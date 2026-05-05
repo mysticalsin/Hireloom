@@ -189,3 +189,48 @@ export function kebabCase(s) {
     .replace(/[^a-z0-9\s-]/g, '')
     .trim().replace(/\s+/g, '-');
 }
+
+// ── parseProfileSummary ─────────────────────────────────────────────────────
+// Read the few fields the wizard's "detect-existing-profile" banner needs out
+// of a profile.yml string. Line-walking parser (regex was too brittle for
+// nested arrays; see commit history). Returns { exists, full_name, email,
+// target_roles, substantive }.
+
+export function parseProfileSummary(yml) {
+  if (typeof yml !== 'string' || yml.trim().length === 0) {
+    return { exists: false, full_name: '', email: '', target_roles: [], substantive: false };
+  }
+
+  // Pull the candidate: block (everything up to the next top-level key)
+  const candidateBlock = yml.match(/^candidate:\s*\n([\s\S]*?)(?=^\S|\Z)/m);
+  const scope = candidateBlock ? candidateBlock[1] : yml;
+  const get = (key) => {
+    const m = scope.match(new RegExp(`^\\s+${key}:\\s*"?([^"\\n]+?)"?\\s*$`, 'm'));
+    return m ? m[1].trim() : '';
+  };
+
+  const target_roles = [];
+  const lines = yml.split('\n');
+  let inTargetRoles = false, inPrimary = false;
+  for (const line of lines) {
+    if (/^target_roles:\s*$/.test(line)) { inTargetRoles = true; continue; }
+    if (inTargetRoles && /^\S/.test(line)) { inTargetRoles = false; inPrimary = false; }
+    if (!inTargetRoles) continue;
+    if (/^\s+primary:\s*$/.test(line)) { inPrimary = true; continue; }
+    // any sibling key under target_roles (e.g. `archetypes:`) ends primary
+    if (inPrimary && /^\s+\w+:/.test(line)) inPrimary = false;
+    if (!inPrimary) continue;
+    const m = line.match(/^\s+-\s+"([^"]+)"/);
+    if (m) target_roles.push(m[1]);
+  }
+
+  const full_name = get('full_name');
+  const email = get('email');
+  return {
+    exists: true,
+    full_name,
+    email,
+    target_roles,
+    substantive: !!(full_name && target_roles.length),
+  };
+}

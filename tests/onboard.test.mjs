@@ -16,6 +16,7 @@ import {
   serializeProfileYaml,
   extractProfileFromResume,
   kebabCase,
+  parseProfileSummary,
 } from '../dashboard-web/lib/onboard.mjs';
 import { makeSafeResolver } from '../dashboard-web/lib/path-safety.mjs';
 
@@ -280,6 +281,107 @@ describe('kebabCase', () => {
   });
   test('collapses multiple spaces', () => {
     assert.equal(kebabCase('A   B    C'), 'a-b-c');
+  });
+});
+
+// ── parseProfileSummary ─────────────────────────────────────────────────────
+
+describe('parseProfileSummary', () => {
+  test('returns exists:false on empty input', () => {
+    assert.deepEqual(parseProfileSummary(''), {
+      exists: false, full_name: '', email: '', target_roles: [], substantive: false,
+    });
+    assert.deepEqual(parseProfileSummary(null).exists, false);
+    assert.deepEqual(parseProfileSummary(undefined).exists, false);
+  });
+
+  test('extracts candidate fields', () => {
+    const yml = `candidate:
+  full_name: "Tony Walteur"
+  email: "tony@x.com"
+target_roles:
+  primary: []
+`;
+    const s = parseProfileSummary(yml);
+    assert.equal(s.full_name, 'Tony Walteur');
+    assert.equal(s.email, 'tony@x.com');
+  });
+
+  test('extracts all target_roles.primary entries', () => {
+    const yml = `candidate:
+  full_name: "X"
+  email: "x@y.com"
+target_roles:
+  primary:
+    - "Role A"
+    - "Role B"
+    - "Role C"
+  archetypes: []
+`;
+    const s = parseProfileSummary(yml);
+    assert.deepEqual(s.target_roles, ['Role A', 'Role B', 'Role C']);
+  });
+
+  test('does not include archetype names in target_roles', () => {
+    const yml = `target_roles:
+  primary:
+    - "Real Role"
+  archetypes:
+    - name: "Decoy A"
+    - name: "Decoy B"
+`;
+    const s = parseProfileSummary(yml);
+    assert.deepEqual(s.target_roles, ['Real Role']);
+  });
+
+  test('marks substantive=true when name + at least one role present', () => {
+    const yml = `candidate:
+  full_name: "Tony"
+  email: "t@x.com"
+target_roles:
+  primary:
+    - "Role"
+`;
+    assert.equal(parseProfileSummary(yml).substantive, true);
+  });
+
+  test('marks substantive=false when name missing', () => {
+    const yml = `candidate:
+  email: "t@x.com"
+target_roles:
+  primary:
+    - "Role"
+`;
+    assert.equal(parseProfileSummary(yml).substantive, false);
+  });
+
+  test('marks substantive=false when target_roles empty', () => {
+    const yml = `candidate:
+  full_name: "Tony"
+target_roles:
+  primary: []
+`;
+    assert.equal(parseProfileSummary(yml).substantive, false);
+  });
+
+  test('handles profile with no target_roles section at all', () => {
+    const yml = `candidate:
+  full_name: "Tony"
+  email: "t@x.com"
+narrative:
+  headline: "Test"
+`;
+    const s = parseProfileSummary(yml);
+    assert.equal(s.full_name, 'Tony');
+    assert.deepEqual(s.target_roles, []);
+    assert.equal(s.substantive, false);
+  });
+
+  test('handles malformed YAML without crashing', () => {
+    const s = parseProfileSummary('this is not yaml at all\n   :::\n');
+    assert.equal(s.exists, true); // string was non-empty
+    assert.equal(s.full_name, '');
+    assert.deepEqual(s.target_roles, []);
   });
 });
 
