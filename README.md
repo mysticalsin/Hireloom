@@ -74,40 +74,78 @@ Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored
 | **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
 | **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
 
-## Quick Start
+## Install in 60 seconds
+
+Pick the path that matches your machine — both end on the **same 6-step onboarding wizard** at `http://localhost:4747`: drop your resume → AI confirms basics → pick target roles + comp → flag deal-breakers → narrative → ship.
+
+### macOS / Linux / WSL
 
 ```bash
-# 1. Clone and install
 git clone https://github.com/santifer/career-ops.git
-cd career-ops && npm install
-npx playwright install chromium   # Required for PDF generation
-
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Personalize with Claude
-claude   # Open Claude Code in this directory
-
-# Then ask Claude to adapt the system to you:
-# "Change the archetypes to backend engineering roles"
-# "Translate the modes to English"
-# "Add these 5 companies to portals.yml"
-# "Update my profile with this CV I'm pasting"
-
-# 6. Start using
-# Paste a job URL or run /career-ops
+cd career-ops
+bash install.sh                  # interactive: docker | local | doctor
 ```
 
-> **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
+Or skip the prompt:
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
+```bash
+bash install.sh --docker         # Docker Compose, isolates Chromium + deps
+bash install.sh --local          # native Node 20+ install
+bash install.sh --update         # pull + apply system updates (data untouched)
+bash install.sh --doctor         # diagnose without installing
+```
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/santifer/career-ops.git
+cd career-ops
+.\install.ps1                    # interactive
+# or: .\install.ps1 -Mode docker
+```
+
+### Make targets (macOS / Linux)
+
+```bash
+make            # show all targets
+make install    # interactive
+make docker     # docker compose up -d
+make docker-prod # adds the hardened production overlay
+make local      # npm install + tests + start
+make logs       # tail the docker logs
+make backup     # snapshot user data to ./backups/<timestamp>/
+make doctor     # environment diagnostic
+```
+
+### One-line bootstrap
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/santifer/career-ops/main/install.sh | bash
+```
+
+> **What happens on first launch:** Open the URL the installer prints, click **⊕ Profile** (or press `⌘ ,`), drop your resume in. The wizard reads it, asks the few things it can't infer (target roles, comp, deal-breakers, narrative), then renders your tailored CV PDF and arms the pipeline. ~2 min, end-to-end.
+
+### Auto-start on boot (optional)
+
+- **Linux** — `sudo cp packaging/career-ops.service /etc/systemd/system/ && sudo systemctl enable --now career-ops`
+- **macOS** — `cp packaging/io.santifer.career-ops.plist ~/Library/LaunchAgents/ && launchctl load -w ~/Library/LaunchAgents/io.santifer.career-ops.plist` (edit the user/path placeholders first)
+- **Docker** — already restarts unless stopped (`restart: unless-stopped`)
+
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide and customization options.
+
+## Manual install (if you want to skip the script)
+
+```bash
+git clone https://github.com/santifer/career-ops.git
+cd career-ops
+cp .env.example .env             # add ANTHROPIC_API_KEY, optional GMAIL_*
+npm install
+npx playwright install chromium  # required for PDF generation
+npm test                         # 116 unit tests, ~150ms
+npm start                        # http://localhost:4747
+```
+
+> **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts — just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
 
 ## Usage
 

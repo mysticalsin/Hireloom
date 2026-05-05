@@ -6749,6 +6749,24 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
     return;
   }
 
+  // ── API: Health check ──
+  // Lightweight liveness probe for Docker HEALTHCHECK / load balancers.
+  // Never touches disk or external services; just proves the event loop
+  // is alive. Returns 200 + uptime so monitors can graph it.
+  if (pathname === '/api/health') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify({
+      ok: true,
+      uptime: Math.round(process.uptime()),
+      version: '1.3.0',
+      now: new Date().toISOString(),
+    }));
+    return;
+  }
+
   // ── API: Setup status ──
   if (pathname === '/api/setup-status') {
     // Parallel — two independent file-existence checks (Vercel `async-parallel`).

@@ -1,0 +1,276 @@
+<#
+.SYNOPSIS
+    JobSeeker / Career-Ops Windows installer.
+
+.DESCRIPTION
+    Mirror of install.sh for native PowerShell on Windows.
+    Drops you onto the 6-step onboarding wizard at http://localhost:4747:
+      drop resume → AI confirms basics → roles + comp → deal-breakers
+      → narrative → generate.
+
+.PARAMETER Mode
+    docker | local | update | uninstall | doctor. If omitted, prompts.
+
+.EXAMPLE
+    .\install.ps1                # interactive
+    .\install.ps1 -Mode docker   # docker compose path
+    .\install.ps1 -Mode local    # local Node.js path
+    .\install.ps1 -Mode update   # pull + apply system updates
+    .\install.ps1 -Mode doctor   # diagnose environment
+
+.NOTES
+    Requires Windows 10/11 with PowerShell 5.1+ or PowerShell 7+.
+    For docker mode: Docker Desktop with WSL2 backend.
+    For local mode: Node.js 20+ from nodejs.org (or via winget/scoop).
+#>
+
+[CmdletBinding()]
+param(
+    [ValidateSet('docker', 'local', 'update', 'uninstall', 'doctor', '')]
+    [string]$Mode = ''
+)
+
+$ErrorActionPreference = 'Stop'
+$ScriptDir = $PSScriptRoot
+$Port = if ($env:DASHBOARD_PORT) { $env:DASHBOARD_PORT } else { '4747' }
+$DashHost = if ($env:DASHBOARD_HOST) { $env:DASHBOARD_HOST } else { '127.0.0.1' }
+$Url = "http://${DashHost}:${Port}"
+
+# ── Output helpers ─────────────────────────────────────────────────────────
+function Write-Banner {
+    Write-Host ''
+    Write-Host '   ╔═══════════════════════════════════════════╗' -ForegroundColor Cyan
+    Write-Host '   ║        JobSeeker · Career-Ops             ║' -ForegroundColor Cyan
+    Write-Host '   ║   Senior-level AI job-search assistant    ║' -ForegroundColor Cyan
+    Write-Host '   ╚═══════════════════════════════════════════╝' -ForegroundColor Cyan
+    Write-Host ''
+}
+function Write-Log    { Write-Host "› $($args -join ' ')" -ForegroundColor DarkGray }
+function Write-Ok     { Write-Host "✓ $($args -join ' ')" -ForegroundColor Green }
+function Write-WarnX  { Write-Host "⚠ $($args -join ' ')" -ForegroundColor Yellow }
+function Write-Fail   { param([string]$Msg, [int]$Code = 3) Write-Host "✗ $Msg" -ForegroundColor Red; exit $Code }
+
+function Test-Cmd { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+
+function Read-Default {
+    param([string]$Question, [string]$Default = '')
+    $prompt = if ($Default) { "$Question [$Default]" } else { $Question }
+    $val = Read-Host $prompt
+    if ([string]::IsNullOrWhiteSpace($val)) { return $Default } else { return $val }
+}
+
+function Read-YesNo {
+    param([string]$Question, [string]$Default = 'y')
+    $reply = Read-Default "$Question (y/n)" $Default
+    return ($reply -match '^[Yy]')
+}
+
+function New-Secret {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    return ($bytes | ForEach-Object { '{0:x2}' -f $_ }) -join ''
+}
+
+# ── Prereqs ────────────────────────────────────────────────────────────────
+function Assert-Docker {
+    if (-not (Test-Cmd docker)) {
+        Write-Fail 'Docker Desktop is required for --docker mode. Install: https://docs.docker.com/desktop/install/windows-install/' 2
+    }
+    $script:DcArgs = $null
+    try { docker compose version *>&1 | Out-Null; $script:DcArgs = @('docker', 'compose') }
+    catch {
+        if (Test-Cmd docker-compose) {
+            $script:DcArgs = @('docker-compose')
+            Write-WarnX 'Using legacy docker-compose. Newer "docker compose" v2 is preferred.'
+        } else {
+            Write-Fail 'docker compose plugin missing. Update Docker Desktop.' 2
+        }
+    }
+}
+
+function Assert-Node {
+    if (-not (Test-Cmd node)) {
+        Write-Fail 'Node.js 20+ required. Install: https://nodejs.org or `winget install OpenJS.NodeJS.LTS`' 2
+    }
+    $verStr = (node -v).TrimStart('v')
+    $major = [int]($verStr -split '\.')[0]
+    if ($major -lt 20) { Write-Fail "Node.js >= 20 required (have v$verStr)." 2 }
+    Write-Ok "Node.js v$verStr detected"
+}
+
+# ── .env ──────────────────────────────────────────────────────────────────
+function Initialize-Env {
+    Push-Location $ScriptDir
+    try {
+        if (Test-Path .env) { Write-Log '.env exists — keeping current values'; return }
+        if (-not (Test-Path .env.example)) { Write-Fail '.env.example missing — corrupt checkout?' 3 }
+
+        Copy-Item .env.example .env
+        Write-Ok 'Created .env from .env.example'
+
+        $secret = New-Secret
+        $content = Get-Content .env -Raw
+        if ($content -match '(?m)^SESSION_SECRET=') {
+            $content = $content -replace '(?m)^SESSION_SECRET=.*$', "SESSION_SECRET=$secret"
+        } else {
+            $content += "`n# Auto-generated by install.ps1`nSESSION_SECRET=$secret`n"
+        }
+        Set-Content -Path .env -Value $content -NoNewline
+        Write-Ok 'Generated SESSION_SECRET'
+        Write-WarnX 'Edit .env to add ANTHROPIC_API_KEY (and optionally GMAIL_*) before first eval'
+    } finally { Pop-Location }
+}
+
+# ── Onboarding nudge ──────────────────────────────────────────────────────
+function Show-Onboarding {
+    Write-Host ''
+    Write-Host 'Next: 6-step onboarding wizard' -ForegroundColor White
+    Write-Host '   1. Drop your resume (.txt / .md or paste)'
+    Write-Host '   2. Confirm basics — name, email, location, headline'
+    Write-Host '   3. Pick target roles + comp range'
+    Write-Host '   4. Flag deal-breakers (optional)'
+    Write-Host '   5. Add narrative — superpowers, best achievement, proof points (optional)'
+    Write-Host '   6. Generate — your CV PDF renders, the pipeline arms'
+    Write-Host ''
+    Write-Host "   Open " -NoNewline; Write-Host $Url -ForegroundColor Cyan -NoNewline; Write-Host " → click ⊕ Profile (or press Ctrl+,)"
+    Write-Host ''
+}
+
+function Open-Url { param([string]$U) Start-Process $U -ErrorAction SilentlyContinue }
+
+# ── Modes ──────────────────────────────────────────────────────────────────
+function Invoke-Docker {
+    Assert-Docker
+    Initialize-Env
+    Push-Location $ScriptDir
+    try {
+        Write-Log 'Building image (first run takes ~3 min for Chromium)…'
+        & $script:DcArgs[0] $script:DcArgs[1..($script:DcArgs.Length - 1)] build
+
+        Write-Log 'Starting container in the background…'
+        & $script:DcArgs[0] $script:DcArgs[1..($script:DcArgs.Length - 1)] up -d
+
+        Write-Log 'Waiting for /api/health…'
+        for ($i = 0; $i -lt 30; $i++) {
+            try {
+                Invoke-WebRequest -Uri "$Url/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
+                Write-Ok "Dashboard is up at $Url"
+                Show-Onboarding
+                Open-Url $Url
+                return
+            } catch { Start-Sleep -Seconds 1 }
+        }
+        Write-WarnX "Health check didn't pass within 30s — try: $($script:DcArgs -join ' ') logs -f"
+    } finally { Pop-Location }
+}
+
+function Invoke-Local {
+    Assert-Node
+    Initialize-Env
+    Push-Location $ScriptDir
+    try {
+        Write-Log 'Installing dependencies (npm install)…'
+        npm install --no-audit --no-fund
+
+        Write-Log 'Running self-tests…'
+        $testResult = npm test --silent 2>&1
+        if ($LASTEXITCODE -eq 0) { Write-Ok 'All tests pass' } else { Write-WarnX 'Tests not all passing — continuing anyway. Check: npm test' }
+
+        Write-Ok 'Ready.'
+        Show-Onboarding
+        Write-Host 'Start the dashboard with: ' -NoNewline; Write-Host 'npm start' -ForegroundColor White
+        Write-Host ''
+        if (Read-YesNo 'Start the dashboard now?' 'y') {
+            Open-Url $Url
+            node dashboard-web/server.mjs
+        }
+    } finally { Pop-Location }
+}
+
+function Invoke-Update {
+    Push-Location $ScriptDir
+    try {
+        if (Test-Path .git) {
+            Write-Log 'git pull…'
+            try { git pull --ff-only } catch { Write-WarnX 'git pull failed; continuing' }
+        }
+        if (Test-Cmd node) {
+            Write-Log 'Running update-system.mjs apply…'
+            node update-system.mjs apply
+            Write-Ok 'System files updated. Your data is untouched.'
+        } else {
+            Write-WarnX 'Node not found; install it then run: node update-system.mjs apply'
+        }
+    } finally { Pop-Location }
+}
+
+function Invoke-Uninstall {
+    Push-Location $ScriptDir
+    try {
+        Write-WarnX 'This stops services. Your data (cv.md, config/, data/, reports/) is preserved.'
+        if (-not (Read-YesNo 'Stop the dashboard and remove containers?' 'n')) {
+            Write-Log 'Cancelled'; return
+        }
+        if ((Test-Cmd docker) -and (Test-Path docker-compose.yaml)) {
+            try { docker compose down } catch {
+                try { docker-compose down } catch {}
+            }
+            Write-Ok 'Containers stopped'
+        }
+        Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -match 'server\.mjs' } | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Log "To remove the repo entirely: Remove-Item -Recurse -Force '$ScriptDir'"
+    } finally { Pop-Location }
+}
+
+function Invoke-Doctor {
+    Push-Location $ScriptDir
+    try {
+        Write-Host 'Environment:' -ForegroundColor White
+        Write-Host ("  OS:           " + (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption)
+        Write-Host ("  Node:         " + (& { try { node -v } catch { 'not installed' } }))
+        Write-Host ("  npm:          " + (& { try { npm -v } catch { 'not installed' } }))
+        Write-Host ("  Docker:       " + (& { try { (docker --version) } catch { 'not installed' } }))
+        Write-Host ("  Compose:      " + (& { try { (docker compose version --short 2>$null) } catch { 'not installed' } }))
+        Write-Host ("  Git:          " + (& { try { (git --version) } catch { 'not installed' } }))
+        Write-Host ("  Project root: $ScriptDir")
+        Write-Host ("  .env:         " + $(if (Test-Path .env) { 'present' } else { 'missing' }))
+        Write-Host ("  cv.md:        " + $(if (Test-Path cv.md) { 'present' } else { 'missing' }))
+        Write-Host ("  profile.yml:  " + $(if (Test-Path config/profile.yml) { 'present' } else { 'missing' }))
+        $dashUp = $false
+        try { Invoke-WebRequest -Uri "$Url/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null; $dashUp = $true } catch {}
+        Write-Host ("  Dashboard:    " + $(if ($dashUp) { "up at $Url" } else { 'down' }))
+
+        if (Test-Cmd node) {
+            Write-Host ''
+            Write-Host 'Self-tests:' -ForegroundColor White
+            npm test --silent 2>&1 | Select-Object -Last 8
+        }
+    } finally { Pop-Location }
+}
+
+# ── Entry ──────────────────────────────────────────────────────────────────
+Write-Banner
+
+if (-not $Mode) {
+    Write-Host 'Pick an install mode:' -ForegroundColor White
+    Write-Host '  1) Docker     ' -NoNewline; Write-Host '— recommended; isolates Chromium + deps' -ForegroundColor DarkGray
+    Write-Host '  2) Local      ' -NoNewline; Write-Host '— run with your system Node 20+/22' -ForegroundColor DarkGray
+    Write-Host '  3) Doctor     ' -NoNewline; Write-Host '— diagnose environment, no install' -ForegroundColor DarkGray
+    Write-Host '  4) Cancel'
+    Write-Host ''
+    $choice = Read-Default 'Choice' '1'
+    switch ($choice) {
+        '1' { $Mode = 'docker' }
+        '2' { $Mode = 'local' }
+        '3' { $Mode = 'doctor' }
+        default { Write-Log 'Cancelled'; exit 1 }
+    }
+}
+
+switch ($Mode) {
+    'docker'    { Invoke-Docker }
+    'local'     { Invoke-Local }
+    'update'    { Invoke-Update }
+    'uninstall' { Invoke-Uninstall }
+    'doctor'    { Invoke-Doctor }
+}

@@ -1,0 +1,42 @@
+# Production-hardening overlay. Apply with:
+#   docker compose -f docker-compose.yaml -f docker-compose.hardened.yml up -d
+#
+# Drops capabilities, marks the container read-only (with tmpfs for temp
+# writes), and pins resource limits. Use this on any host that's exposed
+# to a network beyond loopback.
+
+services:
+  career-ops:
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Chromium needs a few — most notably SETUID and SETGID for sandboxing.
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      # Writeable scratch space used by the runtime + Playwright.
+      - /tmp:size=512m,mode=1777
+      - /run:size=64m,mode=755
+      # npm cache (not strictly required — installs happen at build time)
+      - /root/.npm:size=128m
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1.5G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
