@@ -18,6 +18,7 @@ import {
   parseProfileSummary,
 } from './lib/onboard.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
+import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 
 const PORT = Number(process.env.PORT || 4747);
 // Bind to loopback by default; opt-in to LAN exposure via HOST=0.0.0.0
@@ -4076,9 +4077,23 @@ const HTML = /* html */ `<!DOCTYPE html>
   function renderApps(apps) {
     const tbody = document.getElementById('apps-tbody');
     if (!apps.length) {
-      tbody.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">📭</div>' +
-        '<div class="empty-title">No applications found</div>' +
-        '<div class="empty-sub">Adjust your filters or add URLs to data/pipeline.md</div></div></td></tr>';
+      // Empty-state copy adapts to setup status: pre-CV vs profile-but-no-apps.
+      // window.cvExists is set by checkSetupStatus() on boot.
+      const filterApplied = (typeof currentFilter !== 'undefined' && currentFilter && currentFilter !== 'all');
+      let icon, title, sub;
+      if (filterApplied) {
+        icon = '🔍'; title = 'No applications match this filter';
+        sub = 'Try clearing the filter or switching to "All".';
+      } else if (window.cvExists === false) {
+        icon = '📄'; title = 'Drop your resume to begin';
+        sub = 'Tap ⊕ Profile (or ⌘ ,) to import your CV. Takes ~2 min.';
+      } else {
+        icon = '🚀'; title = 'Profile is set — ready to hunt';
+        sub = 'Add a job URL to <code>data/pipeline.md</code> or run <code>/career-ops scan</code> to find offers.';
+      }
+      tbody.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">' + icon + '</div>' +
+        '<div class="empty-title">' + title + '</div>' +
+        '<div class="empty-sub">' + sub + '</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = apps.map(a => {
@@ -4678,12 +4693,12 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   /* ── Toast ── */
   let toastTimer;
-  function showToast(msg, type = 'success') {
+  function showToast(msg, type = 'success', durationMs = 3000) {
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.className = 'toast show toast-' + type;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+    toastTimer = setTimeout(() => t.classList.remove('show'), durationMs);
   }
 
   /* ── Apply modal ── */
@@ -5167,6 +5182,9 @@ const HTML = /* html */ `<!DOCTYPE html>
     if (!WIZ_SKIPPABLE.has(s)) return;
     if (s === 4) wizGoTo(5);
     else if (s === 5) wizGoTo(WIZ_STEPS);
+    // Move focus into the new step so keyboard users don't have to tab
+    // through the action row again.
+    wizFocusFirst();
   }
 
   async function wizNext() {
@@ -5466,6 +5484,16 @@ const HTML = /* html */ `<!DOCTYPE html>
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'finalize failed');
       wizClearDraft();
+      // Profile is now on disk → flip cvExists so empty-state + button show
+      // the post-setup copy on the next render. checkSetupStatus() also
+      // refreshes this on boot, but we don't want to wait for a page reload.
+      window.cvExists = true;
+      const profileBtn = document.getElementById('profile-btn');
+      if (profileBtn) {
+        profileBtn.textContent = '⊕ Profile';
+        profileBtn.style.color = '';
+        profileBtn.style.borderColor = '';
+      }
       showToast('Profile saved · CV PDF generating…', 'info');
       closeOnboard();
       // Defensive refresh: the disk write + scheduler pickup race means a
@@ -5508,17 +5536,25 @@ const HTML = /* html */ `<!DOCTYPE html>
     showToast('CV PDF still generating — check output/ shortly', 'info');
   }
 
-  // Check setup status on boot — show banner if cv.md missing
+  // Check setup status on boot — show banner if cv.md missing.
+  // Stashes the result on window.cvExists so renderApps can pick the right
+  // empty-state copy (pre-CV vs profile-set-but-no-apps).
   async function checkSetupStatus() {
     try {
       const res = await fetch('/api/setup-status');
       const { cvExists } = await res.json();
+      window.cvExists = !!cvExists;
       if (!cvExists) {
         const btn = document.getElementById('profile-btn');
         btn.textContent = '⚠ Setup';
         btn.style.color = 'var(--orange)';
         btn.style.borderColor = 'rgba(255,159,10,.4)';
         showToast('No CV found — drop your resume to get started', 'error');
+      }
+      // Re-paint the empty-state copy now that cvExists is known. No-op when
+      // there ARE applications (renderApps short-circuits).
+      if (typeof allApps !== 'undefined' && Array.isArray(allApps) && allApps.length === 0) {
+        applyFilter();
       }
     } catch {}
   }
@@ -5590,20 +5626,37 @@ const HTML = /* html */ `<!DOCTYPE html>
   // Global keyboard shortcuts — opens the onboarding wizard. We use comma
   // because it is the macOS-standard "preferences" hotkey and does not
   // collide with browser print (Cmd/Ctrl+P) or find (Cmd/Ctrl+F).
+  // Also: bare ? opens a quick shortcuts cheat-sheet.
   document.addEventListener('keydown', (e) => {
-    if (!(e.metaKey || e.ctrlKey)) return;
-    if (e.key !== ',') return;
     // Skip when typing in a field. Feature-detect matches() because the
     // event target may be the document object itself (synthetic events)
     // which has no matches() method.
     const t = e.target;
-    if (t && typeof t.matches === 'function'
-        && t.matches('input, textarea, select, [contenteditable="true"]')) return;
-    const modal = document.getElementById('onboard-modal');
-    if (modal && modal.classList.contains('open')) return;
-    e.preventDefault();
-    openOnboard();
+    const inField = t && typeof t.matches === 'function'
+      && t.matches('input, textarea, select, [contenteditable="true"]');
+    if (inField) return;
+
+    if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      const modal = document.getElementById('onboard-modal');
+      if (modal && modal.classList.contains('open')) return;
+      e.preventDefault();
+      openOnboard();
+      return;
+    }
+    // Shift+? (i.e. typing '?') opens the shortcuts cheat-sheet. We exclude
+    // ctrl/meta to avoid colliding with browser shortcuts.
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key === '?') {
+      e.preventDefault();
+      showShortcutsHelp();
+    }
   });
+
+  function showShortcutsHelp() {
+    showToast(
+      'Shortcuts:  ⌘ , open profile  ·  Esc close modal  ·  Tab navigate  ·  Enter advance  ·  ? this help',
+      'info', 6000
+    );
+  }
 
   // Boot
   refresh().then(scheduleRefresh);
@@ -5660,32 +5713,6 @@ function isOriginAllowed(req) {
   const origin = req.headers.origin;
   if (!origin) return true; // same-origin fetch / curl / direct request
   return ALLOWED_ORIGINS.has(origin);
-}
-
-// Bounded body reader for POST endpoints. Aborts at MAX_BODY_BYTES to prevent
-// memory exhaustion via unbounded request bodies.
-const MAX_BODY_BYTES = 256 * 1024; // 256 KiB — generous for our payloads
-
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let total = 0;
-    const chunks = [];
-    req.on('data', chunk => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (chunks.length === 0) return resolve({});
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-      catch { reject(new Error('Invalid JSON body')); }
-    });
-    req.on('error', reject);
-  });
 }
 
 // Generic error responder — never leak err.message to the client.

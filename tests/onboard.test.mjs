@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import path from 'path';
 import os from 'os';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { EventEmitter } from 'events';
 import {
   yamlQuote,
   validateOnboardPayload,
@@ -19,6 +20,7 @@ import {
   parseProfileSummary,
 } from '../dashboard-web/lib/onboard.mjs';
 import { makeSafeResolver } from '../dashboard-web/lib/path-safety.mjs';
+import { readJsonBody, MAX_BODY_BYTES, isOriginAllowed } from '../dashboard-web/lib/http-utils.mjs';
 
 // ── yamlQuote ────────────────────────────────────────────────────────────────
 
@@ -616,5 +618,120 @@ describe('makeSafeResolver', () => {
   });
   test('teardown: clean temp dir', () => {
     rmSync(baseDir, { recursive: true, force: true });
+  });
+});
+
+// ── readJsonBody (HTTP body parser + size cap) ───────────────────────────────
+//
+// readJsonBody listens to 'data'/'end'/'error' on req and calls req.destroy()
+// when the cap trips. We simulate a Node http req with a plain EventEmitter
+// plus a destroy() spy.
+
+function fakeReq() {
+  const req = new EventEmitter();
+  req.destroyed = false;
+  req.destroy = () => { req.destroyed = true; };
+  return req;
+}
+
+describe('readJsonBody', () => {
+  test('exposes a 256 KiB default cap', () => {
+    assert.equal(MAX_BODY_BYTES, 256 * 1024);
+  });
+  test('parses a small valid JSON body', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    req.emit('data', Buffer.from('{"hello":"world"}'));
+    req.emit('end');
+    assert.deepEqual(await p, { hello: 'world' });
+  });
+  test('returns {} for an empty body', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    req.emit('end');
+    assert.deepEqual(await p, {});
+  });
+  test('rejects malformed JSON with a generic error', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    req.emit('data', Buffer.from('{ this is not json'));
+    req.emit('end');
+    await assert.rejects(p, /Invalid JSON body/);
+  });
+  test('rejects + destroys when total exceeds the cap (DoS guard)', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req, { maxBytes: 1024 });
+    // Send 2 KiB worth of garbage — should trip the cap on the first chunk
+    req.emit('data', Buffer.alloc(2048, 'x'));
+    await assert.rejects(p, /Request body too large/);
+    assert.equal(req.destroyed, true);
+  });
+  test('default 256 KiB cap rejects a larger payload', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    // Send 257 KiB — one byte over the default cap
+    req.emit('data', Buffer.alloc(MAX_BODY_BYTES + 1, 'a'));
+    await assert.rejects(p, /Request body too large/);
+  });
+  test('accepts a payload exactly at the cap', async () => {
+    const req = fakeReq();
+    // 1 KiB cap, send 1 KiB exactly. Make it valid JSON.
+    const obj = { pad: 'a'.repeat(1000) };
+    const body = JSON.stringify(obj);
+    const p = readJsonBody(req, { maxBytes: body.length });
+    req.emit('data', Buffer.from(body));
+    req.emit('end');
+    const parsed = await p;
+    assert.equal(parsed.pad.length, 1000);
+  });
+  test('propagates request "error" events', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    const boom = new Error('socket reset');
+    req.emit('error', boom);
+    await assert.rejects(p, /socket reset/);
+  });
+  test('handles chunked body across multiple data events', async () => {
+    const req = fakeReq();
+    const p = readJsonBody(req);
+    req.emit('data', Buffer.from('{"a":'));
+    req.emit('data', Buffer.from('1,"b":'));
+    req.emit('data', Buffer.from('"hello"}'));
+    req.emit('end');
+    assert.deepEqual(await p, { a: 1, b: 'hello' });
+  });
+});
+
+// ── isOriginAllowed (CSRF defense) ──────────────────────────────────────────
+
+describe('isOriginAllowed', () => {
+  test('rejects missing / non-string origin', () => {
+    assert.equal(isOriginAllowed(undefined), false);
+    assert.equal(isOriginAllowed(null), false);
+    assert.equal(isOriginAllowed(''), false);
+    assert.equal(isOriginAllowed(42), false);
+  });
+  test('rejects non-loopback origins', () => {
+    assert.equal(isOriginAllowed('https://attacker.com'), false);
+    assert.equal(isOriginAllowed('http://192.168.1.10:4747'), false);
+    assert.equal(isOriginAllowed('http://example.com:4747'), false);
+  });
+  test('rejects non-http(s) protocols', () => {
+    assert.equal(isOriginAllowed('file:///etc/passwd'), false);
+    assert.equal(isOriginAllowed('javascript:alert(1)'), false);
+  });
+  test('accepts loopback origins on any port (no allowlist)', () => {
+    assert.equal(isOriginAllowed('http://localhost:4747'), true);
+    assert.equal(isOriginAllowed('http://127.0.0.1:9999'), true);
+    assert.equal(isOriginAllowed('http://[::1]:4747'), true);
+  });
+  test('respects an explicit port allowlist when provided', () => {
+    assert.equal(isOriginAllowed('http://localhost:4747', ['4747']), true);
+    assert.equal(isOriginAllowed('http://localhost:4747', [4747]), true);
+    assert.equal(isOriginAllowed('http://localhost:9999', ['4747']), false);
+  });
+  test('rejects malformed origin strings', () => {
+    assert.equal(isOriginAllowed('not a url'), false);
+    assert.equal(isOriginAllowed('http://'), false);
   });
 });
