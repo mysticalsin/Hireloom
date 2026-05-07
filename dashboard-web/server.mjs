@@ -2408,6 +2408,101 @@ const HTML = /* html */ `<!DOCTYPE html>
       *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
 
+    /* ── Light mode ────────────────────────────────────────────────────────
+       Apple's iOS/macOS Light palette. Maps every dark-mode token to its
+       light counterpart so all components ripple through without per-rule
+       overrides. Activated by either:
+         - OS setting: @media (prefers-color-scheme: light) — automatic
+         - Manual:     <html data-theme="light"> — set by the theme toggle
+                       (persisted in localStorage as 'careerops:theme=light')
+       data-theme="dark" force-keeps the dark palette regardless of OS.
+       ───────────────────────────────────────────────────────────────────── */
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        color-scheme: light;
+        --bg:           #ffffff;
+        --bg-elevated:  #fbfbfd;
+        --surface:      #f5f5f7;
+        --surface2:     #ececef;
+        --surface3:     #e0e0e3;
+        --surface-hover: rgba(0,0,0,.04);
+        --mat-thin:     rgba(255,255,255,.55);
+        --mat-regular:  rgba(255,255,255,.72);
+        --mat-thick:    rgba(252,252,253,.86);
+        --hairline:     rgba(0,0,0,.07);
+        --hairline-2:   rgba(0,0,0,.11);
+        --separator:    var(--hairline);
+        --separator2:   var(--hairline-2);
+        --edge-sheen:   inset 0 .5px 0 rgba(0,0,0,.04);
+
+        --text:         rgba(0,0,0,.88);
+        --text-sec:     rgba(60,60,67,.65);
+        --text-ter:     rgba(60,60,67,.55);
+        --text-quad:    rgba(60,60,67,.30);
+
+        --accent:       #007aff;     /* Apple system blue (light) */
+        --accent-2:     #34c759;     /* Apple system green (light) */
+        --accent-bg:    rgba(0,122,255,.10);
+        --accent-ring:  rgba(0,122,255,.28);
+
+        --green:   #34c759; --green-bg:  rgba(52,199,89,.10);
+        --blue:    #007aff; --blue-bg:   rgba(0,122,255,.10);
+        --cyan:    #5ac8fa; --cyan-bg:   rgba(90,200,250,.12);
+        --yellow:  #ffcc00; --yellow-bg: rgba(255,204,0,.14);
+        --orange:  #ff9500; --orange-bg: rgba(255,149,0,.12);
+        --red:     #ff3b30; --red-bg:    rgba(255,59,48,.10);
+        --pink:    #ff2d55; --pink-bg:   rgba(255,45,85,.10);
+        --purple:  #af52de; --purple-bg: rgba(175,82,222,.10);
+        --gray:    rgba(60,60,67,.30);  --gray-bg: rgba(0,0,0,.04);
+
+        --shadow-1: 0 1px 2px rgba(0,0,0,.05);
+        --shadow-2: 0 2px 8px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+        --shadow-3: 0 8px 24px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.04);
+        --shadow-4: 0 16px 48px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.06);
+        --shadow-glow-accent: 0 0 0 1px rgba(0,122,255,.18), 0 8px 28px rgba(0,122,255,.14);
+      }
+    }
+    /* Manual override: forced light regardless of OS */
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg:           #ffffff;
+      --bg-elevated:  #fbfbfd;
+      --surface:      #f5f5f7;
+      --surface2:     #ececef;
+      --surface3:     #e0e0e3;
+      --surface-hover: rgba(0,0,0,.04);
+      --mat-thin:     rgba(255,255,255,.55);
+      --mat-regular:  rgba(255,255,255,.72);
+      --mat-thick:    rgba(252,252,253,.86);
+      --hairline:     rgba(0,0,0,.07);
+      --hairline-2:   rgba(0,0,0,.11);
+      --separator:    var(--hairline);
+      --separator2:   var(--hairline-2);
+      --edge-sheen:   inset 0 .5px 0 rgba(0,0,0,.04);
+      --text:         rgba(0,0,0,.88);
+      --text-sec:     rgba(60,60,67,.65);
+      --text-ter:     rgba(60,60,67,.55);
+      --text-quad:    rgba(60,60,67,.30);
+      --accent:       #007aff;
+      --accent-2:     #34c759;
+      --accent-bg:    rgba(0,122,255,.10);
+      --accent-ring:  rgba(0,122,255,.28);
+      --green:   #34c759; --green-bg:  rgba(52,199,89,.10);
+      --blue:    #007aff; --blue-bg:   rgba(0,122,255,.10);
+      --cyan:    #5ac8fa; --cyan-bg:   rgba(90,200,250,.12);
+      --yellow:  #ffcc00; --yellow-bg: rgba(255,204,0,.14);
+      --orange:  #ff9500; --orange-bg: rgba(255,149,0,.12);
+      --red:     #ff3b30; --red-bg:    rgba(255,59,48,.10);
+      --pink:    #ff2d55; --pink-bg:   rgba(255,45,85,.10);
+      --purple:  #af52de; --purple-bg: rgba(175,82,222,.10);
+      --gray:    rgba(60,60,67,.30);  --gray-bg: rgba(0,0,0,.04);
+      --shadow-1: 0 1px 2px rgba(0,0,0,.05);
+      --shadow-2: 0 2px 8px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-3: 0 8px 24px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.04);
+      --shadow-4: 0 16px 48px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.06);
+      --shadow-glow-accent: 0 0 0 1px rgba(0,122,255,.18), 0 8px 28px rgba(0,122,255,.14);
+    }
+
     html { height: 100%; }
 
     body {
@@ -2516,15 +2611,39 @@ const HTML = /* html */ `<!DOCTYPE html>
     .btn-primary:hover { filter: brightness(1.06); }
     .btn-primary:active { filter: brightness(.96); }
 
-    /* Gmail — keep iconic white treatment, tighten radii */
+    /* Gmail — adaptive contrast pill. In dark mode this lands on a near-white
+       chip (Google brand affordance); in light mode it inverts to a near-black
+       chip so the affordance still pops against the bright canvas. Driven by
+       custom props that are defined below per theme. */
     .btn-gmail {
-      background: #ffffff;
-      color: #1f1f1f;
+      background: var(--gmail-pill-bg, #ffffff);
+      color: var(--gmail-pill-fg, #1f1f1f);
       font-size: var(--t-footnote);
       padding: 6px 12px;
       box-shadow: var(--shadow-1);
     }
-    .btn-gmail:hover { background: #f5f5f7; }
+    .btn-gmail:hover { background: var(--gmail-pill-bg-hover, #f5f5f7); }
+    /* Light mode (auto + manual): flip the pill to dark for visibility. */
+    @media (prefers-color-scheme: light) {
+      html:not([data-theme="dark"]) {
+        --gmail-pill-bg: #1d1d1f;
+        --gmail-pill-bg-hover: #2c2c2e;
+        --gmail-pill-fg: #ffffff;
+      }
+    }
+    html[data-theme="light"] {
+      --gmail-pill-bg: #1d1d1f;
+      --gmail-pill-bg-hover: #2c2c2e;
+      --gmail-pill-fg: #ffffff;
+    }
+
+    /* Theme toggle button — sun/moon icon, 38×34 to match other ghost btns */
+    .btn-theme {
+      min-width: 38px; padding: 6px 10px;
+      font-size: 16px; line-height: 1;
+    }
+    .btn-theme #theme-icon { display: inline-block; transition: transform var(--dur-med) var(--ease-spring); }
+    .btn-theme:hover #theme-icon { transform: rotate(15deg); }
 
     /* Apply — the "act now" CTA. Warmer gradient, slight glow. */
     .btn-apply-batch {
@@ -3998,6 +4117,12 @@ const HTML = /* html */ `<!DOCTYPE html>
     <button class="btn btn-apply-batch" onclick="openApplyModal()">⚡ Apply</button>
     <button class="btn btn-autopilot" id="autopilot-btn" onclick="toggleAutopilot()">🤖 Autopilot</button>
     <button class="btn btn-ghost" onclick="refresh()">↻ Refresh</button>
+    <button class="btn btn-ghost btn-theme" id="theme-btn" type="button"
+            aria-label="Toggle light/dark theme"
+            title="Toggle light/dark (Shift+T)"
+            onclick="toggleTheme()">
+      <span aria-hidden="true" id="theme-icon">☾</span>
+    </button>
   </div>
 </header>
 
@@ -4440,6 +4565,45 @@ const HTML = /* html */ `<!DOCTYPE html>
   let sortAsc = false;
   let activeDropdownNum = null;
   let refreshTimer = null;
+
+  /* ── Theme (light/dark) ──
+   * Three-state: 'light' | 'dark' | 'auto'
+   * Default = 'auto' → respects OS prefers-color-scheme
+   * Manual override persisted in localStorage as 'careerops:theme'
+   * Sun/moon icon flips based on the *resolved* mode (what user sees).
+   * Shift+T cycles through dark → light → auto. */
+  const THEME_KEY = 'careerops:theme';
+  function resolvedTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+    return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  function applyTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    const root = document.documentElement;
+    if (stored === 'light' || stored === 'dark') {
+      root.setAttribute('data-theme', stored);
+    } else {
+      root.removeAttribute('data-theme'); // auto — let @media decide
+    }
+    const icon = document.getElementById('theme-icon');
+    if (icon) icon.textContent = resolvedTheme() === 'light' ? '☼' : '☾';
+  }
+  function toggleTheme() {
+    const cur = localStorage.getItem(THEME_KEY);
+    // dark → light → auto → dark (cycle)
+    const next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
+    if (next) localStorage.setItem(THEME_KEY, next);
+    else      localStorage.removeItem(THEME_KEY);
+    applyTheme();
+    if (typeof showToast === 'function') {
+      const label = next === 'light' ? 'Light theme' : next === 'dark' ? 'Dark theme' : 'Auto theme (follows OS)';
+      showToast(label, 'info', 1800);
+    }
+  }
+  // Listen for OS-level changes so 'auto' actually re-resolves.
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
+  applyTheme();
 
   /* ── Helpers ── */
   function esc(s) {
@@ -6331,12 +6495,19 @@ const HTML = /* html */ `<!DOCTYPE html>
     if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key === '?') {
       e.preventDefault();
       showShortcutsHelp();
+      return;
+    }
+    // Shift+T cycles theme: dark → light → auto. Bare 'T' is reserved for
+    // potential future shortcuts; require shift so we don't fight typing.
+    if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && e.key === 'T') {
+      e.preventDefault();
+      toggleTheme();
     }
   });
 
   function showShortcutsHelp() {
     showToast(
-      'Shortcuts:  ⌘ , open profile  ·  Esc close modal  ·  Tab navigate  ·  Enter advance  ·  ? this help',
+      'Shortcuts:  ⌘, profile  ·  ⇧T theme  ·  Esc close  ·  Tab navigate  ·  Enter advance  ·  ? this help',
       'info', 6000
     );
   }
