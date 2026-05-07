@@ -7135,46 +7135,54 @@ async function handleRequest(req, res) {
   * { box-sizing: border-box; }
   body {
     font: 15px/1.55 -apple-system, system-ui, "Segoe UI", sans-serif;
-    background: #000; color: #f5f5f7; margin: 0;
+    /* Hireloom heritage: warm walnut canvas, not pure black */
+    background: #0e0a08; color: rgba(245,235,225,.96); margin: 0;
     min-height: 100vh; display: grid; place-items: start center; padding: 48px 20px;
   }
   .card {
     width: 100%; max-width: 640px;
-    background: rgba(28,28,32,.72); border: .5px solid rgba(255,255,255,.08);
+    background: rgba(34,24,20,.78); border: .5px solid rgba(201,168,106,.12);
     border-radius: 16px; padding: 32px;
-    box-shadow: 0 10px 40px rgba(0,0,0,.4);
+    box-shadow:
+      inset 0 .5px 0 rgba(201,168,106,.08),
+      0 10px 40px rgba(0,0,0,.5);
   }
-  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em; }
-  .sub { color: #a1a1a6; font-size: 14px; margin-bottom: 24px; }
+  h1 {
+    font-family: "New York", "Big Caslon", "Hoefler Text", "Cormorant Garamond", Georgia, "Times New Roman", serif;
+    font-size: 24px; font-weight: 600; margin: 0 0 6px; letter-spacing: .005em;
+  }
+  .sub { color: rgba(220,200,185,.65); font-size: 14px; margin-bottom: 24px; }
   ol { padding-left: 22px; margin: 0 0 24px; }
   ol li { margin-bottom: 14px; line-height: 1.6; }
-  ol li code { background: #1c1c1f; color: #f5f5f7; padding: 2px 7px; border-radius: 5px; font-size: 13px; }
-  a { color: #28b8ff; text-decoration: none; font-weight: 500; }
-  a:hover { text-decoration: underline; }
+  ol li code { background: #221814; color: rgba(245,235,225,.96); padding: 2px 7px; border-radius: 5px; font-size: 13px; border: .5px solid rgba(201,168,106,.10); }
+  /* Champagne links — heritage equivalent of the old Apple cyan */
+  a { color: #c9a86a; text-decoration: none; font-weight: 500; }
+  a:hover { color: #d8bb7e; text-decoration: underline; }
   .copy-row {
     display: flex; align-items: stretch; gap: 8px; margin: 8px 0 0;
-    background: #0a0a0c; border: .5px solid rgba(255,255,255,.08);
+    background: #181210; border: .5px solid rgba(201,168,106,.10);
     border-radius: 8px; overflow: hidden;
   }
   .copy-val {
     flex: 1; font: 13px/1.4 ui-monospace, "SF Mono", monospace;
-    padding: 10px 12px; color: #f5f5f7; user-select: all; word-break: break-all;
+    padding: 10px 12px; color: rgba(245,235,225,.96); user-select: all; word-break: break-all;
   }
   .copy-btn {
-    border: none; background: rgba(201,168,106,.10); color: #28b8ff;
+    border: none; background: rgba(201,168,106,.12); color: #c9a86a;
     padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer;
     transition: background .15s;
   }
-  .copy-btn:hover { background: rgba(201,168,106,.18); }
-  .copy-btn.copied { background: rgba(110,155,91,.18); color: #30d158; }
+  .copy-btn:hover { background: rgba(201,168,106,.20); }
+  .copy-btn.copied { background: rgba(110,155,91,.18); color: #6e9b5b; }
+  /* Honey alert — heritage equivalent of the old Apple orange */
   .alert {
-    background: rgba(212,168,67,.08); border: .5px solid rgba(212,168,67,.30);
+    background: rgba(212,168,67,.10); border: .5px solid rgba(212,168,67,.30);
     border-radius: 10px; padding: 12px 14px; margin-bottom: 20px;
-    font-size: 13px; color: #ffd082;
+    font-size: 13px; color: #e6c47a;
   }
-  .alert strong { color: #ff9f0a; }
+  .alert strong { color: #d4a843; }
   pre {
-    background: #0a0a0c; border: .5px solid rgba(255,255,255,.08);
+    background: #181210; border: .5px solid rgba(201,168,106,.10);
     padding: 14px; border-radius: 10px;
     font: 13px/1.6 ui-monospace, "SF Mono", monospace;
     overflow-x: auto; margin: 8px 0 0;
@@ -7182,14 +7190,16 @@ async function handleRequest(req, res) {
   .btn-back {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 10px 16px; border-radius: 8px;
-    background: rgba(255,255,255,.06); color: #f5f5f7;
+    background: rgba(201,168,106,.08); color: rgba(245,235,225,.96);
+    border: .5px solid rgba(201,168,106,.14);
     text-decoration: none; font-size: 13px; font-weight: 500;
     transition: background .15s;
   }
-  .btn-back:hover { background: rgba(255,255,255,.10); text-decoration: none; }
+  .btn-back:hover { background: rgba(201,168,106,.14); text-decoration: none; }
+  /* Sage scope pill — heritage equivalent of the old Apple green */
   .scope-pill {
     display: inline-block; padding: 2px 9px; border-radius: 999px;
-    background: rgba(110,155,91,.10); color: #30d158;
+    background: rgba(110,155,91,.12); color: #8fbf78;
     font-size: 11px; font-weight: 600; letter-spacing: .02em;
   }
 </style></head><body>
