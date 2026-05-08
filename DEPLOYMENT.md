@@ -117,12 +117,14 @@ auth on every endpoint except `/api/health`:
 
 ```bash
 # Generate a 32-byte token
-HIRELOOM_AUTH_TOKEN=$(openssl rand -hex 32) HOST=0.0.0.0 PORT=4747 npm start
+AUTH_TOKEN=$(openssl rand -hex 32) HOST=0.0.0.0 PORT=4747 npm start
 ```
 
 Now open `http://<your-lan-ip>:4747/?token=<the-token>` from your phone.
-The server stores it in a session cookie so subsequent navigations don't
-need the query param.
+The token is read from the `?token=` query param OR the
+`Authorization: Bearer <token>` header on every request — so save the
+URL with the token, or use a browser extension that injects the
+Authorization header. There is currently no cookie-based session.
 
 ### Put it behind a reverse proxy with TLS
 
@@ -139,7 +141,7 @@ hireloom.example.com {
 ```
 
 Caddy auto-provisions Let's Encrypt certificates. Set
-`HIRELOOM_AUTH_TOKEN` and use a strong passphrase — Hireloom is not designed
+`AUTH_TOKEN` and use a strong passphrase — Hireloom is not designed
 for the public internet.
 
 ---
@@ -183,7 +185,7 @@ services:
 | `GMAIL_CLIENT_ID`       | (unset)                 | Google OAuth client ID                           |
 | `GMAIL_CLIENT_SECRET`   | (unset)                 | Google OAuth client secret                       |
 | `GMAIL_REDIRECT_URI`    | `http://localhost:$PORT/auth/gmail/callback` | OAuth redirect target            |
-| `HIRELOOM_AUTH_TOKEN`   | (unset)                 | Bearer token required when `HOST` is non-loopback |
+| `AUTH_TOKEN`   | (unset)                 | Bearer token required when `HOST` is non-loopback |
 | `RATE_GET_PER_MIN`      | `60`                    | Per-IP GET request budget                        |
 | `RATE_POST_PER_MIN`     | `10`                    | Per-IP mutating request budget                   |
 
@@ -278,7 +280,7 @@ config issues.
 
 Before you put Hireloom in front of anyone other than yourself:
 
-- [ ] **Auth token set** when bound to non-loopback (`HIRELOOM_AUTH_TOKEN`)
+- [ ] **Auth token set** when bound to non-loopback (`AUTH_TOKEN`)
 - [ ] **TLS terminated** by a reverse proxy (Caddy / nginx / Cloudflare)
 - [ ] **Backups scheduled** (config/, data/, reports/)
 - [ ] **Health probe** wired to a monitor

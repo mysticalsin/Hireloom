@@ -121,8 +121,11 @@ test('Rate limiting + CSRF + DoS defenses', async (t) => {
       if (!connectionReset) throw e;
     }
     if (!connectionReset) {
-      assert.ok([400, 413, 500].includes(statusCode),
-        `oversized body rejected with 4xx/5xx (413 ideal), got ${statusCode}`);
+      // 4xx is the expected response — 500 means the server tripped over
+      // the big body, which is itself a regression. Connection reset is
+      // also acceptable (server killed the connection mid-stream).
+      assert.ok([400, 413].includes(statusCode),
+        `oversized body rejected with 4xx (413 ideal), got ${statusCode} — 500 indicates the body cap failed cleanly`);
     }
 
     // Server must still be alive after the attack

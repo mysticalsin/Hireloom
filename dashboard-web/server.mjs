@@ -65,8 +65,20 @@ const ASSETS_DIR = path.join(__dir, 'assets');
 function loadBrandAsset(filename, contentType) {
   try {
     const body = readFileSync(path.join(ASSETS_DIR, filename));
-    const etag = '"' + crypto.createHash('sha1').update(body).digest('hex').slice(0, 16) + '"';
-    return { body, contentType, etag };
+    // Pre-gzip at boot — assets are immutable for the deploy lifetime, so
+    // gzipping per-request is wasted CPU on every cache miss. zlib.gzipSync
+    // at level 9 is fine here (tiny files, runs once at startup).
+    const bodyGzipped = zlib.gzipSync(body, { level: 9 });
+    // ETag includes encoding so a client that loses gzip support doesn't
+    // get a 304 against gzipped bytes it can no longer decode.
+    const sha = crypto.createHash('sha1').update(body).digest('hex').slice(0, 16);
+    return {
+      body,
+      bodyGzipped,
+      contentType,
+      etag:        '"' + sha + '"',
+      etagGzipped: '"' + sha + '+gz"',
+    };
   } catch (err) {
     // Boot-time read failures are loud — better to crash early than to ship
     // a half-broken brand. The path lookup is deterministic so this only
@@ -612,6 +624,38 @@ async function getAccessToken() {
     return await refreshAccessToken();
   }
   return gmailTokens.access_token;
+}
+
+// ── OAuth CSRF protection ────────────────────────────────────────────────
+// Per-flow random state tokens, expire after 10 min. Without this, an
+// attacker who steals an `auth_code` query param (e.g. via a malicious
+// Referer leak or a phishing landing page) could swap their tokens onto
+// the victim's dashboard. The state token is cryptographically random and
+// must round-trip through Google's consent screen unchanged.
+const OAUTH_STATES = new Map(); // state → { issuedAt: number }
+const OAUTH_STATE_TTL_MS = 10 * 60_000;
+
+function issueOAuthState() {
+  const state = crypto.randomBytes(32).toString('base64url');
+  OAUTH_STATES.set(state, { issuedAt: Date.now() });
+  // GC any expired entries while we're here so the Map can't grow unbounded
+  // even if a user starts dozens of OAuth flows without finishing them.
+  const cutoff = Date.now() - OAUTH_STATE_TTL_MS;
+  for (const [s, meta] of OAUTH_STATES) {
+    if (meta.issuedAt < cutoff) OAUTH_STATES.delete(s);
+  }
+  return state;
+}
+
+function consumeOAuthState(state) {
+  if (!state || typeof state !== 'string') return false;
+  const meta = OAUTH_STATES.get(state);
+  if (!meta) return false;
+  // Single-use: delete on consume to prevent replay
+  OAUTH_STATES.delete(state);
+  // Expired tokens are rejected even if the lookup succeeded (Map outlives
+  // the GC sweep window when used heavily).
+  return (Date.now() - meta.issuedAt) <= OAUTH_STATE_TTL_MS;
 }
 
 function getAuthUrl(state = '') {
@@ -7293,8 +7337,24 @@ function isOriginAllowed(req) {
 
 // Generic error responder — never leak err.message to the client.
 function sendJsonError(res, status, publicMessage, err) {
+  // Increment the route-error counter so /api/health surfaces the rate.
+  // ERROR_COUNTERS is initialized later (module load order) but the guard
+  // keeps this safe during early boot when no requests have hit yet.
+  if (typeof ERROR_COUNTERS !== 'undefined') {
+    ERROR_COUNTERS.routeError += 1;
+  }
   if (err) {
     console.error(`[api ${status}] ${publicMessage}:`, err.message);
+    // Persist 5xx errors to the structured log — these are the ones worth
+    // post-mortem'ing. 4xx are user errors and would just be noise.
+    if (status >= 500 && typeof ERROR_LOG !== 'undefined') {
+      ERROR_LOG.log({
+        kind:    'route-error',
+        message: publicMessage,
+        stack:   err.stack || null,
+        ctx:     { status },
+      });
+    }
   }
   if (!res.headersSent) {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -7347,6 +7407,19 @@ const RATE_BUCKETS = new Map();
 const RATE_GET_PER_MIN  = Number(process.env.RATE_GET_PER_MIN  || 60);
 const RATE_POST_PER_MIN = Number(process.env.RATE_POST_PER_MIN || 10);
 const RATE_BUCKET_TTL_MS = 5 * 60_000;
+
+// Janitor: sweep stale rate-limit buckets every 60 s. Without this, a
+// stream of unique source IPs (NAT churn, scanners, attackers rotating
+// addresses) grows the Map unbounded — which is itself a memory DoS
+// vector once the dashboard is exposed beyond loopback.
+const RATE_JANITOR = setInterval(() => {
+  const cutoff = Date.now() - RATE_BUCKET_TTL_MS;
+  for (const [ip, bucket] of RATE_BUCKETS) {
+    if (bucket.last < cutoff) RATE_BUCKETS.delete(ip);
+  }
+}, 60_000);
+// Don't keep the process alive just to run the janitor.
+RATE_JANITOR.unref?.();
 
 function checkRateLimit(req) {
   const ip = req.socket.remoteAddress || 'unknown';
@@ -7880,7 +7953,9 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
 </body></html>`);
       return;
     }
-    const authUrl = getAuthUrl('dashboard');
+    // Issue a single-use, time-limited state token so the callback can
+    // verify the response matches a flow we initiated.
+    const authUrl = getAuthUrl(issueOAuthState());
     res.writeHead(302, { Location: authUrl });
     res.end();
     return;
@@ -7890,8 +7965,23 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
   if (pathname === '/auth/gmail/callback') {
     const code = urlObj.searchParams.get('code');
     const error = urlObj.searchParams.get('error');
+    const state = urlObj.searchParams.get('state');
     if (error || !code) {
       res.writeHead(302, { Location: '/?gmail=error' });
+      res.end();
+      return;
+    }
+    // Verify state token before doing anything else. A missing or invalid
+    // state means the callback wasn't initiated by this server — reject
+    // it rather than blindly exchange the code (which would bind whatever
+    // Google account the attacker authorized to this dashboard).
+    if (!consumeOAuthState(state)) {
+      ERROR_LOG.log({
+        kind: 'oauth-state-mismatch',
+        message: 'Gmail OAuth callback rejected — state token missing or expired',
+        tag: '/auth/gmail/callback',
+      });
+      res.writeHead(302, { Location: '/?gmail=error&reason=state' });
       res.end();
       return;
     }
@@ -7965,32 +8055,45 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
     return;
   }
 
-  // ── API: Health check ──
-  // Lightweight liveness probe for Docker HEALTHCHECK / load balancers.
-  // Never touches disk or external services; just proves the event loop
   // ── Brand assets (favicon, OG image, manifest) ──
   // Served with a long cache TTL + ETag — the assets are immutable for the
-  // lifetime of a deploy and gzipped to keep the response tiny.
+  // lifetime of a deploy and pre-gzipped at boot so the hot path is zero
+  // CPU. ETag varies by encoding so a client that switches Accept-Encoding
+  // can't get a 304 against bytes it can't decode.
   if (BRAND_ASSETS[pathname]) {
     const asset = BRAND_ASSETS[pathname];
-    if (req.headers['if-none-match'] === asset.etag) {
-      res.writeHead(304, { 'ETag': asset.etag, 'Cache-Control': 'public, max-age=86400' });
+    const acceptsGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+    const wantedEtag = acceptsGzip ? asset.etagGzipped : asset.etag;
+
+    if (req.headers['if-none-match'] === wantedEtag) {
+      res.writeHead(304, {
+        'ETag': wantedEtag,
+        'Cache-Control': 'public, max-age=86400',
+        'Vary': 'Accept-Encoding',
+        // Lock down what the SVG can do — it's served same-origin and
+        // could in principle execute scripts. Prevent that by default.
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+        'Cross-Origin-Resource-Policy': 'same-origin',
+      });
       res.end();
       return;
     }
-    const acceptsGzip = (req.headers['accept-encoding'] || '').includes('gzip');
     const headers = {
       'Content-Type': asset.contentType,
-      'ETag': asset.etag,
+      'ETag': wantedEtag,
       'Cache-Control': 'public, max-age=86400',
       'Vary': 'Accept-Encoding',
+      // Hardened SVG/manifest delivery: even if a future commit templates
+      // user input into the SVG body, scripts inside won't execute.
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      'X-Content-Type-Options': 'nosniff',
     };
     if (acceptsGzip) {
-      const gz = zlib.gzipSync(asset.body, { level: 9 });
       headers['Content-Encoding'] = 'gzip';
-      headers['Content-Length'] = gz.length;
+      headers['Content-Length'] = asset.bodyGzipped.length;
       res.writeHead(200, headers);
-      res.end(gz);
+      res.end(asset.bodyGzipped);
     } else {
       headers['Content-Length'] = asset.body.length;
       res.writeHead(200, headers);
@@ -8009,6 +8112,9 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
     return;
   }
 
+  // ── API: Health check ──
+  // Lightweight liveness probe for Docker HEALTHCHECK / load balancers.
+  // Never touches disk or external services; just proves the event loop
   // is alive. Returns 200 + uptime so monitors can graph it.
   if (pathname === '/api/health') {
     res.writeHead(200, {
@@ -8019,6 +8125,25 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
     // process is silently degrading. lastUnhandledRejection is null
     // until something fires; staleSinceMs is undefined when null.
     const lastRej = LAST_UNHANDLED_REJECTION;
+    // Sanitize recent error entries before exposing them on the only
+    // unauthenticated route. Stacks contain absolute filesystem paths,
+    // function names, and library internals — leaking them helps an
+    // attacker fingerprint the deploy. Counters are always safe.
+    //
+    // On loopback we still drop stacks; the dashboard doesn't need them
+    // (it's already inside the trust boundary, and operators who want
+    // full traces tail data/errors.log directly).
+    const publicErrors = ERROR_LOG.recent({ limit: 8 }).map(e => ({
+      t:       e.t,
+      iso:     e.iso,
+      level:   e.level,
+      kind:    e.kind,
+      // Truncate message so a verbose error (e.g. a 4 KB JSON parse error
+      // including raw user input) can't be used as a side-channel.
+      message: typeof e.message === 'string' && e.message.length > 200
+        ? e.message.slice(0, 200) + '…'
+        : e.message,
+    }));
     res.end(JSON.stringify({
       ok: true,
       app: 'Hireloom',
@@ -8027,12 +8152,15 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
       now: new Date().toISOString(),
       lastUnhandledRejection: lastRej ? lastRej.iso : null,
       lastUnhandledRejectionAgoMs: lastRej ? (Date.now() - lastRej.t) : null,
-      lastUnhandledRejectionMessage: lastRej ? lastRej.message : null,
+      lastUnhandledRejectionMessage: lastRej && typeof lastRej.message === 'string' && lastRej.message.length > 200
+        ? lastRej.message.slice(0, 200) + '…'
+        : (lastRej ? lastRej.message : null),
       authMode: NON_LOOPBACK ? 'token' : 'loopback',
       // Error counters survive logger writes so monitors can alert when
-      // the deltas spike. Recent entries help diagnose without ssh.
+      // the deltas spike. Recent entries are sanitized (no stacks, no ctx,
+      // truncated messages).
       errorCounters: { ...ERROR_COUNTERS },
-      recentErrors: ERROR_LOG.recent({ limit: 8 }),
+      recentErrors: publicErrors,
     }));
     return;
   }

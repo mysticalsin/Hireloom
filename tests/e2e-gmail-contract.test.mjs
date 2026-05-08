@@ -167,4 +167,51 @@ test('Gmail OAuth contract', async (t) => {
     });
     assert.equal(r.statusCode, 403);
   });
+
+  await t.test('OAuth callback rejects missing state (CSRF defense)', async () => {
+    const srv = await bootServer({
+      GMAIL_CLIENT_ID: 'fake-client-id.apps.googleusercontent.com',
+      GMAIL_CLIENT_SECRET: 'GOCSPX-fakeSecretForTest',
+    });
+    t.after(srv.cleanup);
+    // Call the callback with a code but NO state — server must redirect
+    // to /?gmail=error&reason=state, NOT exchange the code.
+    const r = await fetchPort(srv.port, '/auth/gmail/callback?code=fake-attacker-code');
+    assert.equal(r.statusCode, 302);
+    assert.match(r.headers.location, /gmail=error/);
+    assert.match(r.headers.location, /reason=state/);
+  });
+
+  await t.test('OAuth callback rejects unknown state (CSRF defense)', async () => {
+    const srv = await bootServer({
+      GMAIL_CLIENT_ID: 'fake-client-id.apps.googleusercontent.com',
+      GMAIL_CLIENT_SECRET: 'GOCSPX-fakeSecretForTest',
+    });
+    t.after(srv.cleanup);
+    // State token the server never issued — must be rejected
+    const r = await fetchPort(srv.port,
+      '/auth/gmail/callback?code=fake&state=attacker-forged-state');
+    assert.equal(r.statusCode, 302);
+    assert.match(r.headers.location, /gmail=error/);
+    assert.match(r.headers.location, /reason=state/);
+  });
+
+  await t.test('GET /auth/gmail issues a fresh state token (random per visit)', async () => {
+    const srv = await bootServer({
+      GMAIL_CLIENT_ID: 'fake-client-id.apps.googleusercontent.com',
+      GMAIL_CLIENT_SECRET: 'GOCSPX-fakeSecretForTest',
+    });
+    t.after(srv.cleanup);
+    const r1 = await fetchPort(srv.port, '/auth/gmail');
+    const r2 = await fetchPort(srv.port, '/auth/gmail');
+    assert.equal(r1.statusCode, 302);
+    assert.equal(r2.statusCode, 302);
+    const state1 = new URL(r1.headers.location).searchParams.get('state');
+    const state2 = new URL(r2.headers.location).searchParams.get('state');
+    // Both states must exist and be distinct (cryptographically random)
+    assert.ok(state1 && state1.length >= 32, `state1 is a long token, got ${state1}`);
+    assert.ok(state2 && state2.length >= 32, `state2 is a long token, got ${state2}`);
+    assert.notEqual(state1, state2, 'each /auth/gmail visit issues a unique state');
+    assert.notEqual(state1, 'dashboard', 'state is not the legacy hardcoded value');
+  });
 });

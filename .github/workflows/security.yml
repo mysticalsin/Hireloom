@@ -75,8 +75,9 @@ jobs:
             FAIL=1
           fi
 
-          # 2. OAuth tokens accidentally checked in
-          if git ls-files | grep -E 'gmail-tokens\.json|gmail-cache\.json'; then
+          # 2. OAuth tokens accidentally checked in (escape . so we don't match
+          # gmail-tokensXjson / gmail-cacheXjson by accident)
+          if git ls-files | grep -E 'gmail-tokens\.json$|gmail-cache\.json$'; then
             echo "::error::Gmail token / cache file is tracked — should be gitignored"
             FAIL=1
           fi
