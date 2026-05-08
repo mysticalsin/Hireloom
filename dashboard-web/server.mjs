@@ -2831,14 +2831,33 @@ const HTML = /* html */ `<!DOCTYPE html>
       opacity: .42; cursor: not-allowed; pointer-events: none;
     }
 
-    /* Ghost — solid surface with hairline border, no glass. */
+    /* Ghost — dark capsule with hairline border. Hover blooms a soft
+       violet ring (matches the reference's nav-pill hover treatment),
+       so any clickable header button feels like part of the same
+       interactive system as the active filters. */
     .btn-ghost {
       background: var(--surface);
       color: var(--text);
       border-color: var(--separator2);
+      transition:
+        background 200ms ease,
+        border-color 200ms ease,
+        color 200ms ease,
+        box-shadow 200ms ease;
     }
-    .btn-ghost:hover { background: var(--surface2); border-color: var(--hairline-2); }
+    .btn-ghost:hover {
+      background: var(--surface2);
+      border-color: color-mix(in srgb, var(--accent) 32%, var(--hairline-2));
+      box-shadow: 0 0 14px rgba(168,85,247,.22);
+    }
     .btn-ghost:active { background: var(--surface3); }
+    .btn-ghost.is-active {
+      background: var(--bg);
+      border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+      box-shadow:
+        0 0 14px rgba(168,85,247,.45),
+        0 0 28px rgba(192,132,252,.20);
+    }
 
     /* Primary — accent fill */
     .btn-primary {
@@ -3303,8 +3322,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       background:
         linear-gradient(96deg,
           var(--text) 0%,
-          var(--text) 35%,
-          #c084fc 70%,
+          #e9d8ff 30%,
+          #c084fc 60%,
           #a855f7 100%);
       background-size: 200% 100%;
       background-position: 0% 50%;
@@ -3366,15 +3385,30 @@ const HTML = /* html */ `<!DOCTYPE html>
       box-shadow:
         0 1px 0 rgba(255,255,255,.05) inset,
         0 12px 28px rgba(0,0,0,.28),
-        0 0 0 1px color-mix(in srgb, var(--status-color, var(--accent)) 18%, transparent);
+        0 0 16px color-mix(in srgb, var(--status-color, var(--accent)) 28%, transparent),
+        0 0 32px color-mix(in srgb, var(--status-color, var(--accent)) 14%, transparent);
     }
+    /* Active stat card — full violet ring (matches reference's "Home"
+       pill recipe), the strongest signal that this card is filtering
+       the table. Status-color drives the halo so each card glows in
+       its own hue when active. */
     .stat-card.active {
       background:
-        radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--status-color, var(--accent)) 18%, transparent) 0%, transparent 65%),
+        radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--status-color, var(--accent)) 22%, transparent) 0%, transparent 65%),
         var(--surface);
-      border-color: color-mix(in srgb, var(--status-color, var(--accent)) 48%, var(--separator2));
+      border-color: color-mix(in srgb, var(--status-color, var(--accent)) 70%, transparent);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.06) inset,
+        0 0 18px color-mix(in srgb, var(--status-color, var(--accent)) 50%, transparent),
+        0 0 36px color-mix(in srgb, var(--status-color, var(--accent)) 22%, transparent),
+        0 8px 24px rgba(0,0,0,.30);
     }
-    .stat-card:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+    .stat-card:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--status-color, var(--accent)) 60%, transparent),
+        0 0 24px color-mix(in srgb, var(--status-color, var(--accent)) 30%, transparent);
+    }
     .stat-bar { display: none; }
     /* Eyebrow row: vibrant icon tile + uppercase label */
     .stat-label {
@@ -3511,17 +3545,25 @@ const HTML = /* html */ `<!DOCTYPE html>
       white-space: nowrap;
       border-radius: 999px;
     }
-    .filter-pill:hover { background: var(--surface2); color: var(--text); border-color: var(--hairline-2); }
-    .filter-pill:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
-    .filter-pill.active {
-      background: linear-gradient(180deg,
-        color-mix(in srgb, var(--accent) 28%, var(--surface)),
-        color-mix(in srgb, var(--accent) 16%, var(--surface)));
+    .filter-pill:hover {
+      background: var(--surface2);
       color: var(--text);
-      border-color: color-mix(in srgb, var(--accent) 60%, var(--separator2));
+      border-color: color-mix(in srgb, var(--accent) 22%, var(--hairline-2));
+      box-shadow: 0 0 12px rgba(168,85,247,.18);
+    }
+    .filter-pill:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+    /* Active filter pill — direct port of the reference's "Home" treatment.
+       Inset darker fill, vivid violet hairline, layered violet bloom
+       (14px inner halo + 28px outer halo) so the glow reads as a soft
+       ring around the pill rather than a billboard glow. */
+    .filter-pill.active {
+      background: var(--bg);
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 70%, transparent);
       box-shadow:
-        0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
-        0 0 18px rgba(168,85,247,.28);
+        0 0 14px rgba(168,85,247,.50),
+        0 0 28px rgba(192,132,252,.22),
+        inset 0 1px 0 rgba(255,255,255,.04);
     }
     /* The "money" filter keeps a small champagne tint to flag the only
        monetary filter — but no longer a colored pill island. */
@@ -3561,7 +3603,10 @@ const HTML = /* html */ `<!DOCTYPE html>
       cursor: pointer;
     }
     tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,.03); }
+    /* Subtle violet wash on hover so the row picks up the same hue
+       as the rest of the active-state system. The base alpha is low
+       enough that it never competes with the data inside the row. */
+    tbody tr:hover { background: rgba(168,85,247,.06); }
     tbody tr.followup-row { background: rgba(212,168,67,.04); box-shadow: inset 2px 0 0 var(--orange); }
     tbody tr.followup-row:hover { background: rgba(212,168,67,.08); }
     td {
@@ -3818,30 +3863,42 @@ const HTML = /* html */ `<!DOCTYPE html>
       0%,100% { box-shadow: inset 0 .5px 0 rgba(255,245,225,.20), 0 0 14px rgba(110,155,91,.42), 0 0 22px rgba(201,168,106,.16); }
       50%     { box-shadow: inset 0 .5px 0 rgba(255,245,225,.24), 0 0 22px rgba(110,155,91,.58), 0 0 32px rgba(201,168,106,.26); }
     }
+    /* Autopilot status bar — pulled into the midnight-velvet system.
+       The "running" pulse on the dot communicates state; the soft
+       violet wash + thin violet border tie it to the rest of the
+       active-state language. */
     .autopilot-bar {
       display: none;
-      background: linear-gradient(90deg, rgba(110,155,91,.08), rgba(107,140,175,.08));
-      border: .5px solid rgba(110,155,91,.2);
-      border-radius: var(--r-lg);
+      background:
+        radial-gradient(140% 110% at 0% 0%, rgba(168,85,247,.10) 0%, transparent 60%),
+        var(--surface);
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--separator2));
+      border-radius: 14px;
       padding: 12px 18px;
       margin-bottom: 16px;
       align-items: center; gap: 12px;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.05) inset,
+        0 0 16px rgba(168,85,247,.16);
     }
     .autopilot-bar.show { display: flex; }
     .autopilot-bar-dot {
       width: 8px; height: 8px; border-radius: 50%;
-      background: var(--green); flex-shrink: 0;
-      box-shadow: 0 0 8px var(--green);
+      background: var(--accent); flex-shrink: 0;
+      box-shadow: 0 0 8px var(--accent), 0 0 14px rgba(168,85,247,.55);
       animation: pulse 2s ease-in-out infinite;
     }
     .autopilot-bar-text { flex: 1; }
-    .autopilot-bar-title { font-size: 13px; font-weight: 600; color: var(--green); }
+    .autopilot-bar-title { font-size: 13px; font-weight: 600; color: var(--link); }
     .autopilot-bar-sub { font-size: 11px; color: var(--text-sec); margin-top: 2px; }
     .autopilot-bar-stats {
       display: flex; gap: 14px; font-size: 12px; font-family: var(--font-mono);
       color: var(--text-sec);
     }
-    .autopilot-bar-stats span { color: var(--green); font-weight: 700; }
+    .autopilot-bar-stats span { color: var(--link); font-weight: 700; }
+    /* Pipeline status pill — a slim glass capsule above the page header.
+       Picks up the same violet halo when running, mutes to a quiet
+       hairline when idle. */
     .pipeline-bar {
       display: flex; align-items: center; gap: var(--space-3);
       padding: 9px 16px; margin-bottom: var(--space-3);
@@ -3855,13 +3912,13 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
     .pipeline-bar-dot {
       width: 7px; height: 7px; border-radius: 50%;
-      background: var(--blue); flex-shrink: 0;
+      background: var(--accent); flex-shrink: 0;
       box-shadow: 0 0 8px currentColor;
-      color: var(--blue);
+      color: var(--accent);
     }
     .pipeline-bar-dot.idle { background: var(--text-ter); color: transparent; box-shadow: none; }
     .pipeline-bar-dot.running { animation: pulse 1.5s ease-in-out infinite; }
-    .pipeline-bar-label { font-weight: 700; color: var(--blue); letter-spacing: -.005em; }
+    .pipeline-bar-label { font-weight: 700; color: var(--link); letter-spacing: -.005em; }
     .pipeline-bar-label.idle { color: var(--text-sec); }
     .pipeline-bar-next { margin-left: auto; color: var(--text-ter); font-family: var(--font-mono); font-size: var(--t-caption); }
     .auto-apply-overlay {
@@ -4372,12 +4429,18 @@ const HTML = /* html */ `<!DOCTYPE html>
       line-height: 1.5;
     }
 
-    /* ── Follow-up list ── */
+    /* ── Follow-up list — sidebar items pick up a soft violet hover
+       so the same interactive language flows from the main table to
+       the sidebar without needing a separate hover hue. */
     .followup-item {
       display: flex; align-items: center; gap: 10px;
-      padding: 8px 0;
+      padding: 8px 10px;
+      margin: 0 -10px;
       border-bottom: .5px solid var(--separator);
+      border-radius: 8px;
+      transition: background 200ms ease;
     }
+    .followup-item:hover { background: rgba(168,85,247,.08); }
     .followup-item:last-child { border-bottom: none; }
     .followup-info { flex: 1; }
     .followup-company { font-size: 12px; font-weight: 600; }
