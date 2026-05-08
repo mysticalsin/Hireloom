@@ -511,9 +511,9 @@ Strategic Operator · AI Ecosystem Architect · Partnership Leader
     assert.ok(p.phone.includes('415'));
   });
   test('handles "City, Country" location (not just "City, ST")', () => {
-    const text = `Jane Doe\nMontreal, Canada · jane@x.com`;
+    const text = `Jane Doe\nBerlin, Germany · jane@x.com`;
     const p = extractProfileFromResume(text);
-    assert.equal(p.location, 'Montreal, Canada');
+    assert.equal(p.location, 'Berlin, Germany');
   });
 });
 

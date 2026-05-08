@@ -21,11 +21,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=tony
-Group=tony
-WorkingDirectory=/home/tony/career-ops
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/career-ops
 EnvironmentFile=-/etc/career-ops.env
-EnvironmentFile=/home/tony/career-ops/.env
+EnvironmentFile=/home/YOUR_USERNAME/career-ops/.env
 Environment=NODE_ENV=production
 Environment=PORT=4747
 Environment=HOST=127.0.0.1
@@ -42,7 +42,7 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/tony/career-ops/data /home/tony/career-ops/reports /home/tony/career-ops/output /home/tony/career-ops/config /home/tony/career-ops/tmp
+ReadWritePaths=/home/YOUR_USERNAME/career-ops/data /home/YOUR_USERNAME/career-ops/reports /home/YOUR_USERNAME/career-ops/output /home/YOUR_USERNAME/career-ops/config /home/YOUR_USERNAME/career-ops/tmp
 PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true

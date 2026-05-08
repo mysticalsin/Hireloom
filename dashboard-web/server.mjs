@@ -902,6 +902,9 @@ async function loadProfile() {
     headline: '', exit_story: '', best_achievement: '',
     target_range: '', minimum: '', currency: '',
     visa_status: '',
+    legally_authorized_to_work: '',
+    require_sponsorship: '',
+    work_permit_type: '',
   };
   try {
     const yml = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8');
@@ -920,6 +923,10 @@ async function loadProfile() {
     p.minimum = get('minimum');
     p.currency = get('currency');
     p.visa_status = get('visa_status');
+    // Work authorization (wizard Step 4) — autopilot's primary visa source.
+    p.legally_authorized_to_work = get('legally_authorized_to_work');
+    p.require_sponsorship        = get('require_sponsorship');
+    p.work_permit_type           = get('work_permit_type');
   } catch {}
   return p;
 }
@@ -954,7 +961,17 @@ function composeCoverLetter(profile) {
 }
 
 function composeVisa(profile) {
-  return profile.visa_status || null;
+  // Prefer the wizard's structured work_authorization fields; fall back to a
+  // freeform location.visa_status if the user hand-edited profile.yml.
+  const auth = (profile.legally_authorized_to_work || '').trim();
+  const sponsor = (profile.require_sponsorship || '').trim();
+  const permit = (profile.work_permit_type || '').trim();
+  if (!auth && !sponsor && !permit) return profile.visa_status || null;
+  const parts = [];
+  if (auth)    parts.push(`Authorized to work: ${auth}.`);
+  if (sponsor) parts.push(`Require sponsorship: ${sponsor}.`);
+  if (permit)  parts.push(`Work permit: ${permit}.`);
+  return parts.join(' ');
 }
 
 function composeProfileSummary(profile) {
@@ -4555,7 +4572,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Step 4: Deal-breakers -->
+    <!-- Step 4: Deal-breakers + work authorization -->
     <div class="wiz-step" data-step="4">
       <span class="wiz-label">Deal-breakers — what would make you say no? <span class="wiz-count" id="wiz-dealbreakers-count" aria-live="polite"></span></span>
       <div class="wiz-hint">Tap to flag. We'll auto-skip postings that match these.</div>
@@ -4564,6 +4581,23 @@ const HTML = /* html */ `<!DOCTYPE html>
         <input class="wiz-input" id="wiz-dealbreaker-add" placeholder="Anything else? (e.g. 'No on-call rotation')" onkeydown="if(event.key==='Enter'){event.preventDefault();wizAddCustom('dealbreakers');}">
         <button class="wiz-add-btn" onclick="wizAddCustom('dealbreakers')">Add</button>
       </div>
+
+      <span class="wiz-label" style="margin-top:18px">Work authorization</span>
+      <div class="wiz-hint">Every application asks these two. The autopilot skips them entirely if you leave them blank.</div>
+      <label class="wiz-label" for="wiz-auth-authorized" style="margin-top:8px;font-weight:500;text-transform:none;letter-spacing:0">Are you legally authorized to work where you're applying?</label>
+      <select class="wiz-input" id="wiz-auth-authorized" aria-label="Legally authorized to work">
+        <option value="">— prefer not to say —</option>
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      </select>
+      <label class="wiz-label" for="wiz-auth-sponsorship" style="margin-top:10px;font-weight:500;text-transform:none;letter-spacing:0">Do you require visa sponsorship?</label>
+      <select class="wiz-input" id="wiz-auth-sponsorship" aria-label="Require visa sponsorship">
+        <option value="">— prefer not to say —</option>
+        <option value="No">No</option>
+        <option value="Yes">Yes</option>
+      </select>
+      <label class="wiz-label" for="wiz-auth-permit" style="margin-top:10px;font-weight:500;text-transform:none;letter-spacing:0">Work permit / visa type (optional)</label>
+      <input class="wiz-input" id="wiz-auth-permit" placeholder="e.g. US Citizen, Green Card, EU Blue Card, H-1B" aria-label="Work permit type">
     </div>
 
     <!-- Step 5: Narrative (superpowers, achievement, proof) -->
@@ -5630,8 +5664,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       sub: 'Step 2 of 6 · Tap any field to fix. The pencil icons mark what I pulled from your resume.' },
     { title: 'What kind of role are you after?',
       sub: 'Step 3 of 6 · Pick everything that fits. I\\'ll filter postings against this list.' },
-    { title: 'Anything that\\'s a hard no?',
-      sub: 'Step 4 of 6 · Optional. I\\'ll auto-skip any posting that matches one of these.' },
+    { title: 'Hard nos + work authorization',
+      sub: 'Step 4 of 6 · Deal-breakers auto-skip postings. Work-auth answers fill the two questions every application asks.' },
     { title: 'Tell me what makes you, you',
       sub: 'Step 5 of 6 · Optional but high-leverage — these go into every tailored CV and cover letter.' },
     { title: 'Ready when you are',
@@ -5661,6 +5695,14 @@ const HTML = /* html */ `<!DOCTYPE html>
       basics: { full_name: '', email: '', phone: '', location: '', linkedin: '', headline: '' },
       roles: { selected: new Set(), custom: [], comp_target: '', comp_min: '', comp_currency: 'USD', location_pref: '' },
       dealbreakers: { selected: new Set(), custom: [] },
+      // Work authorization — every US/CA/EU application asks both questions.
+      // Empty values are valid (autopilot will skip the field rather than
+      // guess on someone's behalf).
+      work_authorization: {
+        legally_authorized_to_work: '',  // 'Yes' | 'No' | ''
+        require_sponsorship: '',         // 'Yes' | 'No' | ''
+        work_permit_type: '',            // free-text (e.g. "US Citizen", "EU Blue Card")
+      },
       narrative: { superpowers: ['','',''], best_achievement: '', proof_points: [] },
     };
   }
@@ -5837,6 +5879,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       basics: { ...defaultWizState().basics, ...(draft.basics || {}) },
       roles: { ...defaultWizState().roles, ...(draft.roles || {}), selected: new Set(draft.roles?.selected || []) },
       dealbreakers: { ...defaultWizState().dealbreakers, ...(draft.dealbreakers || {}), selected: new Set(draft.dealbreakers?.selected || []) },
+      work_authorization: { ...defaultWizState().work_authorization, ...(draft.work_authorization || {}) },
       narrative: { ...defaultWizState().narrative, ...(draft.narrative || {}) },
     };
     // Re-populate inputs
@@ -5851,6 +5894,9 @@ const HTML = /* html */ `<!DOCTYPE html>
     setVal('wiz-comp-min',      window.wizState.roles.comp_min);
     setVal('wiz-comp-currency', window.wizState.roles.comp_currency);
     setVal('wiz-location-pref', window.wizState.roles.location_pref);
+    setVal('wiz-auth-authorized',  window.wizState.work_authorization.legally_authorized_to_work || '');
+    setVal('wiz-auth-sponsorship', window.wizState.work_authorization.require_sponsorship || '');
+    setVal('wiz-auth-permit',      window.wizState.work_authorization.work_permit_type || '');
     setVal('wiz-super-1', window.wizState.narrative.superpowers[0] || '');
     setVal('wiz-super-2', window.wizState.narrative.superpowers[1] || '');
     setVal('wiz-super-3', window.wizState.narrative.superpowers[2] || '');
@@ -6174,7 +6220,14 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   function wizCollectStep4() {
-    /* deal-breakers are optional — anything goes through */
+    // Deal-breakers are optional. Work-authorization fields are also optional
+    // — empty just means "let the autopilot skip the question" rather than
+    // guessing on the user's behalf.
+    const wa = window.wizState.work_authorization || (window.wizState.work_authorization = {});
+    const get = (id) => (document.getElementById(id) && document.getElementById(id).value || '').trim();
+    wa.legally_authorized_to_work = get('wiz-auth-authorized');
+    wa.require_sponsorship        = get('wiz-auth-sponsorship');
+    wa.work_permit_type           = get('wiz-auth-permit');
   }
 
   function wizRenderProof() {
@@ -6265,6 +6318,7 @@ const HTML = /* html */ `<!DOCTYPE html>
         location_flexibility: window.wizState.roles.location_pref,
       },
       deal_breakers: [...window.wizState.dealbreakers.selected],
+      work_authorization: window.wizState.work_authorization,
       narrative: window.wizState.narrative,
     };
     try {

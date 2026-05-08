@@ -373,7 +373,7 @@ The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `
 1. **Resume** — drop `.txt`/`.md` or paste; PDFs trigger a "Open in tab → ⌘+A → ⌘+C" assist with auto-paste detection.
 2. **Confirm basics** — name/email/phone/location/linkedin/headline pre-filled from extraction; user edits.
 3. **Roles + comp** — chip multi-select (16 presets) + free-text additions + comp range/min/currency/location-pref.
-4. **Deal-breakers** — chip multi-select (9 presets) + free-text additions.
+4. **Deal-breakers + work authorization** — chip multi-select (9 presets) + free-text additions; plus the two questions every application asks ("Are you legally authorized to work?", "Do you require sponsorship?") and an optional permit/visa-type field. The autopilot uses these directly; leave any of them blank to make the autopilot skip the corresponding form field rather than guess.
 5. **Narrative** — 3 superpower bullets, one best-achievement, repeatable proof-points (name + URL + hero-metric).
 6. **Review** — structured summary, one CTA writes `config/profile.yml` (snapshot to `.bak.{timestamp}` first; rotation keeps newest 10) and kicks off CV PDF generation in the background.
 
