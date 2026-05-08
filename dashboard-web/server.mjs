@@ -2434,7 +2434,7 @@ const HTML = /* html */ `<!DOCTYPE html>
   <title>Hireloom — Career Atelier</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400,0..100;9..144,500,0..100;9..144,600,0..100;9..144,700,0..100&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -7934,7 +7934,7 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
         <title>${safeFilename}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400;9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400,0..100;9..144,500,0..100;9..144,600,0..100&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
         <style>
           /* Heritage palette — auto-respects prefers-color-scheme + theme attr.
              Mirrors the dashboard so report links don't feel like a different
