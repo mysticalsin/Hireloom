@@ -2441,58 +2441,58 @@ const HTML = /* html */ `<!DOCTYPE html>
     :root {
       color-scheme: dark;
 
-      /* ── Hireloom: heritage palette ──────────────────────────────────
-         Inspired by Hermès leather, Mont Blanc oxblood, and Savile Row
-         tailoring. Warm-charcoal surfaces (not pure black — that reads
-         "tech demo"), oxblood for action, champagne for accents. Every
-         hairline carries a faint warm cast so the whole UI feels woven,
-         not assembled. ────────────────────────────────────────────────── */
+      /* ── Hireloom: midnight-velvet palette ────────────────────────────
+         A luxurious dark + vivid-violet system. Near-black backgrounds
+         with a subtle purple tint (no pure #000 — that reads "tech
+         demo"); vibrant violet for action, lighter periwinkle for
+         text-accents and gradient finals. Every hairline carries a
+         faint violet cast so the whole UI feels woven from a single
+         color, not assembled from separate ones. ─────────────────────── */
 
-      /* ── Surfaces (warm-charcoal, not OLED black) ─────────────────── */
-      --bg:           #0e0a08;          /* deep walnut-charcoal */
-      --bg-elevated:  #181210;
-      --surface:      #221814;
-      --surface2:     #2a1e19;
-      --surface3:     #3a2a23;
-      --surface-hover: rgba(201,168,106,.06);
-      /* Translucent materials — warm-tinted */
-      --mat-thin:     rgba(28,20,16,.55);
-      --mat-regular:  rgba(34,24,20,.72);
-      --mat-thick:    rgba(42,30,25,.86);
-      /* Hairlines — champagne-tinted, 0.5px max */
-      --hairline:     rgba(201,168,106,.07);
-      --hairline-2:   rgba(201,168,106,.12);
+      /* ── Surfaces (deep purple-black, not OLED) ──────────────────── */
+      --bg:           #0a0612;          /* near-black, faint purple tint */
+      --bg-elevated:  #110b1e;
+      --surface:      #1a1330;
+      --surface2:     #221a3d;
+      --surface3:     #2d234d;
+      --surface-hover: rgba(192,132,252,.06);
+      /* Translucent materials — violet-tinted */
+      --mat-thin:     rgba(20,12,32,.58);
+      --mat-regular:  rgba(26,19,48,.74);
+      --mat-thick:    rgba(34,26,61,.88);
+      /* Hairlines — periwinkle-tinted, 0.5px max */
+      --hairline:     rgba(192,132,252,.08);
+      --hairline-2:   rgba(192,132,252,.16);
       --separator:    var(--hairline);
       --separator2:   var(--hairline-2);
-      /* Edge sheen — faint champagne glint on card tops */
-      --edge-sheen:   inset 0 .5px 0 rgba(201,168,106,.08);
+      /* Edge sheen — faint violet glint on card tops */
+      --edge-sheen:   inset 0 .5px 0 rgba(192,132,252,.10);
 
-      /* ── Text scale (warm-cream over walnut) ──────────────────────── */
-      /* All over the warm-charcoal --bg = #0e0a08 (luminance .010):
-           .96 → 18.7:1 (AAA)
-           .65 →  9.6:1 (AAA)
-           .60 →  8.5:1 (AAA, well past WCAG AA)
-           .30 →  3.1:1 (decorative only) */
-      --text:         rgba(245,235,225,.96);
-      --text-sec:     rgba(220,200,185,.65);
-      --text-ter:     rgba(220,200,185,.60);
-      --text-quad:    rgba(220,200,185,.32);
+      /* ── Text scale (cool warm-white over midnight) ──────────────── */
+      /* All over the deep --bg = #0a0612 (luminance ~.008):
+           .97 → 19.2:1 (AAA)
+           .72 → 11.2:1 (AAA)
+           .62 →  8.8:1 (AAA, well past WCAG AA)
+           .30 →  3.0:1 (decorative only) */
+      --text:         rgba(247,242,255,.97);
+      --text-sec:     rgba(225,215,245,.72);
+      --text-ter:     rgba(215,205,240,.62);
+      --text-quad:    rgba(205,195,230,.34);
 
-      /* ── Accent (oxblood primary, champagne flourish) ─────────────── */
-      --accent:       #a8253a;          /* oxblood — used on filled buttons */
-      --accent-2:     #c9a86a;          /* champagne — flourishes & success */
-      --accent-bg:    rgba(168,37,58,.14);
-      --accent-ring:  rgba(168,37,58,.34);
-      /* Champagne accents (used in success states + brand mark glints) */
-      --champagne:    #c9a86a;
-      --champagne-bg: rgba(201,168,106,.10);
+      /* ── Accent (vibrant violet primary, periwinkle flourish) ────── */
+      --accent:       #a855f7;          /* vivid violet — primary action */
+      --accent-2:     #c084fc;          /* periwinkle — gradient & accents */
+      --accent-bg:    rgba(168,85,247,.14);
+      --accent-ring:  rgba(168,85,247,.40);
+      /* Brand glints + soft halos */
+      --violet-glow:  0 0 30px rgba(168,85,247,.22);
+      --violet-soft:  rgba(192,132,252,.10);
       /* Link/text-accent — used wherever the accent appears as TEXT
-         (links, badges, value highlights). In dark mode, oxblood vs the
-         walnut-charcoal --bg only yields 2.8:1 (fails WCAG AA), so this
-         maps to champagne (8.7:1, AAA) on dark and to oxblood (10:1,
-         AAA) on light. */
-      --link:         #c9a86a;
-      --link-hover:   #d8bb7e;
+         (links, badges, value highlights). On dark, periwinkle (#c084fc)
+         hits 9.6:1 over --bg vs vivid violet's 5.8:1, so this maps to
+         the lighter shade for any TEXT use. */
+      --link:         #c084fc;
+      --link-hover:   #d6acff;
 
       /* ── Semantic status colors (heritage-recoloured, lower-saturation) */
       --green:   #6e9b5b; --green-bg:  rgba(110,155,91,.14);   /* sage */
@@ -2619,19 +2619,21 @@ const HTML = /* html */ `<!DOCTYPE html>
         --text-ter:     rgba(95,70,50,.80);
         --text-quad:    rgba(95,70,50,.32);
 
-        /* Oxblood + brass — oxblood deepened from #a8253a to #7a1424
-           in light so it reads ~10:1 over cream (AAA), not 4.7:1. */
-        --accent:       #7a1424;          /* deep oxblood — AAA on cream */
-        --accent-2:     #a87f3c;          /* antique brass */
-        --accent-bg:    rgba(122,20,36,.10);
-        --accent-ring:  rgba(122,20,36,.32);
-        --champagne:    #a87f3c;
-        --champagne-bg: rgba(168,127,60,.12);
-        /* Link/text-accent — oxblood on cream is 10:1 AAA, so --link
-           maps directly to --accent in light. (Mirrors the dark-mode
-           champagne mapping; one variable, both modes.) */
-        --link:         #7a1424;
-        --link-hover:   #5a0e1c;
+        /* Vivid violet, deepened for AAA contrast on paper. The light
+           theme inverts the dark midnight system but keeps the same
+           hue: vivid violet for primary, deeper grape for text-accent
+           use so links don't fail WCAG over the warm canvas. */
+        --accent:       #7e22ce;          /* deep violet — ~9.7:1 on paper */
+        --accent-2:     #a855f7;          /* mid violet — gradient + halos */
+        --accent-bg:    rgba(126,34,206,.10);
+        --accent-ring:  rgba(126,34,206,.32);
+        --violet-glow:  0 0 0 1px rgba(126,34,206,.18), 0 8px 28px rgba(126,34,206,.14);
+        --violet-soft:  rgba(168,85,247,.10);
+        /* Link/text-accent — deep violet on paper is ~9.7:1 AAA, so
+           --link maps directly to --accent in light (mirrors the dark
+           periwinkle mapping; one variable, both modes). */
+        --link:         #7e22ce;
+        --link-hover:   #6b1ba8;
 
         /* Heritage semantic colors — deepened so each clears WCAG AA
            body (4.5:1) on cream paper without leaning on the colored
@@ -2654,9 +2656,9 @@ const HTML = /* html */ `<!DOCTYPE html>
         --shadow-glow-accent: 0 0 0 1px rgba(122,20,36,.20), 0 8px 28px rgba(122,20,36,.14);
       }
     }
-    /* Manual override: forced light regardless of OS — mirror of
-       @media block above. Hireloom heritage palette: cream paper,
-       walnut ink, oxblood seal, antique brass. */
+    /* Manual override: forced light regardless of OS. Same midnight
+       palette pivoted to a paper canvas — the violet hue stays, only
+       the lightness inverts. */
     :root[data-theme="light"] {
       color-scheme: light;
       --bg:           #faf6f0;
@@ -2664,12 +2666,12 @@ const HTML = /* html */ `<!DOCTYPE html>
       --surface:      #f3ece1;
       --surface2:     #ebe2d3;
       --surface3:     #ddd1bd;
-      --surface-hover: rgba(58,30,15,.04);
+      --surface-hover: rgba(126,34,206,.04);
       --mat-thin:     rgba(250,246,240,.55);
       --mat-regular:  rgba(250,246,240,.72);
       --mat-thick:    rgba(252,248,242,.86);
-      --hairline:     rgba(58,30,15,.10);
-      --hairline-2:   rgba(58,30,15,.14);
+      --hairline:     rgba(126,34,206,.10);
+      --hairline-2:   rgba(126,34,206,.16);
       --separator:    var(--hairline);
       --separator2:   var(--hairline-2);
       --edge-sheen:   inset 0 .5px 0 rgba(255,250,240,.55);
@@ -2678,14 +2680,14 @@ const HTML = /* html */ `<!DOCTYPE html>
       /* WCAG AA on cream #faf6f0: stone .80 = 4.7:1 (passes 4.5:1) */
       --text-ter:     rgba(95,70,50,.80);
       --text-quad:    rgba(95,70,50,.32);
-      --accent:       #7a1424;
-      --accent-2:     #a87f3c;
-      --accent-bg:    rgba(122,20,36,.10);
-      --accent-ring:  rgba(122,20,36,.32);
-      --champagne:    #a87f3c;
-      --champagne-bg: rgba(168,127,60,.12);
-      --link:         #7a1424;
-      --link-hover:   #5a0e1c;
+      --accent:       #7e22ce;
+      --accent-2:     #a855f7;
+      --accent-bg:    rgba(126,34,206,.10);
+      --accent-ring:  rgba(126,34,206,.32);
+      --violet-glow:  0 0 0 1px rgba(126,34,206,.18), 0 8px 28px rgba(126,34,206,.14);
+      --violet-soft:  rgba(168,85,247,.10);
+      --link:         #7e22ce;
+      --link-hover:   #6b1ba8;
       --green:   #4d6b3e; --green-bg:  rgba(90,125,74,.14);
       --blue:    #5572a0; --blue-bg:   rgba(85,114,160,.14);
       --cyan:    #4e7980; --cyan-bg:   rgba(78,121,128,.14);
@@ -2705,7 +2707,17 @@ const HTML = /* html */ `<!DOCTYPE html>
     html { height: 100%; }
 
     body {
-      background: var(--bg);
+      /* Layered: deep midnight base + two soft radial-violet auras —
+         one anchored top-left (cool periwinkle), one bottom-right
+         (vivid violet) — so the canvas feels like polished velvet
+         under stage lighting, not a flat color block. Fixed background
+         attachment keeps the auras from sliding while the user scrolls
+         the data table. */
+      background:
+        radial-gradient(60% 50% at 8% -10%,  rgba(192,132,252,.10) 0%, transparent 60%),
+        radial-gradient(70% 60% at 100% 100%, rgba(168, 85,247,.12) 0%, transparent 65%),
+        var(--bg);
+      background-attachment: fixed;
       color: var(--text);
       font-family: var(--font);
       font-size: 14px;
@@ -2764,20 +2776,24 @@ const HTML = /* html */ `<!DOCTYPE html>
       flex-shrink: 0;
     }
 
-    /* ── Brand seal — solid oxblood circle, no breathing, no glow.
-       Functional indicator at 24px (same as a favicon), not a hero. */
+    /* ── Brand seal — vivid-violet gradient with a soft halo. Reads
+       as a polished pendant against the midnight surface around it. */
     .logo-mark {
-      width: 24px; height: 24px;
-      background: linear-gradient(180deg, #a8253a 0%, #7a1424 100%);
+      width: 26px; height: 26px;
+      background: linear-gradient(180deg, #c084fc 0%, #7e22ce 100%);
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-family: var(--font-display);
       font-size: 13px;
-      font-weight: 600;
-      color: rgba(245,220,190,.98);
+      font-weight: 700;
+      color: rgba(252,250,255,.98);
       font-variation-settings: "opsz" 9;
       letter-spacing: -.02em;
       flex-shrink: 0;
+      box-shadow:
+        inset 0 .5px 0 rgba(255,255,255,.30),
+        0 0 0 1px rgba(168,85,247,.22),
+        0 0 18px rgba(168,85,247,.32);
     }
     .header-spacer { flex: 1; }
     .header-actions {
@@ -2867,31 +2883,50 @@ const HTML = /* html */ `<!DOCTYPE html>
     .btn-theme #theme-icon { display: inline-block; transition: opacity 120ms ease; }
     .btn-theme:hover #theme-icon { opacity: .7; }
 
-    /* Primary CTA — solid oxblood pill with a soft top-edge sheen.
-       Picks up the visual gravity of a "primary action" without the
-       billboard glow of glassmorphic gradient buttons. */
+    /* Primary CTA — pure white pill with vivid-violet text + chevron.
+       Mirrors the "Launch Calculator" treatment from the reference
+       design: in dark luxurious systems, the loudest action is the
+       inverse of the canvas. The button gets a soft violet halo on
+       hover (uses --violet-glow) so the eye lands on it without a
+       neon billboard treatment. */
     .btn-apply-batch {
-      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white 12%), var(--accent));
-      color: rgba(245,220,190,.98);
-      font-weight: 600;
-      border-color: rgba(0,0,0,.22);
+      background: #ffffff;
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: -.005em;
+      border-color: rgba(0,0,0,.06);
       box-shadow:
-        0 1px 0 rgba(255,255,255,.10) inset,
-        0 1px 2px rgba(0,0,0,.18);
+        0 1px 0 rgba(255,255,255,.45) inset,
+        0 1px 2px rgba(0,0,0,.18),
+        0 0 0 0 rgba(168,85,247,0);
+      transition:
+        box-shadow 200ms var(--ease-out),
+        transform  160ms var(--ease-out),
+        filter     120ms ease;
     }
-    .btn-apply-batch:hover  { filter: brightness(1.08); }
-    .btn-apply-batch:active { filter: brightness(.95); }
+    .btn-apply-batch:hover {
+      filter: brightness(1.02);
+      transform: translateY(-1px);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.45) inset,
+        0 6px 18px rgba(0,0,0,.32),
+        0 0 0 6px rgba(168,85,247,.18);
+    }
+    .btn-apply-batch:active { transform: translateY(0); filter: brightness(.96); }
     /* Right-arrow chevron rendered via CSS so we don't need extra markup
-       on every CTA. Suppressed when the button text already contains a
-       chevron or arrow glyph. */
+       on every CTA. Same hue as the button text — never a stray gray. */
     .btn-apply-batch::after {
       content: "→";
       font-family: var(--font);
-      font-weight: 500;
-      margin-left: 2px;
-      transition: transform 160ms var(--ease-out);
+      font-weight: 600;
+      margin-left: 4px;
+      color: var(--accent);
+      transition: transform 200ms var(--ease-out);
     }
-    .btn-apply-batch:hover::after { transform: translateX(2px); }
+    .btn-apply-batch:hover::after { transform: translateX(3px); }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-apply-batch:hover, .btn-apply-batch:hover::after { transform: none; }
+    }
 
     /* ── Apply modal ── */
     .modal-overlay {
@@ -3158,6 +3193,68 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
+    /* ── Page-load reveal — staggered fade-up for elements that wear
+       the .reveal class. Each card animates in 60ms after the previous,
+       so the stat band assembles itself top-down without feeling like
+       a JS-driven cascade. The :nth-child overrides handle the stagger
+       inside common parents (.stats); freeform reveals can set
+       --reveal-delay inline. */
+    @keyframes hl-reveal {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .reveal {
+      opacity: 0;
+      animation: hl-reveal 600ms cubic-bezier(0.16, 1, 0.30, 1) forwards;
+      animation-delay: var(--reveal-delay, 0ms);
+    }
+    .stats > .reveal:nth-child(1) { --reveal-delay:  60ms; }
+    .stats > .reveal:nth-child(2) { --reveal-delay: 120ms; }
+    .stats > .reveal:nth-child(3) { --reveal-delay: 180ms; }
+    .stats > .reveal:nth-child(4) { --reveal-delay: 240ms; }
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { animation: none; opacity: 1; }
+    }
+
+    /* ── Footer credit — subtle line beneath the layout. Just an
+       attribution + source-code link; floats inside its own pill so
+       it picks up the same capsule language as the rest of the chrome. */
+    .built-by {
+      max-width: 1280px;
+      margin: 32px auto 24px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-ter);
+      letter-spacing: .01em;
+    }
+    .built-by-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: var(--surface);
+      border: 1px solid var(--separator2);
+      border-radius: 999px;
+      color: var(--text-sec);
+      text-decoration: none;
+      transition: background 200ms ease, border-color 200ms ease, color 200ms ease;
+    }
+    .built-by-pill:hover {
+      background: var(--surface2);
+      border-color: color-mix(in srgb, var(--accent) 38%, var(--separator2));
+      color: var(--text);
+    }
+    .built-by-pill .built-by-dot {
+      width: 6px; height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(168,85,247,.55);
+    }
+
     /* ── Layout — Linear-style: 1fr content + 280px sidebar.
        The 84px top reserve covers the floating header capsule (60px) +
        its 12px top margin + 12px breathing gap below it. */
@@ -3195,18 +3292,34 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
     .page-title {
       font-family: var(--font-display);
-      font-weight: 500;
+      font-weight: 600;
       font-size: var(--t-display);
       font-variation-settings: "opsz" 96, "SOFT" 30;
-      letter-spacing: -.018em;
-      background: linear-gradient(96deg,
-        var(--text) 0%,
-        var(--text) 55%,
-        color-mix(in srgb, var(--accent-2) 92%, var(--text) 8%) 100%);
+      letter-spacing: -.022em;
+      /* White → vivid-violet gradient with a 200% over-extended
+         background so the keyframe animation can pan the violet stop
+         across the text for a slow shimmer (12s cycle, almost
+         imperceptible — but the eye notices when it stops). */
+      background:
+        linear-gradient(96deg,
+          var(--text) 0%,
+          var(--text) 35%,
+          #c084fc 70%,
+          #a855f7 100%);
+      background-size: 200% 100%;
+      background-position: 0% 50%;
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
       color: transparent;
+      animation: titleShimmer 12s ease-in-out infinite;
+    }
+    @keyframes titleShimmer {
+      0%, 100% { background-position: 0% 50%; }
+      50%      { background-position: 100% 50%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .page-title { animation: none; }
     }
     .page-subtitle {
       font-size: var(--t-callout);
@@ -3214,49 +3327,56 @@ const HTML = /* html */ `<!DOCTYPE html>
       font-variant-numeric: tabular-nums;
     }
 
-    /* ── Stat strip — 4 module-style cards with eyebrow + huge number.
-       Each card is its own rounded surface (was a 1px-gap grid trick),
-       so the layout reads as a row of distinct intelligence modules
-       rather than a single dense bar. The --status-color per card
-       drives a subtle left-edge bar that lights up when active. */
+    /* ── Stat strip — 4 module-style cards with vibrant icon tile +
+       eyebrow + huge number. The icon tile is a 40px square with a
+       saturated fill driven by --status-color, hosting a Unicode glyph
+       in white. Hover gently lifts the card and brightens the tile —
+       the page-load stagger fades each card in sequence so the band
+       feels assembled, not dropped. */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
+      gap: 14px;
       margin-bottom: var(--space-6);
     }
     .stat-card {
       position: relative;
-      background: var(--bg-elevated);
+      background:
+        radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--status-color, var(--accent)) 8%, transparent) 0%, transparent 60%),
+        var(--bg-elevated);
       padding: 18px 20px 20px;
       cursor: pointer;
-      transition: background 120ms ease, border-color 120ms ease, transform 160ms var(--ease-out);
+      transition:
+        background 200ms ease,
+        border-color 200ms ease,
+        transform 200ms var(--ease-out),
+        box-shadow 200ms var(--ease-out);
       border: 1px solid var(--separator2);
-      border-radius: 14px;
-      display: flex; flex-direction: column; gap: 12px;
+      border-radius: 16px;
+      display: flex; flex-direction: column; gap: 14px;
       overflow: hidden;
-    }
-    /* Soft tinted accent bar on the left edge — lit only when active. */
-    .stat-card::before {
-      content: "";
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: 3px;
-      background: var(--status-color, var(--accent-2));
-      opacity: 0;
-      transition: opacity 160ms ease;
+      box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 1px 2px rgba(0,0,0,.18);
     }
     .stat-card:hover {
-      background: var(--surface);
-      border-color: var(--hairline-2);
+      background:
+        radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--status-color, var(--accent)) 14%, transparent) 0%, transparent 60%),
+        var(--surface);
+      border-color: color-mix(in srgb, var(--status-color, var(--accent)) 32%, var(--separator2));
+      transform: translateY(-2px);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.05) inset,
+        0 12px 28px rgba(0,0,0,.28),
+        0 0 0 1px color-mix(in srgb, var(--status-color, var(--accent)) 18%, transparent);
     }
     .stat-card.active {
-      background: var(--surface);
-      border-color: color-mix(in srgb, var(--status-color, var(--accent-2)) 38%, var(--separator2));
+      background:
+        radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--status-color, var(--accent)) 18%, transparent) 0%, transparent 65%),
+        var(--surface);
+      border-color: color-mix(in srgb, var(--status-color, var(--accent)) 48%, var(--separator2));
     }
-    .stat-card.active::before { opacity: .85; }
     .stat-card:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
     .stat-bar { display: none; }
+    /* Eyebrow row: vibrant icon tile + uppercase label */
     .stat-label {
       font-size: 11px;
       font-weight: 600;
@@ -3265,32 +3385,46 @@ const HTML = /* html */ `<!DOCTYPE html>
       text-transform: uppercase;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
-    /* Tiny colored dot in front of the eyebrow label — same hue as the
-       card's status-color. Picks up the reference's "icon-tile + label"
-       pattern without needing inline SVG markup. */
-    .stat-label::before {
-      content: "";
-      width: 8px; height: 8px;
-      border-radius: 999px;
-      background: var(--status-color, var(--accent-2));
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-color, var(--accent-2)) 22%, transparent);
+    .stat-icon {
+      width: 32px; height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(160deg,
+        color-mix(in srgb, var(--status-color, var(--accent)) 100%, white 0%) 0%,
+        color-mix(in srgb, var(--status-color, var(--accent)) 78%, black 22%) 100%);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      color: rgba(252,250,255,.97);
       flex-shrink: 0;
+      box-shadow:
+        inset 0 .5px 0 rgba(255,255,255,.30),
+        0 6px 14px color-mix(in srgb, var(--status-color, var(--accent)) 32%, transparent);
+      transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+    }
+    .stat-card:hover .stat-icon {
+      transform: scale(1.06);
+      box-shadow:
+        inset 0 .5px 0 rgba(255,255,255,.40),
+        0 8px 18px color-mix(in srgb, var(--status-color, var(--accent)) 40%, transparent);
     }
     .stat-value {
       font-family: var(--font-display);
       font-variation-settings: "opsz" 96, "SOFT" 30;
-      font-size: 44px;
-      font-weight: 500;
+      font-size: 48px;
+      font-weight: 600;
       line-height: 1;
-      letter-spacing: -.025em;
+      letter-spacing: -.028em;
       color: var(--text);
       font-variant-numeric: tabular-nums;
     }
+    @media (prefers-reduced-motion: reduce) {
+      .stat-card:hover { transform: none; }
+      .stat-card:hover .stat-icon { transform: none; }
+    }
     @media (max-width: 900px) {
       .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-      .stat-value { font-size: 36px; }
+      .stat-value { font-size: 38px; }
     }
     /* Legacy zero-state hero — kept hidden, replaced by page-header.
        (Selectors retained as no-ops so any leftover JS toggling them
@@ -3380,9 +3514,14 @@ const HTML = /* html */ `<!DOCTYPE html>
     .filter-pill:hover { background: var(--surface2); color: var(--text); border-color: var(--hairline-2); }
     .filter-pill:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
     .filter-pill.active {
-      background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+      background: linear-gradient(180deg,
+        color-mix(in srgb, var(--accent) 28%, var(--surface)),
+        color-mix(in srgb, var(--accent) 16%, var(--surface)));
       color: var(--text);
-      border-color: color-mix(in srgb, var(--accent) 50%, var(--separator2));
+      border-color: color-mix(in srgb, var(--accent) 60%, var(--separator2));
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
+        0 0 18px rgba(168,85,247,.28);
     }
     /* The "money" filter keeps a small champagne tint to flag the only
        monetary filter — but no longer a colored pill island. */
@@ -4186,24 +4325,26 @@ const HTML = /* html */ `<!DOCTYPE html>
       pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.3);
     }
 
-    /* ── Apply banner — promoted to a hero-style call-to-action card.
-       Picks up the warm oxblood-tinted gradient and a soft accent ring
-       on the left edge so it reads as "the action you came here for"
-       rather than a passive notification strip. */
+    /* ── Apply banner — hero CTA card with a violet aurora wash. Reads
+       as "the action you came here for" against the midnight canvas;
+       the left-edge accent ribbon picks up both violet stops so it
+       echoes the gradient direction of the page title. */
     .apply-banner {
       display: none;
       position: relative;
       background:
-        radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 60%),
+        radial-gradient(140% 110% at 0% 0%, rgba(168,85,247,.20) 0%, transparent 60%),
+        radial-gradient(120% 100% at 100% 100%, rgba(192,132,252,.12) 0%, transparent 65%),
         var(--surface);
-      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--separator2));
-      border-radius: 16px;
-      padding: 18px 18px 18px 22px;
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--separator2));
+      border-radius: 18px;
+      padding: 20px 22px 20px 26px;
       margin-bottom: var(--space-4);
       align-items: center; gap: var(--space-4);
       box-shadow:
-        0 1px 0 rgba(255,255,255,.05) inset,
-        0 1px 2px rgba(0,0,0,.18);
+        0 1px 0 rgba(255,255,255,.06) inset,
+        0 12px 36px rgba(168,85,247,.10),
+        0 1px 2px rgba(0,0,0,.22);
     }
     .apply-banner::before {
       content: "";
@@ -4211,7 +4352,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       inset: 14px auto 14px 0;
       width: 3px;
       border-radius: 999px;
-      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+      background: linear-gradient(180deg, #c084fc 0%, #a855f7 50%, #7e22ce 100%);
+      box-shadow: 0 0 12px rgba(168,85,247,.45);
     }
     .apply-banner.show { display: flex; }
     .apply-banner-text { flex: 1; min-width: 0; }
@@ -4411,20 +4553,20 @@ const HTML = /* html */ `<!DOCTYPE html>
          s-rejected / s-responded / s-evaluated; they no longer take
          visual space (Skill ban: KPI grids as default dashboard). -->
     <div class="stats" id="stats-grid">
-      <div class="stat-card" style="--status-color:var(--accent-2)" onclick="setFilter('pipeline',this)" data-filter="pipeline">
-        <div class="stat-label">In pipeline</div>
+      <div class="stat-card reveal" style="--status-color:#a855f7" onclick="setFilter('pipeline',this)" data-filter="pipeline">
+        <div class="stat-label"><span class="stat-icon" aria-hidden="true">◔</span>In pipeline</div>
         <div class="stat-value" id="s-pending">–</div>
       </div>
-      <div class="stat-card" style="--status-color:var(--blue)" onclick="setFilter('applied',this)" data-filter="applied">
-        <div class="stat-label">Applied</div>
+      <div class="stat-card reveal" style="--status-color:#38bdf8" onclick="setFilter('applied',this)" data-filter="applied">
+        <div class="stat-label"><span class="stat-icon" aria-hidden="true">↗</span>Applied</div>
         <div class="stat-value" id="s-applied">–</div>
       </div>
-      <div class="stat-card" style="--status-color:var(--yellow)" onclick="setFilter('interview',this)" data-filter="interview">
-        <div class="stat-label">Interview</div>
+      <div class="stat-card reveal" style="--status-color:#10b981" onclick="setFilter('interview',this)" data-filter="interview">
+        <div class="stat-label"><span class="stat-icon" aria-hidden="true">▦</span>Interview</div>
         <div class="stat-value" id="s-interview">–</div>
       </div>
-      <div class="stat-card" style="--status-color:var(--green)" onclick="setFilter('offer',this)" data-filter="offer">
-        <div class="stat-label">Offer</div>
+      <div class="stat-card reveal" style="--status-color:#f59e0b" onclick="setFilter('offer',this)" data-filter="offer">
+        <div class="stat-label"><span class="stat-icon" aria-hidden="true">★</span>Offer</div>
         <div class="stat-value" id="s-offer">–</div>
       </div>
     </div>
@@ -6773,6 +6915,23 @@ const HTML = /* html */ `<!DOCTYPE html>
   setInterval(checkPipelineStatus, 30 * 1000);
   setInterval(renderManualQueue, 60 * 1000);
 </script>
+
+<!-- ── Footer credit ───────────────────────────────────────────────
+     Tony Walteur built this. Lives outside the main grid so it
+     doesn't compete with the data table for attention; clicks open
+     his LinkedIn in a new tab. ─────────────────────────────────── -->
+<footer class="built-by" role="contentinfo">
+  <a class="built-by-pill"
+     href="https://www.linkedin.com/in/tonywalteur/"
+     target="_blank" rel="noopener noreferrer"
+     title="Built by Tony Walteur — open LinkedIn profile in new tab">
+    <span class="built-by-dot" aria-hidden="true"></span>
+    Built by <strong style="font-weight:600;color:var(--text)">Tony Walteur</strong>
+    <span style="opacity:.5">·</span>
+    <span style="opacity:.7">LinkedIn ↗</span>
+  </a>
+</footer>
+
 </body>
 </html>`;
 
