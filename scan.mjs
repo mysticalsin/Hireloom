@@ -69,6 +69,19 @@ function detectApi(company) {
     };
   }
 
+  // Workday (paginated POST to the cxs endpoint). Accepts either a public board
+  // URL like https://{tenant}.{shard}.myworkdayjobs.com/{site} (optionally with a
+  // /{locale}/ prefix) or a direct .../wday/cxs/{tenant}/{site}/jobs URL.
+  const wdMatch = url.match(/https?:\/\/([^.]+)\.(wd\d+)\.myworkdayjobs\.com\/(?:wday\/cxs\/[^/]+\/([^/]+)\/jobs|(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+))/);
+  if (wdMatch) {
+    return {
+      type: 'workday',
+      host: `${wdMatch[1]}.${wdMatch[2]}.myworkdayjobs.com`,
+      tenant: wdMatch[1],
+      site: wdMatch[3] || wdMatch[4],
+    };
+  }
+
   return null;
 }
 
@@ -120,6 +133,56 @@ async function fetchJson(url) {
   }
 }
 
+// ── Workday fetch (paginated POST) ──────────────────────────────────
+// Workday exposes a public JSON endpoint at /wday/cxs/{tenant}/{site}/jobs that
+// takes a POST body and returns { total, jobPostings:[{title, externalPath,
+// locationsText}] }. We page through it (20 at a time) and build public URLs.
+
+const WORKDAY_PAGE = 20;
+const WORKDAY_MAX = 1000; // safety cap on jobs per company
+
+async function fetchWorkdayJobs(api, companyName) {
+  const { host, tenant, site } = api;
+  const cxs = `https://${host}/wday/cxs/${tenant}/${site}/jobs`;
+  const out = [];
+  let offset = 0;
+  let total = null; // Workday reports the real total only on the first page
+
+  while (offset < WORKDAY_MAX) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let json;
+    try {
+      const res = await fetch(cxs, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ appliedFacets: {}, limit: WORKDAY_PAGE, offset, searchText: '' }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      json = await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (offset === 0) total = json.total ?? 0; // capture once; later pages report 0
+    const posts = json.jobPostings || [];
+    if (posts.length === 0) break;
+
+    for (const j of posts) {
+      out.push({
+        title: j.title || '',
+        url: `https://${host}/${site}${j.externalPath || ''}`,
+        company: companyName,
+        location: j.locationsText || '',
+      });
+    }
+    offset += WORKDAY_PAGE;
+    if (total != null && offset >= total) break;
+  }
+  return out;
+}
+
 // ── Title filter ────────────────────────────────────────────────────
 
 function buildTitleFilter(titleFilter) {
@@ -131,6 +194,26 @@ function buildTitleFilter(titleFilter) {
     const hasPositive = positive.length === 0 || positive.some(k => lower.includes(k));
     const hasNegative = negative.some(k => lower.includes(k));
     return hasPositive && !hasNegative;
+  };
+}
+
+// ── Location filter (v1.8.0) ────────────────────────────────────────
+// Keeps jobs whose location matches the user's eligibility. A job with an
+// empty/unknown location passes (let the pipeline decide). A negative match
+// always rejects, even if a positive keyword is also present.
+
+function buildLocationFilter(locationFilter) {
+  const positive = (locationFilter?.positive || []).map(k => k.toLowerCase());
+  const negative = (locationFilter?.negative || []).map(k => k.toLowerCase());
+
+  // No positive keywords configured → feature off, keep everything.
+  if (positive.length === 0) return () => true;
+
+  return (location) => {
+    const loc = (location || '').trim().toLowerCase();
+    if (!loc) return true; // unknown location → don't filter out
+    if (negative.some(k => loc.includes(k))) return false;
+    return positive.some(k => loc.includes(k));
   };
 }
 
@@ -219,11 +302,11 @@ function appendToPipeline(offers) {
 function appendToScanHistory(offers, date) {
   // Ensure file + header exist
   if (!existsSync(SCAN_HISTORY_PATH)) {
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\n', 'utf-8');
+    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tlocation\tstatus\n', 'utf-8');
   }
 
   const lines = offers.map(o =>
-    `${o.url}\t${date}\t${o.source}\t${o.title}\t${o.company}\tadded`
+    `${o.url}\t${date}\t${o.source}\t${o.title}\t${o.company}\t${o.location || ''}\tadded`
   ).join('\n') + '\n';
 
   appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
@@ -264,6 +347,8 @@ async function main() {
   const config = parseYaml(readFileSync(PORTALS_PATH, 'utf-8'));
   const companies = config.tracked_companies || [];
   const titleFilter = buildTitleFilter(config.title_filter);
+  const locationFilter = buildLocationFilter(config.location_filter);
+  const locationFilterActive = (config.location_filter?.positive || []).length > 0;
 
   // 2. Filter to enabled companies with detectable APIs
   const targets = companies
@@ -285,20 +370,30 @@ async function main() {
   const date = new Date().toISOString().slice(0, 10);
   let totalFound = 0;
   let totalFiltered = 0;
+  let totalLocationFiltered = 0;
   let totalDupes = 0;
   const newOffers = [];
   const errors = [];
 
   const tasks = targets.map(company => async () => {
-    const { type, url } = company._api;
+    const api = company._api;
     try {
-      const json = await fetchJson(url);
-      const jobs = PARSERS[type](json, company.name);
+      let jobs;
+      if (api.type === 'workday') {
+        jobs = await fetchWorkdayJobs(api, company.name);
+      } else {
+        const json = await fetchJson(api.url);
+        jobs = PARSERS[api.type](json, company.name);
+      }
       totalFound += jobs.length;
 
       for (const job of jobs) {
         if (!titleFilter(job.title)) {
           totalFiltered++;
+          continue;
+        }
+        if (!locationFilter(job.location)) {
+          totalLocationFiltered++;
           continue;
         }
         if (seenUrls.has(job.url)) {
@@ -313,7 +408,7 @@ async function main() {
         // Mark as seen to avoid intra-scan dupes
         seenUrls.add(job.url);
         seenCompanyRoles.add(key);
-        newOffers.push({ ...job, source: `${type}-api` });
+        newOffers.push({ ...job, source: `${api.type}-api` });
       }
     } catch (err) {
       errors.push({ company: company.name, error: err.message });
@@ -335,6 +430,9 @@ async function main() {
   console.log(`Companies scanned:     ${targets.length}`);
   console.log(`Total jobs found:      ${totalFound}`);
   console.log(`Filtered by title:     ${totalFiltered} removed`);
+  if (locationFilterActive) {
+    console.log(`Filtered by location:  ${totalLocationFiltered} removed`);
+  }
   console.log(`Duplicates:            ${totalDupes} skipped`);
   console.log(`New offers added:      ${newOffers.length}`);
 
