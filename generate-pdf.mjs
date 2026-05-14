@@ -133,7 +133,12 @@ async function generatePDF() {
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    // Allow overriding the browser binary (e.g. when only the full Chromium is
+    // installed and the headless-shell download is unavailable). No-op otherwise.
+    ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}),
+  });
   try {
     const page = await browser.newPage();
 
