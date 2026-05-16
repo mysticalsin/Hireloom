@@ -28,6 +28,7 @@ import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { makeErrorLogger } from './lib/error-log.mjs';
+import { createResolver, extractFieldsInPage } from '../autoapply-core.mjs';
 
 const PORT = Number(process.env.PORT || 4747);
 // Bind to loopback by default; opt-in to LAN exposure via HOST=0.0.0.0
@@ -687,25 +688,59 @@ async function exchangeCode(code) {
 
 // ── Gmail: Inbox scanner ──────────────────────────────────────────────────────
 
-const INTERVIEW_SIGNALS = ['interview','next steps','schedule a call','phone screen','video call',
-  'coding challenge','technical assessment','hired','offer extended','move forward'];
-const REJECTION_SIGNALS = ['unfortunately','not moving forward','position has been filled',
-  'other candidates','doesn\'t meet','won\'t be moving','no longer considering',
-  'decided to move in a different direction','position has been closed'];
-const RECEIVED_SIGNALS  = ['received your application','thank you for applying','we\'ll be in touch',
-  'application has been received','keep your application'];
+// Genuine interview/scheduling language ONLY. Deliberately NO bare "interview"
+// or "next steps"/"move forward" — those appear in auto-acknowledgment emails
+// ("here's what the interview process looks like", "next steps: we'll review").
+const INTERVIEW_SIGNALS = ['schedule an interview','schedule a call','schedule a time','schedule some time',
+  'set up a call','set up a time','set up an interview','book a time','find a time','phone screen','phone interview',
+  'video interview','technical assessment','coding challenge','take-home','availability for a call',
+  'availability to chat','your availability','invite you to interview','invitation to interview','interview invitation',
+  'like to interview you','like to speak with you','like to set up','next round','meet with the team','calendly'];
+// Unambiguous rejection language — always wins (even over an ack subject).
+const STRONG_REJECTION_SIGNALS = ['not moving forward','not be moving forward','won\'t be moving',
+  'will not be moving forward','not be progressing','decided not to proceed','decided not to move forward',
+  'were not selected','not been selected','not selected to move','position has been filled','position has been closed',
+  'decided to move in a different direction','pursue other candidates','moving forward with other candidates',
+  'no longer considering','no longer under consideration','unable to move forward','not be advancing your application',
+  'will not be advancing','regret to inform','not to move forward with your application'];
+// Soft words that ALSO appear in auto-ack disclaimers ("unfortunately we can't reply
+// to everyone"); only treated as a rejection when the subject isn't an acknowledgment.
+const WEAK_REJECTION_SIGNALS = ['unfortunately','other candidates','doesn\'t meet','does not meet'];
+const RECEIVED_SIGNALS  = ['received your application','thank you for applying','thanks for applying',
+  'we\'ll be in touch','application has been received','successfully received your application',
+  'we have received your application','we received your application','what happens next',
+  'application was sent','keep your application','thanks for your application','thank you for your application'];
+// Subject-line markers of an auto-acknowledgment. When the SUBJECT matches one of
+// these, it's a "received" confirmation — even if the body describes the interview
+// process — so it never gets mis-flagged as an interview invite.
+const ACK_SUBJECT_SIGNALS = ['thank you for applying','thanks for applying','thank you for your application',
+  'thanks for your application','application received','received your application','we received your application',
+  'we\'ve received your application','got your application','we\'ve got your application','what happens next',
+  'what to expect','application confirmation','application submitted','your application to','your application for',
+  'thanks for your interest','thank you for your interest'];
 const VERIFICATION_SIGNALS = ['verification code','verify your email','confirm your email',
   'one-time password','security code','your code is','enter this code',
   'otp','confirmation link','click to verify','verify your account','passcode'];
 
 function detectSignal(subject, snippet, bodyText, from) {
   const text = (subject + ' ' + snippet + ' ' + (bodyText || '')).toLowerCase();
+  const subj = (subject || '').toLowerCase();
   if (VERIFICATION_SIGNALS.some(s => text.includes(s))) {
     const codes = extractVerificationCodes(bodyText || snippet, subject);
     if (codes.length > 0) return { type: 'verification', codes };
   }
+  // 1. Strong, unambiguous rejection wins outright.
+  if (STRONG_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
+  // 2. Acknowledgment by SUBJECT short-circuits to "received": auto-acks describe
+  //    the interview process AND carry "unfortunately we can't reply to everyone"
+  //    disclaimers, either of which would otherwise mis-flag them. Settle by subject.
+  const isAck = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
+  if (isAck) return { type: 'received' };
+  // 3. Soft rejection words only count when it's NOT an acknowledgment email.
+  if (WEAK_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
+  // 4. Genuine interview/scheduling language (real invites, not process blurbs).
   if (INTERVIEW_SIGNALS.some(s => text.includes(s))) return { type: 'interview' };
-  if (REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
+  // 5. Received (body-level acks) as the fallback.
   if (RECEIVED_SIGNALS.some(s => text.includes(s))) return { type: 'received' };
   return { type: 'other' };
 }
@@ -740,8 +775,8 @@ async function scanGmailInbox() {
   let appsContent = '';
   try { appsContent = await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'); } catch { return; }
   const apps = parseMarkdownTable(appsContent)
-    .filter(r => r['#'] && /\d/.test(r['#']||''))
-    .map(r => ({ num: stripMd(r['#']||r['num']||''), company: stripMd(r['company']||''), status: stripMd(r['status']||'').toLowerCase() }));
+    .filter(r => (r['num'] || r['#']) && /\d/.test(r['num'] || r['#'] || ''))
+    .map(r => ({ num: stripMd(r['num']||r['#']||''), company: stripMd(r['company']||''), status: stripMd(r['status']||'').toLowerCase() }));
 
   if (!apps.length) return;
 
@@ -987,6 +1022,8 @@ async function loadProfile() {
     legally_authorized_to_work: '',
     require_sponsorship: '',
     work_permit_type: '',
+    gender: '', race_ethnicity: '', veteran_status: '', disability_status: '',
+    school: '', degree: '', discipline: '',
   };
   try {
     const yml = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8');
@@ -1009,6 +1046,15 @@ async function loadProfile() {
     p.legally_authorized_to_work = get('legally_authorized_to_work');
     p.require_sponsorship        = get('require_sponsorship');
     p.work_permit_type           = get('work_permit_type');
+    // EEO self-identification (use real answers, never "prefer not to say" unless blank)
+    p.gender            = get('gender');
+    p.race_ethnicity    = get('race_ethnicity');
+    p.veteran_status    = get('veteran_status');
+    p.disability_status = get('disability_status');
+    // Education (for application forms that require School / Degree / Discipline)
+    p.school     = get('school');
+    p.degree     = get('degree');
+    p.discipline = get('discipline');
   } catch {}
   return p;
 }
@@ -1021,14 +1067,18 @@ async function loadProfile() {
 // neutral — they're appended to whatever the user writes in profile.yml.
 
 function composeSalary(profile) {
+  const pkg = currentPkg();
+  if (pkg && pkg.salary) return pkg.salary;   // role-specific salary from batch package
   if (!profile.target_range) return null;
   const cur = profile.currency ? ` ${profile.currency}` : '';
   return `My target range is ${profile.target_range}${cur} depending on total compensation package, equity, and role scope. I'm flexible on structure.`;
 }
 
 function composeMotivation(profile) {
-  // "Why this role / company" — the most personal answer; require explicit
-  // user content rather than any default.
+  // "Why this role / company" — prefer the role-specific "why" from the batch
+  // package; otherwise fall back to the user's exit story.
+  const pkg = currentPkg();
+  if (pkg && pkg.why) return pkg.why;
   return profile.exit_story || null;
 }
 
@@ -1038,6 +1088,8 @@ function composeAchievement(profile) {
 }
 
 function composeCoverLetter(profile) {
+  const pkg = currentPkg();
+  if (pkg && pkg.why) return pkg.why;   // role-specific text for "anything else"/cover fields
   const bits = [profile.headline, profile.exit_story, profile.best_achievement].filter(Boolean);
   return bits.length ? bits.join(' ') : null;
 }
@@ -1086,11 +1138,80 @@ function resumeCandidatePaths(profile) {
   return out;
 }
 
+// Prefer a role-tailored CV (output/cv-<name>-<num|company>-*.pdf) for the job
+// currently being applied to; fall back to the generic resume paths.
+async function findTailoredCv(profile, hint) {
+  if (!hint || (hint.num == null && !hint.company)) return null;
+  if (!profile || !profile.full_name) return null;
+  const nameKebab = String(profile.full_name).toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
+  if (!nameKebab) return null;
+  let files;
+  try { files = await fs.readdir(path.join(ROOT, 'output')); } catch { return null; }
+  const cands = files.filter(f => f.startsWith(`cv-${nameKebab}-`) && f.toLowerCase().endsWith('.pdf'));
+  if (!cands.length) return null;
+  // 1) Match by report number (e.g. cv-jane-example-060-... for app #60), padded or raw
+  if (hint.num != null) {
+    const padded = String(hint.num).padStart(3, '0');
+    const byNum = cands.find(f => f.includes(`-${padded}-`) || f.includes(`-${hint.num}-`));
+    if (byNum) return path.join(ROOT, 'output', byNum);
+  }
+  // 2) Match by a company-name token (e.g. "Coconut Software" -> "coconut"),
+  //    but ONLY when exactly one candidate matches — otherwise we'd risk
+  //    attaching the wrong role's CV for a multi-role company (e.g. 3x BMO).
+  if (hint.company) {
+    const tokens = String(hint.company).toLowerCase().replace(/[^a-z0-9]+/g, ' ')
+      .split(' ').filter(t => t.length >= 3);
+    const matches = cands.filter(f => tokens.some(tok => f.toLowerCase().includes(tok)));
+    if (matches.length === 1) return path.join(ROOT, 'output', matches[0]);
+  }
+  return null;
+}
+
 async function findResumePdf(profile) {
+  // Prefer the current role's package CV (clean recruiter-facing filename,
+  // e.g. output/uploads/<num>/Jane Example - Resume.pdf).
+  const pkg = currentPkg();
+  if (pkg && pkg.cvPath) {
+    const abs = path.isAbsolute(pkg.cvPath) ? pkg.cvPath : path.join(ROOT, pkg.cvPath);
+    try { await fs.access(abs); return abs; } catch {}
+  }
+  // Use the role-tailored CV for the job currently being filled, if one exists.
+  const hint = (typeof autoApplyState !== 'undefined' && autoApplyState && autoApplyState.current) ? autoApplyState.current : null;
+  try {
+    const tailored = await findTailoredCv(profile, hint);
+    if (tailored) return tailored;
+  } catch {}
   for (const p of resumeCandidatePaths(profile)) {
     try { await fs.access(p); return p; } catch {}
   }
   return null;
+}
+
+// Per-role application package, written by the batch generator to
+// output/autoapply/<num>.json: { salary, why, coverPath } — lets the
+// auto-applier use role-specific answers/cover letters instead of generics.
+async function loadRolePackage(num) {
+  if (num == null) return null;
+  try {
+    const raw = await fs.readFile(path.join(ROOT, 'output', 'autoapply', `${num}.json`), 'utf8');
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+function currentPkg() {
+  return (typeof autoApplyState !== 'undefined' && autoApplyState && autoApplyState.current && autoApplyState.current.pkg) || null;
+}
+// Attach the role's tailored cover-letter PDF to a cover-letter file input, if both exist.
+async function attachCoverLetter(page) {
+  const pkg = currentPkg();
+  if (!pkg || !pkg.coverPath) return;
+  const abs = path.isAbsolute(pkg.coverPath) ? pkg.coverPath : path.join(ROOT, pkg.coverPath);
+  try { await fs.access(abs); } catch { return; }
+  try {
+    const inp = page.locator('input[type="file"][id*="cover" i], input[type="file"][name*="cover" i], input[type="file"][aria-label*="cover" i]').first();
+    if (await inp.count() > 0) await inp.setInputFiles(abs);
+  } catch {}
 }
 
 async function runAutoApply() {
@@ -1107,6 +1228,9 @@ async function runAutoApply() {
       if (!autoApplyState.stoppable) break;
       const item = autoApplyState.queue.shift();
       autoApplyState.current = { ...item, step: 'Opening page' };
+      // Load the role's batch package (salary / why / cover-letter path) so the
+      // form-fillers use role-specific answers, not generic profile defaults.
+      autoApplyState.current.pkg = await loadRolePackage(item.num);
 
       try {
         const page = await context.newPage();
@@ -1123,6 +1247,12 @@ async function runAutoApply() {
           filled = await fillLeverForm(page, profile);
         } else if (url.includes('ashbyhq.com')) {
           filled = await fillAshbyForm(page, profile);
+        } else if (url.includes('workable.com')) {
+          filled = await fillWorkableForm(page, profile);
+        } else if (url.includes('recruitee.com')) {
+          filled = await fillRecruiteeForm(page, profile);
+        } else if (url.includes('smartrecruiters')) {
+          filled = await fillSmartRecruitersForm(page, profile);
         } else {
           filled = await fillGenericForm(page, profile);
         }
@@ -1142,17 +1272,76 @@ async function runAutoApply() {
           }
         }
 
-        // Submit if auto mode
-        if (autoApplyState.mode === 'auto' && filled) {
-          autoApplyState.current.step = 'Submitting application';
-          const submitBtn = page.locator('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")').first();
-          await submitBtn.click({ timeout: 5000 }).catch(() => {});
-          await page.waitForTimeout(2000);
+        // Submit + confirmation gate (consistent with the CLI auto-apply.mjs):
+        // flip the tracker to "Applied" ONLY when a confirmation is detected;
+        // otherwise mark "Submitted?" so a captcha-blocked or unverified attempt
+        // is never falsely counted as Applied.
+        let confirmed = false;
+        let attempted = false;
+        autoApplyState.skipCurrent = false;   // reset per role
+        if (filled) {
+          // Tight confirmation test (a loose regex once matched job-description
+          // text and false-flagged Applied). A still-visible Submit button means
+          // we're still on the form, so it is NOT confirmed regardless of text.
+          const CONFIRM_RE = /thank you|thanks for applying|application (received|submitted|complete|has been (received|submitted))|successfully submitted|we['’ ]?ve received your/i;
+          const startUrl = page.url();
+          const isConfirmed = async () => {
+            const body = await page.textContent('body').catch(() => '');
+            const urlNow = page.url();
+            const textOk = CONFIRM_RE.test(body);
+            const urlOk = urlNow !== startUrl && /thank|confirm|success|submitted|complete|received/i.test(urlNow);
+            const stillOnForm = await page.locator('button[type="submit"]:visible, input[type="submit"]:visible').count().catch(() => 0);
+            return (textOk || urlOk) && stillOnForm === 0;
+          };
+
+          if (autoApplyState.mode === 'auto') {
+            // Auto-submit, then watch briefly for confirmation.
+            autoApplyState.current.step = 'Submitting application';
+            const submitBtn = page.locator('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")').first();
+            await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+            await submitBtn.click({ timeout: 5000 }).catch(() => {});
+            attempted = true;
+            for (let a = 0; a < 4 && !confirmed && autoApplyState.stoppable; a++) {
+              await page.waitForTimeout(a === 0 ? 4000 : 7000);
+              if (await isConfirmed()) { confirmed = true; break; }
+            }
+          } else {
+            // ASSISTED (human-in-the-loop): the form is filled. Wait patiently for
+            // the user to review, solve any CAPTCHA, and click Submit themselves.
+            // Advance the instant a real confirmation appears. The user can POST
+            // /api/auto-apply/skip to pass on this role, or /stop to halt.
+            autoApplyState.current.step = '✋ ' + item.company + ': review the filled form, solve the CAPTCHA, click Submit — I will detect the confirmation and open the next role (or POST /api/auto-apply/skip to pass)';
+            const maxMs = 15 * 60 * 1000;   // patient: up to 15 min per role
+            const start = Date.now();
+            while (Date.now() - start < maxMs && autoApplyState.stoppable && !autoApplyState.skipCurrent) {
+              await page.waitForTimeout(3000);
+              if (await isConfirmed()) { confirmed = true; attempted = true; break; }
+            }
+          }
         }
 
-        // Mark as Applied in tracker
-        await updateApplicationStatus(item.num, 'Applied').catch(() => {});
-        pushCompleted({ num: item.num, company: item.company, status: 'success' });
+        // Screenshot for the audit trail.
+        try {
+          const shotDir = path.join(ROOT, 'output', 'autoapply', 'screenshots');
+          await fs.mkdir(shotDir, { recursive: true });
+          await page.screenshot({ path: path.join(shotDir, `${item.num}-${confirmed ? 'confirmed' : 'unconfirmed'}-dash-${new Date().toISOString().slice(0,10)}.png`), fullPage: true }).catch(() => {});
+        } catch {}
+
+        if (confirmed) {
+          await updateApplicationStatus(item.num, 'Applied').catch(() => {});
+          pushCompleted({ num: item.num, company: item.company, status: 'success' });
+        } else if (autoApplyState.skipCurrent) {
+          // User passed on this role — leave it Evaluated, move to the next.
+          pushCompleted({ num: item.num, company: item.company, status: 'skipped (left Evaluated)' });
+        } else if (!filled) {
+          // Form couldn't be reached/filled (e.g. generic/JS careers page) — leave
+          // Evaluated for manual apply, do NOT mark Submitted?.
+          pushCompleted({ num: item.num, company: item.company, status: 'form not reachable — apply manually' });
+        } else {
+          // Filled + submit attempted but no confirmation — never falsely Applied.
+          await updateApplicationStatus(item.num, 'Submitted?').catch(() => {});
+          pushCompleted({ num: item.num, company: item.company, status: attempted ? 'unconfirmed (verify manually)' : 'not submitted (timed out)' });
+        }
         await page.close();
       } catch (err) {
         pushCompleted({ num: item.num, company: item.company, status: 'failed', error: err.message.substring(0, 100) });
@@ -1305,6 +1494,12 @@ async function runAutopilot() {
               filled = await fillLeverForm(page, profile);
             } else if (urlLower.includes('ashbyhq.com')) {
               filled = await fillAshbyForm(page, profile);
+            } else if (urlLower.includes('workable.com')) {
+              filled = await fillWorkableForm(page, profile);
+            } else if (urlLower.includes('recruitee.com')) {
+              filled = await fillRecruiteeForm(page, profile);
+            } else if (urlLower.includes('smartrecruiters')) {
+              filled = await fillSmartRecruitersForm(page, profile);
             } else {
               filled = await fillGenericForm(page, profile);
             }
@@ -1367,9 +1562,12 @@ async function runAutopilot() {
                 const currentUrl = page.url();
                 const bodyText = await page.textContent('body').catch(() => '');
 
-                // Success: redirected to thank-you or confirmation text
-                if (/thank you|application.*received|successfully submitted|we.*review|your application/i.test(bodyText) &&
-                    !bodyText.includes('Apply for this job')) {
+                // Success: thank-you / received text AND no Submit button still
+                // on the page. Tight regex + submit-button guard so job-description
+                // text never false-flags a confirmation.
+                const CONFIRM_RE_AP = /thank you|thanks for applying|application (received|submitted|complete|has been (received|submitted))|successfully submitted|we['’ ]?ve received your/i;
+                const stillOnFormAP = await page.locator('button[type="submit"]:visible, input[type="submit"]:visible').count().catch(() => 0);
+                if (CONFIRM_RE_AP.test(bodyText) && stillOnFormAP === 0) {
                   submitted = true;
                   await updateApplicationStatus(app.num, 'Applied').catch(() => {});
                   autopilotState.applied++;
@@ -1450,12 +1648,13 @@ async function runAutopilot() {
                   break;
                 }
 
-                // No CAPTCHA, no errors, no thank-you — might have silently submitted
+                // No CAPTCHA, no errors, no thank-you — unconfirmed. Do NOT call
+                // it Applied; mark "Submitted?" so it's flagged for manual verify
+                // (consistent with the CLI confirmation gate).
                 if (attempt === 2) {
-                  // Last attempt — mark as submitted (unconfirmed)
-                  await updateApplicationStatus(app.num, 'Applied').catch(() => {});
-                  autopilotState.applied++;
-                  addLog(app.num, app.company, app.role, 'applied', 'Submitted (unconfirmed — check email)', url);
+                  await updateApplicationStatus(app.num, 'Submitted?').catch(() => {});
+                  autopilotState.skipped++;
+                  addLog(app.num, app.company, app.role, 'submitted?', 'Unconfirmed — verify manually (check email)', url);
                   submitted = true;
                 }
               }
@@ -1615,833 +1814,233 @@ async function validateFormBeforeSubmit(page, profile) {
   return { ok: issues.length === 0, issues };
 }
 
-// ── Form fillers ──
+// ── Form fillers (resolver-driven — shared with the CLI via autoapply-core.mjs) ──
+//
+// All four ATS fillers now delegate to fillFormViaResolver, which uses the SAME
+// answer-resolution logic as auto-apply.mjs (autoapply-core.mjs). This keeps the
+// dashboard autopilot and the CLI exactly consistent: identity, EEO, education,
+// work-auth, per-role package answers, the global Q&A bank, and the role-pitch
+// fallback all behave identically. Browser mechanics (React-select clicking,
+// uploads) live here.
 
-async function fillGenericForm(page, profile) {
-  let filled = false;
-  const tryFill = async (selector, value) => {
-    if (!value) return;
-    try {
-      const el = page.locator(selector).first();
-      if (await el.isVisible({ timeout: 2000 })) { await el.fill(value); filled = true; }
-    } catch {}
-  };
-
-  // Name fields
-  await tryFill('input[name*="name" i][name*="first" i], input[id*="first" i][id*="name" i], input[autocomplete="given-name"]', profile.full_name.split(' ')[0] || '');
-  await tryFill('input[name*="name" i][name*="last" i], input[id*="last" i][id*="name" i], input[autocomplete="family-name"]', profile.full_name.split(' ').slice(1).join(' ') || '');
-  await tryFill('input[name*="full" i][name*="name" i], input[id*="full" i][id*="name" i], input[autocomplete="name"]', profile.full_name);
-  await tryFill('input[type="email"], input[name*="email" i], input[id*="email" i]', profile.email);
-  await tryFill('input[type="tel"], input[name*="phone" i], input[id*="phone" i]', profile.phone);
-  await tryFill('input[name*="linkedin" i], input[id*="linkedin" i], input[placeholder*="linkedin" i]', profile.linkedin);
-  await tryFill('input[name*="location" i], input[name*="city" i], input[id*="location" i]', profile.location);
-
-  // Resume upload
-  try {
-    const cvPdf = path.join(ROOT, 'output', 'cv.pdf');
-    const cvMd = path.join(ROOT, 'cv.md');
-    let resumePath = null;
-    try { await fs.access(cvPdf); resumePath = cvPdf; } catch {
-      try { await fs.access(cvMd); resumePath = cvMd; } catch {}
-    }
-    if (resumePath) {
-      const fileInput = page.locator('input[type="file"]').first();
-      if (await fileInput.count() > 0) { await fileInput.setInputFiles(resumePath); filled = true; }
-    }
-  } catch {}
-
-  return filled;
+function buildResolver() {
+  return createResolver({
+    projectDir: ROOT,
+    profileFile: path.join(CONFIG_DIR, 'profile.yml'),
+    autoapplyDir: path.join(ROOT, 'output', 'autoapply'),
+  });
 }
 
-async function fillGreenhouseForm(page, profile) {
-  let filled = false;
-  const tryFill = async (selector, value) => {
-    if (!value) return;
-    try {
-      const el = page.locator(selector).first();
-      if (await el.isVisible({ timeout: 2000 })) { await el.fill(value); filled = true; }
-    } catch {}
-  };
+async function fillFormViaResolver(page, profile, pkgArg) {
+  let RES;
+  try { RES = buildResolver(); }
+  catch (e) { console.log('[autopilot] resolver init failed:', e.message); return false; }
 
-  // --- PHASE 1: Fill custom questions FIRST (dropdowns re-render the form) ---
-  // Wait for React to fully render all custom questions
-  await page.waitForTimeout(2000);
+  const pkg = pkgArg || currentPkg() || {};
+  let filled = false;
+
+  // Let React render custom questions (dropdowns re-render the form).
+  await page.waitForTimeout(1500);
   try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch {}
 
-  // Custom questions — fill by label matching (with textarea fallback scan)
-  const questionMap = await page.evaluate(() => {
-    const result = [];
-    const seen = new Set();
-    // Primary: walk all labels
-    document.querySelectorAll('label').forEach(label => {
-      const text = label.textContent?.trim() || '';
-      const input = label.querySelector('input, textarea, select') ||
-                    (label.htmlFor ? document.getElementById(label.htmlFor) : null);
-      if (input && input.id && text.length > 5 && !seen.has(input.id)) {
-        seen.add(input.id);
-        result.push({ id: input.id, tag: input.tagName, text: text.substring(0, 200) });
-      }
-    });
-    // Fallback: scan all question textareas/inputs not yet captured
-    document.querySelectorAll('textarea[id], input[id^="question_"], input[id^="s3_"]').forEach(el => {
-      if (seen.has(el.id)) return;
-      const lbl = document.querySelector(`label[for="${el.id}"]`);
-      const text = lbl?.textContent?.trim() || el.placeholder || '';
-      if (text.length > 5) {
-        seen.add(el.id);
-        result.push({ id: el.id, tag: el.tagName, text: text.substring(0, 200) });
-      }
-    });
-    return result;
-  });
-
-  // Tailored answers come from config/profile.yml. Empty profile fields turn
-  // into null so the field is left blank for the user to fill in manually,
-  // rather than leaking a stale default into someone else's application.
-  for (const q of questionMap) {
-    const t = q.text.toLowerCase();
-    let answer = null;
-
-    // LinkedIn / portfolio / GitHub — fall back to empty (skip), never to a default URL.
-    if (t.includes('linkedin')) answer = profile.linkedin || null;
-    else if (t.includes('website') || t.includes('portfolio') || t.includes('github')) {
-      answer = profile.portfolio_url || profile.github || profile.linkedin || null;
+  // Ensure we're on the application FORM, not the job listing. Some callers
+  // (runAutoApply) navigate straight to the job URL without clicking Apply, so
+  // the page would otherwise have no real fields to fill. Idempotent: only acts
+  // when no form is present yet.
+  const formPresent = async () => (await page.locator('form, [role="form"], input[type="file"], input#first_name, input[name*="first" i]').count().catch(() => 0)) > 0;
+  if (!(await formPresent())) {
+    const u = page.url();
+    if (/greenhouse\.io/i.test(u) && !/\/apply(\b|$)/.test(u)) {
+      await page.goto(u.replace(/\/$/, '') + '/apply', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(1500);
+    } else if (/ashbyhq\.com/i.test(u) && !/\/application$/.test(u)) {
+      await page.goto(u.replace(/\/$/, '') + '/application', { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(1500);
+    } else if (/workable\.com/i.test(u) && !/\/apply\/?$/.test(u)) {
+      await page.goto(u.replace(/\/$/, '') + '/apply/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(1500);
     }
-    // Visa sponsorship / right to work
-    else if (t.includes('visa') || t.includes('sponsorship') || t.includes('authorized') || t.includes('employment eligibility')) answer = composeVisa(profile);
-    // Relocation
-    else if (t.includes('relocation') || t.includes('relocate') || t.includes('open to')) {
-      if (t.includes('relocat')) answer = 'Yes, I am open to relocation for this role.';
-      else if (t.includes('in-person') || t.includes('office')) answer = 'Yes, I am open to working in-person / hybrid.';
-      else answer = 'Yes';
+    // Recruitee (.../o/<role>) and SmartRecruiters (jobs.smartrecruiters.com/...) expose
+    // the form behind an Apply / "I'm interested" button → handled by clickApplyButton below.
+    if (!(await formPresent())) {   // still no form → click an Apply button
+      await clickApplyButton(page).catch(() => {});
+      await page.waitForTimeout(2000);
     }
-    // Start date / earliest
-    else if (t.includes('start') || t.includes('earliest') || t.includes('available')) answer = 'Available immediately — can start within 2-3 weeks.';
-    // Timeline / deadlines
-    else if (t.includes('deadline') || t.includes('timeline') || t.includes('consideration')) answer = 'No hard deadlines. I am actively interviewing and can prioritize.';
-    // Why this company
-    else if (t.includes('why ') || t.includes('why do you want') || t.includes('interest in')) answer = composeMotivation(profile);
-    // AI policy acknowledgment
-    else if (t.includes('ai policy') || t.includes('acknowledge') || t.includes('consent')) answer = 'I acknowledge and agree to the AI policy for this application.';
-    // Interviewed before — keep neutral; user can override
-    else if (t.includes('interview') && t.includes('before')) answer = 'No.';
-    // How did you hear — leave blank by default; this answer is application-specific
-    else if (t.includes('how did you') || t.includes('where did you') || t.includes('hear about') || t.includes('source')) answer = null;
-    // Work address / based in / currently located — use profile.location or skip
-    else if (t.includes('address') || (t.includes('where') && t.includes('work')) || (t.includes('plan') && t.includes('work'))
-             || t.includes('based in') || t.includes('currently based') || t.includes('currently located') || t.includes('currently live')) {
-      answer = profile.location || null;
-    }
-    // Office / hybrid (broader match)
-    else if (t.includes('office') || t.includes('hybrid') || t.includes('2-3 days') || t.includes('on-site') || t.includes('onsite')) answer = 'Yes, I am open to hybrid / in-office work.';
-    // Experience / describe / driven adoption (open-ended) → best_achievement
-    else if ((t.includes('describe') || t.includes('driven') || t.includes('experience')) && (t.includes('adoption') || t.includes('customer') || t.includes('technical') || t.includes('complex') || t.includes('expansion') || t.includes('upsell'))) answer = composeAchievement(profile);
-    // Salary expectations
-    else if (t.includes('salary') || t.includes('compensation') || t.includes('pay expectation') || t.includes('total comp')) answer = composeSalary(profile);
-    // How are you using AI / AI experiment
-    else if (t.includes('using ai') || t.includes('ai today') || t.includes('ai experiment') || t.includes('last ai')) answer = composeAiExperiment(profile);
-    // Specific example / STAR format questions → best_achievement
-    else if (t.includes('specific example') || t.includes('tell us about a time') || t.includes('give an example') || t.includes('describe a situation')) answer = composeAchievement(profile);
-    // Country-based eligibility / where are you based — derive from profile.location
-    else if ((t.includes('country') || t.includes('countries') || t.includes('based')) && (t.includes('eligible') || t.includes('currently') || t.includes('these'))) {
-      const parts = (profile.location || '').split(',').map(s => s.trim()).filter(Boolean);
-      answer = parts[parts.length - 1] || null;
-    }
-    // Notice period / availability
-    else if (t.includes('notice period') || t.includes('when can you start') || t.includes('availability')) answer = 'Available immediately — can start within 2-3 weeks.';
-    // Motivation (generic catch — try this AFTER the specific "why X" branch above)
-    else if (t.includes('what excites you') || t.includes('what interests you') || t.includes('what draws you') || t.includes('motivation')) answer = composeMotivation(profile);
-    // Cover letter / anything else
-    else if (t.includes('cover letter') || t.includes('anything else') || t.includes('additional information') || t.includes('additional context')) answer = composeCoverLetter(profile);
-    // Right to work
-    else if (t.includes('right to work') || t.includes('authorized to work') || t.includes('work permit') || t.includes('legally authorized')) answer = composeVisa(profile);
-    // Location / city — must come BEFORE catch-all to avoid enterprise-text in city fields
-    else if ((t.includes('city') || (t.includes('location') && !t.includes('relocation') && !t.includes('office') && !t.includes('remote') && !t.includes('where') && !t.includes('plan'))) && q.tag === 'INPUT') answer = profile.location || null;
-    // Gender / demographics (optional)
-    else if (t.includes('gender') || t.includes('hispanic') || t.includes('veteran') || t.includes('disability') || t.includes('race') || t.includes('ethnicity') || t.includes('pronoun') || t.includes('personal preference')) answer = null;
-    // Catch-all for required text fields → fall back to a profile-derived summary
-    else if (t.includes('*') && !t.includes('first name') && !t.includes('last name') && !t.includes('email') && !t.includes('phone') && !t.includes('country') && !t.includes('resume') && !t.includes('attach') && !t.includes('gender') && !t.includes('hispanic') && !t.includes('veteran') && !t.includes('disability')) {
-      answer = composeProfileSummary(profile);
-    }
-    // Optional fields without a match: skip
-    else answer = null;
-
-    if (answer && q.id) {
-      if (q.tag === 'TEXTAREA') {
-        await tryFill('#' + q.id, answer);
-      } else if (q.tag === 'INPUT') {
-        // Try fill first; if field is a Greenhouse dropdown, it'll fail — then try click+select
-        const didFill = await tryFill('#' + q.id, answer);
-        if (!didFill) {
-          // Greenhouse Yes/No dropdowns: click the input to open, then select option
-          try {
-            const wrapper = page.locator('#' + q.id).locator('..');
-            await wrapper.click();
-            await page.waitForTimeout(200);
-            const shortAnswer = answer.length > 10 ? (answer.toLowerCase().startsWith('yes') ? 'Yes' : answer.toLowerCase().startsWith('no') ? 'No' : answer.substring(0, 30)) : answer;
-            await page.locator('[class*="option"]:has-text("' + shortAnswer + '"), li:has-text("' + shortAnswer + '")').first().click({ timeout: 2000 });
-            filled = true;
-          } catch {}
-        }
-      } else if (q.tag === 'SELECT') {
-        try {
-          const sel = page.locator('#' + q.id);
-          await sel.selectOption({ label: answer }, { timeout: 2000 }).catch(async () => {
-            // Try clicking the select-like div and selecting option
-            await sel.click().catch(() => {});
-            await page.locator('li:has-text("' + answer.substring(0, 30) + '")').first().click({ timeout: 2000 }).catch(() => {});
-          });
-          filled = true;
-        } catch {}
-      }
-    }
+    try { await page.waitForLoadState('networkidle', { timeout: 4000 }); } catch {}
   }
 
-  // Handle Greenhouse React Select dropdowns (click → type-to-search → Enter)
-  // Also handles native <select> elements with matching labels
-  // If searchText is empty, press ArrowDown to skip placeholder before Enter
-  const ghSelectByLabel = async (label, searchText) => {
-    const labelLower = label.toLowerCase();
+  let fields;
+  try { fields = await page.evaluate(extractFieldsInPage); } catch { fields = []; }
+  if (!fields || !fields.length) return false;
 
-    // 1. Try React Select (.select__control variants) AND ARIA comboboxes
+  // SAME resolution as the CLI: identity → profile post-processor → package
+  // answers → Q&A bank → role-pitch fallback.
+  let answers = RES.resolveAnswers(fields, pkg);
+  answers = RES.mergeIdentity(answers, fields);
+  RES.applyProfileAnswers(answers, fields);
+
+  // Kimi smart-fill OVERLAY (when KIMI_API_KEY is set): the LLM reasons over every
+  // field (label + options + facts) and its value WINS over the deterministic one
+  // where it returns something concrete; deterministic stays the fallback. This is
+  // what lets the dashboard match quirky dropdowns the rule-matcher missed.
+  try {
+    const kimiMap = await kimiFillFields(fields, RES, pkg);
+    let used = 0;
+    for (const f of fields) {
+      const k = kimiMap[f.id];
+      if (k === undefined || k === '' || RES.isDecline(k)) continue;
+      let v = k;
+      const lim = (f.label || '').match(/(\d{2,4})\s*characters?/i);   // hard-enforce stated char limits
+      if (lim && typeof v === 'string' && v.length > +lim[1]) v = v.slice(0, +lim[1]).trim();
+      answers[f.id] = v; used++;
+    }
+    if (used) console.log(`[kimi-fill] applied ${used}/${fields.length} field answers from Kimi`);
+  } catch (e) { console.log('[kimi-fill] overlay skipped:', e.message); }
+
+  // React-select / native-select handler, matched to a field by its label text.
+  const selectByLabel = async (label, value) => {
+    if (!label) return false;
+    const labelLower = String(label).toLowerCase().slice(0, 60);
+    const short = value.length > 12 ? (/^yes/i.test(value) ? 'Yes' : /^no/i.test(value) ? 'No' : value.slice(0, 40)) : value;
     const selects = page.locator('.select__control, [class*="Select-control"], [class*="select-control"], [role="combobox"], [aria-haspopup="listbox"]');
-    const count = await selects.count();
+    const count = await selects.count().catch(() => 0);
     for (let i = 0; i < count; i++) {
       const parentLabel = await selects.nth(i).evaluate(el => {
-        // Walk up multiple levels to find the label
         let node = el;
-        for (let tries = 0; tries < 8; tries++) {
-          node = node.parentElement;
-          if (!node) break;
-          const lbl = node.querySelector('label');
-          if (lbl) return lbl.textContent?.trim()?.substring(0, 150) || '';
-        }
-        // Also check previous siblings
-        const prev = el.closest('[class*="field"],[class*="question"],[class*="form-group"],[class*="row"]');
-        return prev?.querySelector('label')?.textContent?.trim()?.substring(0, 150) || '';
+        for (let t = 0; t < 8; t++) { node = node.parentElement; if (!node) break; const l = node.querySelector('label'); if (l) return (l.textContent || '').trim().slice(0, 150); }
+        const p = el.closest('[class*="field"],[class*="question"],[class*="form-group"],[class*="row"]');
+        return (p && p.querySelector('label') ? p.querySelector('label').textContent : '').trim().slice(0, 150);
       }).catch(() => '');
-      if (parentLabel.toLowerCase().includes(labelLower)) {
+      if (parentLabel && (parentLabel.toLowerCase().includes(labelLower) || labelLower.includes(parentLabel.toLowerCase().slice(0, 40)))) {
         try {
-          await selects.nth(i).click();
-          await page.waitForTimeout(400);
-          if (searchText) {
-            await page.keyboard.type(searchText, { delay: 30 });
-            await page.waitForTimeout(600);
-          }
-          // Wait for dropdown menu to appear, then click first visible option
-          try { await page.waitForSelector('[class*="menu"]:visible, [class*="listbox"]:visible, [class*="dropdown"][role="listbox"]', { timeout: 1800 }); } catch {}
-          // Filter to only VISIBLE options (avoids stale options from previously-closed dropdowns)
-          const optSel = page.locator('[class*="option"]:not([class*="disabled"]):not([class*="no-option"]), [role="option"]').filter({ visible: true });
-          const optCount = await optSel.count();
+          await selects.nth(i).click(); await page.waitForTimeout(350);
+          await page.keyboard.type(short, { delay: 25 }); await page.waitForTimeout(450);
+          const opt = page.locator('[class*="option"]:not([class*="disabled"]):not([class*="no-option"]), [role="option"]').filter({ visible: true });
+          const oc = await opt.count().catch(() => 0);
           let clicked = false;
-          if (optCount > 0) {
-            if (searchText) {
-              for (let j = 0; j < Math.min(optCount, 15); j++) {
-                const optText = await optSel.nth(j).textContent().catch(() => '');
-                if (optText.toLowerCase().includes(searchText.toLowerCase())) {
-                  await optSel.nth(j).click().catch(() => {});
-                  clicked = true;
-                  break;
-                }
-              }
-            }
-            if (!clicked) {
-              // First real option (index 0 when no search, or fallback when search found nothing)
-              await optSel.nth(0).click().catch(() => {});
-              clicked = true;
-            }
+          for (let j = 0; j < Math.min(oc, 15); j++) {
+            const ot = await opt.nth(j).textContent().catch(() => '');
+            if (ot && ot.toLowerCase().includes(short.toLowerCase())) { await opt.nth(j).click().catch(() => {}); clicked = true; break; }
           }
-          if (!clicked) {
-            // Fallback: keyboard navigation
-            if (!searchText) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200); }
-            await page.keyboard.press('Enter');
-          }
-          await page.waitForTimeout(400);
-          filled = true;
-          return true;
+          if (!clicked && oc > 0) { await opt.nth(0).click().catch(() => {}); clicked = true; }
+          if (!clicked) await page.keyboard.press('Enter');
+          await page.waitForTimeout(300); filled = true; return true;
         } catch {}
       }
     }
-
-    // 2. Try native <select> elements
-    const nativeSelects = page.locator('select');
-    const nCount = await nativeSelects.count();
-    for (let i = 0; i < nCount; i++) {
-      const info = await nativeSelects.nth(i).evaluate((el, lbl) => {
-        const id = el.id;
-        const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
-        const fieldLabel = labelEl?.textContent?.trim() ||
-          el.closest('[class*="field"],[class*="question"],[class*="form-group"]')?.querySelector('label')?.textContent?.trim() || '';
-        // Get options for searchText matching
-        const opts = Array.from(el.options).map(o => o.text.trim()).filter(Boolean);
-        return { label: fieldLabel.substring(0, 150), opts };
-      }, label).catch(() => ({ label: '', opts: [] }));
-      if (info.label.toLowerCase().includes(labelLower)) {
+    const nat = page.locator('select');
+    const nc = await nat.count().catch(() => 0);
+    for (let i = 0; i < nc; i++) {
+      const info = await nat.nth(i).evaluate(el => {
+        const id = el.id; const le = id ? document.querySelector('label[for="' + id + '"]') : null;
+        const fl = (le ? le.textContent : (el.closest('[class*="field"],[class*="question"],[class*="form-group"]') && el.closest('[class*="field"],[class*="question"],[class*="form-group"]').querySelector('label') ? el.closest('[class*="field"],[class*="question"],[class*="form-group"]').querySelector('label').textContent : '')) || '';
+        return { label: fl.trim().slice(0, 150), opts: Array.from(el.options).map(o => o.text.trim()).filter(Boolean) };
+      }).catch(() => ({ label: '', opts: [] }));
+      if (info.label && info.label.toLowerCase().includes(labelLower)) {
         try {
-          const sel = nativeSelects.nth(i);
-          if (searchText) {
-            // Find option matching searchText
-            const match = info.opts.find(o => o.toLowerCase().includes(searchText.toLowerCase()));
-            if (match) await sel.selectOption({ label: match });
-            else await sel.selectOption({ index: 1 }); // skip placeholder at index 0
-          } else {
-            await sel.selectOption({ index: 1 }); // skip placeholder at index 0
-          }
-          await page.waitForTimeout(300);
-          filled = true;
-          return true;
+          const sel = nat.nth(i);
+          const m = info.opts.find(o => o.toLowerCase().includes(short.toLowerCase()));
+          if (m) await sel.selectOption({ label: m });
+          else await sel.selectOption({ label: value }).catch(() => {});
+          await page.waitForTimeout(200); filled = true; return true;
         } catch {}
       }
     }
-
     return false;
   };
 
-  try {
-    await ghSelectByLabel('Country', 'Canada');
-    await ghSelectByLabel('relocation', 'Yes');
-    await ghSelectByLabel('in-person', 'Yes');
-    await ghSelectByLabel('office', 'Yes');
-    await ghSelectByLabel('AI Policy', 'Yes');
-    await ghSelectByLabel('visa sponsorship', 'Yes');
-    await ghSelectByLabel('future', 'Yes');
-    await ghSelectByLabel('require employment', 'Yes');
-    await ghSelectByLabel('interview', 'No');
-    await ghSelectByLabel('interviewed', 'No');
-    await ghSelectByLabel('based in', 'Yes');
-    await ghSelectByLabel('currently based', 'Canada');
-    await ghSelectByLabel('salary', '150');   // search for 150k range options
-    await ghSelectByLabel('compensation', '150');
-    await ghSelectByLabel('pay expect', '150');
-    await ghSelectByLabel('eligible', 'Yes');
-    await ghSelectByLabel('countries', 'Canada');
-    await ghSelectByLabel('authoriz', '');  // ArrowDown → first option = "I am authorized to work..."
-    await ghSelectByLabel('right to work', 'Yes');
-    await ghSelectByLabel('legally', 'Yes');
-    await ghSelectByLabel('work in the country', '');  // first option = authorized
-    await ghSelectByLabel('country where you live', '');  // first option = authorized
-    await ghSelectByLabel('notice period', '');   // picks first option (Immediately/ASAP)
-    await ghSelectByLabel('when would you be available', '');
-    await ghSelectByLabel('when can you start', '');
-    await ghSelectByLabel('available to start', '');
-    // Parloa-specific fields
-    await ghSelectByLabel('work from', 'Remote');
-    await ghSelectByLabel('where would you like to work', 'Remote');
-    await ghSelectByLabel('preferred location', 'Remote');
-    await ghSelectByLabel('english', 'Fluent');
-    await ghSelectByLabel('language proficiency', 'Fluent');
-    await ghSelectByLabel('proficiency in english', 'C2');
-    await ghSelectByLabel('eligible to work in', 'Yes');
-    await ghSelectByLabel('work permit', 'Yes');
-    await ghSelectByLabel('work in germany', 'Yes');
-    await ghSelectByLabel('work in the', 'Yes');
-    // Consent / GDPR React Select (Parloa EU)
-    await ghSelectByLabel('consent', 'Yes');
-    await ghSelectByLabel('personal data', 'Yes');
-    await ghSelectByLabel('processing of my personal', 'Yes');
-    // Arize / SaaS experience
-    await ghSelectByLabel('saas', 'Yes');
-    await ghSelectByLabel('years of experience', 'Yes');
-    await ghSelectByLabel('years of sales', 'Yes');
-    await ghSelectByLabel('sales experience', 'Yes');
-    // Parloa-specific yes/no qualification questions (ArrowDown picks Yes = 1st option)
-    await ghSelectByLabel('directly owned', '');   // "Have you directly owned post-sale strategy..."
-    await ghSelectByLabel('post-sale', '');        // same pattern variations
-    await ghSelectByLabel('driven adoption', '');  // "Have you driven adoption and expansion..."
-    await ghSelectByLabel('$500k', '');
-    await ghSelectByLabel('500k+', '');
-    await ghSelectByLabel('$1m', '');
-    await ghSelectByLabel('enterprise account', '');
-    await ghSelectByLabel('7+ years', '');
-    await ghSelectByLabel('5+ years', '');
-    await ghSelectByLabel('5 years', '');
-    await ghSelectByLabel('channel partner', '');  // "Do you have channel partner experience?"
-    await ghSelectByLabel('partner experience', '');
-    // Gender / demographics — skip (pick prefer not to say)
-    await ghSelectByLabel('gender', 'Prefer not to say').catch(() => {});
-    await ghSelectByLabel('veteran', 'I am not a protected veteran').catch(() => {});
-    await ghSelectByLabel('disability', 'No, I do not have').catch(() => {});
-  } catch {}
-
-  // --- PHASE 2.7: JS-based fallback for notice period / available-to-start (handles selects, radios, inputs) ---
-  try {
-    await page.evaluate(() => {
-      const noticePhrases = ['notice period', 'available to start', 'when would you be available', 'when can you start', 'start date'];
-      // 1. Native <select> — pick first non-empty option
-      document.querySelectorAll('select').forEach(sel => {
-        const lbl = (document.querySelector(`label[for="${sel.id}"]`)?.textContent || sel.closest('[class*="field"],[class*="question"]')?.querySelector('label')?.textContent || '').toLowerCase();
-        if (noticePhrases.some(p => lbl.includes(p)) && sel.selectedIndex <= 0 && sel.options.length > 1) {
-          sel.selectedIndex = 1;
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
-      // 2. Radio buttons — click first option in a notice period group
-      const allRadios = document.querySelectorAll('input[type="radio"]');
-      const noticeGroups = new Set();
-      allRadios.forEach(r => {
-        const lbl = (document.querySelector(`label[for="${r.id}"]`)?.textContent || r.closest('[class*="field"],[class*="question"]')?.querySelector('label:not([for])')?.textContent || '').toLowerCase();
-        if (noticePhrases.some(p => lbl.includes(p)) && !noticeGroups.has(r.name)) {
-          r.checked = true;
-          r.dispatchEvent(new Event('change', { bubbles: true }));
-          r.click();
-          noticeGroups.add(r.name);
-        }
-      });
-      // 3. Checkbox groups in <fieldset> (Parloa EU: "What is your notice period?" as multi-checkbox)
-      document.querySelectorAll('fieldset').forEach(fieldset => {
-        const lbl = (fieldset.querySelector('label, legend')?.textContent || '').toLowerCase();
-        if (noticePhrases.some(p => lbl.includes(p))) {
-          // Pick first unchecked checkbox in the group (e.g. "1 Week")
-          const cb = fieldset.querySelector('input[type="checkbox"]:not(:checked)');
-          if (cb) {
-            cb.checked = true;
-            cb.dispatchEvent(new Event('change', { bubbles: true }));
-            cb.click();
-          }
-        }
-      });
-    });
-  } catch {}
-
-  // Phase 2.7 Playwright-native: notice period fieldset checkboxes
-  // (React ignores DOM-level evaluate() clicks — this fires real browser events)
-  try {
-    const noticePhraseRx = /notice period|available to start|when would you be available|when can you start|start date/i;
-    const fieldsets = page.locator('fieldset');
-    const fsCount = await fieldsets.count();
-    for (let fi = 0; fi < fsCount; fi++) {
-      const fs = fieldsets.nth(fi);
-      const fsText = await fs.textContent().catch(() => '');
-      if (!noticePhraseRx.test(fsText)) continue;
-      const checkboxes = fs.locator('input[type="checkbox"]');
-      const cbCount = await checkboxes.count();
-      if (cbCount === 0) continue;
-      // Click the first unchecked checkbox in this notice-period group
-      for (let ci = 0; ci < cbCount; ci++) {
-        const cb = checkboxes.nth(ci);
-        const isChecked = await cb.isChecked().catch(() => false);
-        if (!isChecked) {
-          await cb.click({ force: true });
-          await page.waitForTimeout(400);
-          filled = true;
-          break;
-        }
-      }
-    }
-  } catch {}
-
-  // Handle checkbox groups (country eligibility, etc.) — click checkbox for Canada/Yes
-  try {
-    await page.evaluate(() => {
-      const checkboxLabels = document.querySelectorAll('label');
-      for (const lbl of checkboxLabels) {
-        const text = lbl.textContent?.toLowerCase() || '';
-        const input = lbl.querySelector('input[type="checkbox"]') ||
-                      (lbl.htmlFor ? document.getElementById(lbl.htmlFor) : null);
-        if (!input || input.type !== 'checkbox') continue;
-        // Check "Canada" or "Yes" options inside country/eligibility groups
-        if (text === 'canada' || text === 'yes' || text.includes('canada')) {
-          const groupLabel = input.closest('[class*="field"],[class*="question"]')
-            ?.querySelector('label:not([for])')?.textContent?.toLowerCase() || '';
-          if (groupLabel.includes('countr') || groupLabel.includes('based') || groupLabel.includes('eligible') || groupLabel.includes('locat')) {
-            input.click();
-          }
-        }
-      }
-    });
-  } catch {}
-
-  // --- PHASE 2.8: Catch-all — fill any remaining empty native selects or comboboxes ---
-  try {
-    // Handle native <select> elements that still show index 0 (placeholder)
-    await page.evaluate(() => {
-      const allSelects = document.querySelectorAll('select');
-      for (const sel of allSelects) {
-        if (sel.selectedIndex <= 0 && sel.options.length > 1) {
-          // Check if this is a required or labeled field
-          const id = sel.id;
-          const lbl = id ? document.querySelector(`label[for="${id}"]`)?.textContent?.toLowerCase() || '' : '';
-          const val = sel.options[0]?.value || '';
-          // Skip demographics
-          if (lbl.includes('gender') || lbl.includes('race') || lbl.includes('veteran') || lbl.includes('disability')) continue;
-          // Skip if placeholder value is not empty (has an actual value)
-          if (val && val !== 'Select' && val !== '' && val !== '0') continue;
-          // Pick index 1 (first real option after placeholder)
-          sel.selectedIndex = 1;
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }
-    });
-
-    // Handle combobox/aria dropdowns that are still showing placeholder
-    const comboboxes = page.locator('[role="combobox"], [aria-haspopup="listbox"]');
-    const cbCount = await comboboxes.count();
-    for (let i = 0; i < cbCount; i++) {
-      const combo = comboboxes.nth(i);
-      const info = await combo.evaluate(el => {
-        const text = el.textContent?.trim() || el.getAttribute('aria-label') || '';
-        const isPlaceholder = text === '' || text === 'Select' || text === 'Select...' || text === 'Bitte auswählen' || el.getAttribute('aria-expanded') === 'false';
-        const lbl = el.closest('[class*="field"],[class*="question"],[class*="form-group"],[class*="row"]')
-          ?.querySelector('label')?.textContent?.toLowerCase() || '';
-        return { text, isPlaceholder, lbl };
-      }).catch(() => ({ isPlaceholder: false, lbl: '' }));
-
-      if (!info.isPlaceholder) continue;
-      // Skip demographics
-      if (info.lbl.includes('gender') || info.lbl.includes('race') || info.lbl.includes('veteran') || info.lbl.includes('disability') || info.lbl.includes('pronoun')) continue;
-      // Skip if no label (unknown context)
-      if (!info.lbl) continue;
-
+  const fillText = async (f, value) => {
+    for (const s of [f.id ? '[id="' + f.id + '"]' : null, f.name ? '[name="' + f.name + '"]' : null].filter(Boolean)) {
       try {
-        await combo.click({ timeout: 2000 });
-        await page.waitForTimeout(300);
-        // Type relevant answer based on label
-        const lbl = info.lbl;
-        if (lbl.includes('notice') || lbl.includes('available') || lbl.includes('start')) {
-          await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200);
-        } else if (lbl.includes('english') || lbl.includes('language')) {
-          await page.keyboard.type('Fluent', { delay: 30 }); await page.waitForTimeout(300);
-        } else if (lbl.includes('salary') || lbl.includes('compensation') || lbl.includes('expectation')) {
-          await page.keyboard.type('150', { delay: 30 }); await page.waitForTimeout(300);
-        } else if (lbl.includes('work from') || lbl.includes('location preference') || lbl.includes('where would you like to work') || lbl.includes('where do you want to work')) {
-          await page.keyboard.type('Remote', { delay: 30 }); await page.waitForTimeout(300);
-        } else {
-          await page.keyboard.press('ArrowDown'); await page.waitForTimeout(200);
-        }
-        await page.keyboard.press('Enter');
-        await page.waitForTimeout(400);
-        filled = true;
+        const el = page.locator(s).first();
+        if (await el.count() > 0 && await el.isVisible({ timeout: 1000 }).catch(() => false)) { await el.fill(String(value)); filled = true; return true; }
       } catch {}
     }
-  } catch {}
-
-  // --- PHASE 2.5: Upload resume AFTER all dropdowns (dropdowns clear file inputs) ---
-  try {
-    const cvMd = path.join(ROOT, 'cv.md');
-    let resumePath = await findResumePdf(profile);
-    if (!resumePath) { try { await fs.access(cvMd); resumePath = cvMd; } catch {} }
-    if (resumePath) {
-      const fileInput = page.locator('#resume').first();
-      if (await fileInput.count() > 0) { await fileInput.setInputFiles(resumePath); filled = true; }
-    }
-  } catch {}
-  await page.waitForTimeout(500);
-
-  // --- PHASE 3: Fill basic fields LAST (React re-renders may have cleared them) ---
-  await page.waitForTimeout(500);
-  const firstName = profile.full_name.split(' ')[0] || '';
-  const lastName = profile.full_name.split(' ').slice(1).join(' ') || '';
-
-  // Fill with click + type to trigger React onChange properly
-  const basicFields = [
-    ['#first_name', firstName, false],
-    ['#last_name', lastName, false],
-    ['#email', profile.email, false],
-    ['#phone', profile.phone, false],
-    ['#country', profile.location, false],
-    // Location city (Arize and others use these) — needs Google Places trigger
-    ['input[id*="location" i]:not([id*="country"]):not([id*="remote"])', profile.location, true],
-    ['input[placeholder*="city" i]', profile.location, true],
-    ['input[placeholder*="location" i]', profile.location, true],
-    ['input[name*="location" i]:not([name*="country"])', profile.location, true],
-  ];
-
-  // Helper: fill a location field and attempt Google Places / autocomplete selection
-  const fillLocationField = async (el, val) => {
-    await el.click();
-    await el.fill('');
-    // Type slowly to trigger Google Places API (debounced at ~300ms)
-    await el.type(val.split(',')[0].trim(), { delay: 60 }); // type just the city part first
-    await page.waitForTimeout(1500); // wait for Places API
-    const suggestion = page.locator('.pac-item, .pac-container li, [class*="suggestion"]:visible, [class*="autocomplete"] [role="option"]:visible').first();
-    const hasSuggestion = await suggestion.isVisible({ timeout: 2000 }).catch(() => false);
-    if (hasSuggestion) {
-      await suggestion.click().catch(() => {});
-    } else {
-      // Keyboard fallback: ArrowDown selects first Places suggestion, Enter confirms
-      await page.keyboard.press('ArrowDown');
-      await page.waitForTimeout(400);
-      await page.keyboard.press('Enter');
-    }
-    await page.waitForTimeout(500);
-    // Verify field has value; if empty after Places attempt, type full location directly
-    const currentVal = await el.inputValue().catch(() => '');
-    if (!currentVal || currentVal.trim().length < 3) {
-      await el.fill(val);
-    }
-    filled = true;
+    return false;
   };
 
-  for (const [sel, val, isLocationField] of basicFields) {
-    if (!val) continue;
+  // selectByLabel matches a control by its LABEL, so duplicate-rendered fields
+  // (Greenhouse renders some twice) would make it act on the SAME control twice
+  // (e.g. typing "Canada" → "Canada Canada"). Dedupe: run the label-matched path
+  // at most once per distinct question label.
+  // SAFE-ONLY filling. Every action targets ONE element by its unique id/name and
+  // SETS the value (never appends, never types into comboboxes). This eliminates
+  // the doubled values ("CanadaCanada", "77") and the React "freak-out/blank" that
+  // the old click+keyboard.type combobox path caused. React-select comboboxes
+  // (Greenhouse Country/EEO) are intentionally left for the user to click — the
+  // user reviews every form anyway, so reliability beats over-filling.
+  for (const f of fields) {
+    const value = answers[f.id] !== undefined ? answers[f.id] : answers[f.name];
+    if (value == null || value === '') continue;
+    if (f.type === 'file') continue; // uploads handled below
+    const byId = f.id ? '[id="' + f.id + '"]' : (f.name ? '[name="' + f.name + '"]' : null);
+    if (!byId) continue;
+
     try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 500 })) {
-        if (isLocationField) {
-          await fillLocationField(el, val);
-        } else {
-          await el.click();
-          await el.fill('');
-          await el.type(val, { delay: 10 });
+      if (f.type === 'checkbox') {
+        if (value === 'CHECK') {
+          const el = page.locator(byId).first();
+          if (await el.count() > 0 && !(await el.isChecked().catch(() => false))) { await el.check({ timeout: 2000 }).catch(() => {}); filled = true; }
+        }
+      } else if (f.type === 'radio') {
+        const r = page.locator('input[name="' + f.name + '"][value="' + String(value) + '"]').first();
+        if (await r.count() > 0) { await r.check({ timeout: 2000 }).catch(() => {}); filled = true; }
+      } else if (f.type === 'select') {
+        // Native <select> only (safe). React-select renders as type 'text' and is skipped.
+        const el = page.locator('select' + byId).first();
+        if (await el.count() > 0) {
+          await el.selectOption({ label: String(value) }, { timeout: 1500 })
+            .catch(async () => { await el.selectOption(String(value), { timeout: 1000 }).catch(() => {}); });
+          filled = true;
+        }
+      } else {
+        // text / textarea / email / tel / number — el.fill REPLACES the value, so
+        // it can never produce a doubled string.
+        const el = page.locator(byId).first();
+        if (await el.count() > 0
+            && await el.isVisible({ timeout: 800 }).catch(() => false)
+            && await el.isEditable({ timeout: 800 }).catch(() => false)) {
+          await el.fill(String(value)).catch(() => {});
           filled = true;
         }
       }
-    } catch {}
+    } catch { /* per-field best effort */ }
   }
 
-  // Phase 3 extra: explicit retry for Greenhouse's #job_application_location if still empty
+  // Uploads: role-tailored resume to the first non-cover file input; cover PDF
+  // to the cover input. Mirrors the CLI's ensureUploads guarantee.
   try {
-    const locField = page.locator('#job_application_location, input[autocomplete*="city"], input[autocomplete*="address-level2"]').first();
-    if (await locField.isVisible({ timeout: 500 }).catch(() => false)) {
-      const locVal = await locField.inputValue().catch(() => '');
-      if (!locVal || locVal.trim().length < 3) {
-        // Use profile.location if set; otherwise leave the field for the user.
-        if (profile.location) await fillLocationField(locField, profile.location);
+    const resumePath = await findResumePdf(profile);
+    if (resumePath) {
+      const fileInputs = page.locator('input[type="file"]');
+      const fc = await fileInputs.count().catch(() => 0);
+      let resumeDone = false;
+      for (let i = 0; i < fc; i++) {
+        const el = fileInputs.nth(i);
+        const has = await el.evaluate(n => n.files && n.files.length > 0).catch(() => false);
+        if (has) continue;
+        const ctx = (await el.evaluate(n => {
+          const l = n.id ? document.querySelector('label[for="' + n.id + '"]') : null;
+          return (l ? l.textContent : '') + ' ' + (n.name || '') + ' ' + (n.id || '') + ' ' + (n.getAttribute('aria-label') || '');
+        }).catch(() => '')).toLowerCase();
+        if (/cover|motivation/.test(ctx)) continue;
+        await el.setInputFiles(resumePath).catch(() => {}); resumeDone = true; filled = true; break;
       }
+      if (!resumeDone) { const fi = fileInputs.first(); if (await fi.count() > 0) { await fi.setInputFiles(resumePath).catch(() => {}); filled = true; } }
     }
-  } catch {}
-
-  // Verify and retry any empty required fields
-  await page.waitForTimeout(300);
-  const emptyBasics = await page.evaluate(() => {
-    const checks = [
-      { id: 'first_name', label: 'First Name' },
-      { id: 'last_name', label: 'Last Name' },
-      { id: 'email', label: 'Email' },
-    ];
-    return checks.filter(c => { const el = document.getElementById(c.id); return el && !el.value; });
-  });
-
-  for (const field of emptyBasics) {
-    const val = field.id === 'first_name' ? firstName : field.id === 'last_name' ? lastName : profile.email;
-    try {
-      await page.locator('#' + field.id).click();
-      await page.keyboard.type(val, { delay: 20 });
-    } catch {}
-  }
-
-  // --- PHASE 4: Re-fill any question textareas that React cleared ---
-  // Scan for empty required textareas by label text and re-fill
-  await page.waitForTimeout(500);
-  const emptyTextareas = await page.evaluate(() => {
-    const result = [];
-    document.querySelectorAll('textarea').forEach(ta => {
-      if (ta.value && ta.value.trim()) return; // already filled
-      const lbl = ta.closest('[class*="field"],[class*="question"],[class*="form"]')
-        ?.querySelector('label')
-        || document.querySelector(`label[for="${ta.id}"]`);
-      const text = lbl?.textContent?.trim() || ta.placeholder || '';
-      if (text.length > 5) result.push({ id: ta.id, text: text.substring(0, 200) });
-    });
-    return result;
-  });
-
-  // Profile-derived answers; empty fields produce null and the question is skipped.
-  const aiAnswer = composeAiExperiment(profile);
-  const experienceAnswer = composeAchievement(profile);
-
-  for (const ta of emptyTextareas) {
-    const t = ta.text.toLowerCase();
-    let ans = null;
-    if (t.includes('using ai') || t.includes('ai today') || t.includes('ai experiment') || t.includes('last ai')) ans = aiAnswer;
-    else if (t.includes('driven') || t.includes('adoption') || t.includes('expansion') || t.includes('upsell') || t.includes('post-sale') || t.includes('post sale') || t.includes('aar') || t.includes('$500k') || t.includes('500k')) ans = experienceAnswer;
-    else if (t.includes('salary') || t.includes('compensation') || t.includes('expectation')) ans = composeSalary(profile);
-    else if (t.includes('notice') || t.includes('available to start') || t.includes('when can you start') || t.includes('start date')) ans = 'Immediately / 2 weeks notice.';
-    else if (t.includes('why') || t.includes('motivation') || t.includes('interest')) ans = composeMotivation(profile);
-    else if (t.includes('describe') || t.includes('example') || t.includes('tell us') || t.includes('specific')) ans = experienceAnswer;
-    else if (t.includes('cover letter') || t.includes('additional') || t.includes('anything else')) ans = composeCoverLetter(profile);
-    else if (t.includes('*')) ans = composeProfileSummary(profile);
-
-    if (ans && ta.id) {
-      try {
-        const el = page.locator('#' + ta.id);
-        if (await el.isVisible({ timeout: 1000 })) {
-          await el.click();
-          await el.fill(ans);
-          filled = true;
-        }
-      } catch {}
-    }
-  }
-
-  // --- PHASE 4B: Re-fill empty custom question INPUTS that React cleared ---
-  // Broad scan: any visible empty text input with a meaningful label (not basic fields)
-  const emptyInputs = await page.evaluate(() => {
-    const result = [];
-    const basicIds = new Set(['first_name', 'last_name', 'email', 'phone', 'country', 'resume']);
-    const basicNames = new Set(['first_name', 'last_name', 'email', 'phone']);
-    document.querySelectorAll('input[type="text"], input[type="tel"], input[type="url"], input:not([type]), input[type=""]').forEach(inp => {
-      if (!inp.offsetParent) return; // hidden
-      if (inp.type === 'hidden' || inp.type === 'submit' || inp.type === 'button') return;
-      if (inp.id && basicIds.has(inp.id)) return;
-      if (inp.name && basicNames.has(inp.name)) return;
-      if (inp.value && inp.value.trim().length > 2) return; // already filled
-      // Get label from multiple sources
-      const lbl = document.querySelector(`label[for="${inp.id}"]`)?.textContent?.trim()
-        || inp.closest('[class*="field"],[class*="question"],[class*="form-group"],[class*="row"]')?.querySelector('label')?.textContent?.trim()
-        || inp.placeholder?.trim()
-        || inp.getAttribute('aria-label')?.trim()
-        || '';
-      if (lbl.length > 3) result.push({ id: inp.id || '', name: inp.name || '', text: lbl.substring(0, 200) });
-    });
-    return result;
-  });
-
-  for (const inp of emptyInputs) {
-    const t = inp.text.toLowerCase();
-    let ans = null;
-    if (t.includes('salary') || t.includes('compensation') || t.includes('expectation') || t.includes('pay')) {
-      ans = profile.target_range ? `${profile.target_range}${profile.currency ? ' ' + profile.currency : ''} (flexible on structure)` : null;
-    }
-    else if (t.includes('city') || (t.includes('location') && !t.includes('relocation') && !t.includes('remote') && !t.includes('where'))) ans = profile.location || null;
-    else if (t.includes('linkedin')) ans = profile.linkedin || null;
-    else if (t.includes('notice') || t.includes('available to start') || t.includes('when can you start') || t.includes('start date')) ans = 'Immediately / 2 weeks notice';
-    else if (t.includes('why') || t.includes('motivation')) ans = composeMotivation(profile);
-    else if (t.includes('portfolio') || t.includes('website') || t.includes('github')) ans = profile.portfolio_url || profile.github || profile.linkedin || null;
-    if (ans) {
-      const sel = inp.id ? '#' + inp.id : (inp.name ? `input[name="${inp.name}"]` : null);
-      if (!sel) continue;
-      try {
-        const el = page.locator(sel).first();
-        if (await el.isVisible({ timeout: 1000 })) {
-          await el.click();
-          await el.fill(ans);
-          filled = true;
-        }
-      } catch {}
-    }
-  }
-
-  // --- PHASE 4C: Accept terms/privacy/consent checkboxes (required for Parloa EU Greenhouse) ---
-  // Strategy: use JavaScript directly to set checked state + dispatch events (more reliable than Playwright .check() with React)
-  try {
-    const checkedCount = await page.evaluate(() => {
-      let checked = 0;
-      const keywords = ['terms', 'privacy', 'agree', 'accept', 'consent', 'datenschutz', 'bedingungen', 'dsgvo', 'gdpr'];
-      document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        if (cb.checked) return; // skip already checked
-        // Get surrounding text from label or container
-        const labelEl = document.querySelector(`label[for="${cb.id}"]`) || cb.closest('label');
-        const containerEl = cb.closest('[class*="check"],[class*="field"],[class*="consent"],[class*="agreement"],[class*="gdpr"],[class*="terms"]');
-        const text = (labelEl?.textContent || containerEl?.textContent || cb.parentElement?.textContent || '').toLowerCase();
-        if (keywords.some(k => text.includes(k))) {
-          cb.checked = true;
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
-          cb.dispatchEvent(new Event('input', { bubbles: true }));
-          cb.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-          if (labelEl) labelEl.click();
-          checked++;
-        }
-      });
-      // Also try ARIA role="checkbox" elements
-      document.querySelectorAll('[role="checkbox"][aria-checked="false"], [role="checkbox"]:not([aria-checked="true"])').forEach(el => {
-        const text = (el.textContent || el.getAttribute('aria-label') || el.closest('[class*="field"],[class*="consent"]')?.textContent || '').toLowerCase();
-        if (keywords.some(k => text.includes(k))) {
-          el.setAttribute('aria-checked', 'true');
-          el.click();
-          checked++;
-        }
-      });
-      return checked;
-    }).catch(() => 0);
-    if (checkedCount > 0) {
-      filled = true;
-      await page.waitForTimeout(300);
-    }
-  } catch {}
-
-  // Phase 4C Playwright-native: physically click any unchecked terms/consent checkboxes
-  // (backup for React components that ignore page.evaluate() manipulations)
-  try {
-    const termsRx = /terms|privacy|agree|accept|consent|datenschutz|dsgvo|gdpr|personal data|processing/i;
-    const allCbs = page.locator('input[type="checkbox"]');
-    const cbTotal = await allCbs.count();
-    for (let ci = 0; ci < cbTotal; ci++) {
-      const cb = allCbs.nth(ci);
-      const isChecked = await cb.isChecked().catch(() => true);
-      if (isChecked) continue;
-      const isVis = await cb.isVisible({ timeout: 300 }).catch(() => false);
-      if (!isVis) continue;
-      // Get surrounding text
-      const cbId = await cb.getAttribute('id').catch(() => '');
-      const labelText = cbId
-        ? await page.locator(`label[for="${cbId}"]`).textContent().catch(() => '')
-        : '';
-      const containerText = await cb.evaluate(el => {
-        const c = el.closest('[class*="check"],[class*="field"],[class*="consent"],[class*="terms"],[class*="gdpr"],[class*="agreement"]');
-        return c?.textContent || el.parentElement?.textContent || '';
-      }).catch(() => '');
-      const fullText = (labelText + ' ' + containerText).toLowerCase();
-      // Only click if this is actually a consent/terms checkbox (not a qualification question)
-      if (termsRx.test(fullText) && !fullText.includes('notice period') && !fullText.includes('experience')) {
-        await cb.click({ force: true });
-        await page.waitForTimeout(300);
-        filled = true;
-      }
-    }
+    await attachCoverLetter(page);
   } catch {}
 
   return filled;
 }
 
-async function fillLeverForm(page, profile) {
-  let filled = false;
-  const tryFill = async (selector, value) => {
-    if (!value) return;
-    try {
-      const el = page.locator(selector).first();
-      if (await el.isVisible({ timeout: 2000 })) { await el.fill(value); filled = true; }
-    } catch {}
-  };
-  await tryFill('input[name="name"]', profile.full_name);
-  await tryFill('input[name="email"]', profile.email);
-  await tryFill('input[name="phone"]', profile.phone);
-  await tryFill('input[name="urls[LinkedIn]"], input[name*="linkedin" i]', profile.linkedin);
-  await tryFill('input[name*="location" i]', profile.location);
-
-  try {
-    const cvPdf = path.join(ROOT, 'output', 'cv.pdf');
-    const cvMd = path.join(ROOT, 'cv.md');
-    let resumePath = null;
-    try { await fs.access(cvPdf); resumePath = cvPdf; } catch {
-      try { await fs.access(cvMd); resumePath = cvMd; } catch {}
-    }
-    if (resumePath) {
-      const fileInput = page.locator('input[type="file"]').first();
-      if (await fileInput.count() > 0) { await fileInput.setInputFiles(resumePath); filled = true; }
-    }
-  } catch {}
-  return filled;
-}
-
-async function fillAshbyForm(page, profile) {
-  let filled = false;
-  const tryFill = async (selector, value) => {
-    if (!value) return;
-    try {
-      const el = page.locator(selector).first();
-      if (await el.isVisible({ timeout: 2000 })) { await el.fill(value); filled = true; }
-    } catch {}
-  };
-  await tryFill('input[name*="name" i]:not([name*="last"]):not([name*="company"])', profile.full_name);
-  await tryFill('input[name*="email" i], input[type="email"]', profile.email);
-  await tryFill('input[name*="phone" i], input[type="tel"]', profile.phone);
-  await tryFill('input[name*="linkedin" i]', profile.linkedin);
-
-  try {
-    const cvPdf = path.join(ROOT, 'output', 'cv.pdf');
-    const cvMd = path.join(ROOT, 'cv.md');
-    let resumePath = null;
-    try { await fs.access(cvPdf); resumePath = cvPdf; } catch {
-      try { await fs.access(cvMd); resumePath = cvMd; } catch {}
-    }
-    if (resumePath) {
-      const fileInput = page.locator('input[type="file"]').first();
-      if (await fileInput.count() > 0) { await fileInput.setInputFiles(resumePath); filled = true; }
-    }
-  } catch {}
-  return filled;
-}
+async function fillGenericForm(page, profile)        { return fillFormViaResolver(page, profile); }
+async function fillGreenhouseForm(page, profile)     { return fillFormViaResolver(page, profile); }
+async function fillLeverForm(page, profile)          { return fillFormViaResolver(page, profile); }
+async function fillAshbyForm(page, profile)          { return fillFormViaResolver(page, profile); }
+async function fillWorkableForm(page, profile)       { return fillFormViaResolver(page, profile); }
+async function fillRecruiteeForm(page, profile)      { return fillFormViaResolver(page, profile); }
+async function fillSmartRecruitersForm(page, profile){ return fillFormViaResolver(page, profile); }
 
 // ── Kimi extract (for onboarding) ────────────────────────────────────────────
 
@@ -2469,7 +2068,7 @@ Resume:
 ${resumeText.slice(0, 12000)}`;
 
   const body = JSON.stringify({
-    model: 'moonshot-v1-8k',
+    model: process.env.KIMI_MODEL || 'moonshot-v1-8k',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.1,
   });
@@ -2502,6 +2101,53 @@ ${resumeText.slice(0, 12000)}`;
     req.write(body);
     req.end();
   });
+}
+
+// ── Kimi smart-fill (LLM reasons over every field) ───────────────────────────
+// Returns a { fieldId: value } map. Kimi sees each field's label + options + the
+// candidate's real facts/resume, so it matches quirky dropdowns ("Middle Eastern"
+// → "...MENA") and drafts grounded essays. Empty {} when KIMI_API_KEY is unset
+// (caller then keeps the deterministic resolver answers — graceful fallback).
+let _cvMdCache;
+async function kimiFillFields(fields, RES, pkg) {
+  const key = process.env.KIMI_API_KEY || '';
+  if (!key || !fields?.length) return {};
+  const base = (process.env.KIMI_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '');
+  const model = process.env.KIMI_MODEL || 'moonshotai/kimi-k2.6';
+  const C = RES.candidate;
+  const name = `${C.firstName} ${C.lastName}`.trim() || 'the candidate';
+  if (_cvMdCache === undefined) { try { _cvMdCache = readFileSync(path.join(ROOT, 'cv.md'), 'utf8').slice(0, 6000); } catch { _cvMdCache = ''; } }
+  const FACTS = [
+    `Name: ${C.firstName} ${C.lastName}`, `Email: ${C.email}`, `Phone: ${C.phone}`,
+    `Location: ${C.location} (City: ${C.city}; Country: ${C.country})`, `LinkedIn: ${C.linkedin}`,
+    `Education: ${JSON.stringify(C.education)}`, `Work authorization: ${JSON.stringify(C.workAuth)}`,
+    `EEO / voluntary: ${JSON.stringify(C.eeo)}`, `Logistics: ${JSON.stringify(C.appAnswers)}`,
+    `Salary target: ${RES.salaryFallback}`,
+  ].join('\n');
+  const compact = fields.map(f => ({ id: f.id, label: (f.label || '').slice(0, 200), type: f.type, options: (f.options || []).slice(0, 50) }));
+  const job = `${pkg?.company || ''} — ${pkg?.role || ''}\n${pkg?.why || ''}`.trim();
+  const sys = `You fill job application forms AS the candidate ${name}, first person. RULES:
+- Use ONLY the candidate FACTS and RESUME. NEVER invent employers, titles, dates, degrees, or metrics.
+- select/radio: choose EXACTLY ONE string copied verbatim from that field's "options". If none truly fit, "".
+- text/tel/email/number: short factual answers from FACTS (name, email, phone, city, salary, yes/no logistics).
+- textarea/essays: 3-5 honest sentences grounded in RESUME + JOB; if the resume lacks the asked experience, say so briefly and pivot to transferable strengths.
+- Respect any character limit stated in a label. NEVER pick a "prefer not to say"/decline option. If you can't ground an answer, "". No markdown, no em-dashes.
+Return ONLY a JSON object mapping field id to value. No prose, no fences.`;
+  const usr = `CANDIDATE FACTS:\n${FACTS}\n\nRESUME:\n${_cvMdCache}\n\nJOB:\n${job}\n\nFIELDS (JSON):\n${JSON.stringify(compact)}`;
+  try {
+    const r = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], temperature: 0.3, max_tokens: 2200 }),
+    });
+    if (!r.ok) { console.log('[kimi-fill] HTTP', r.status); return {}; }
+    const j = await r.json();
+    const m = (j.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/);
+    if (!m) return {};
+    const obj = JSON.parse(m[0]);
+    for (const k of Object.keys(obj)) if (typeof obj[k] === 'string') obj[k] = obj[k].replace(/—/g, '-');
+    return obj;
+  } catch (e) { console.log('[kimi-fill] failed:', e.message); return {}; }
 }
 
 // ── HTML ──────────────────────────────────────────────────────────────────────
@@ -5047,7 +4693,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     </div>
     <div class="modal-threshold">
       <span class="threshold-label">Minimum score:</span>
-      <input class="threshold-slider" type="range" id="apply-threshold" min="3.0" max="5.0" step="0.1" value="4.0" aria-label="Minimum score threshold for batch apply" oninput="updateApplyList()">
+      <input class="threshold-slider" type="range" id="apply-threshold" min="1.0" max="5.0" step="0.1" value="1.0" aria-label="Minimum score threshold for batch apply" oninput="updateApplyList()">
       <span class="threshold-val" id="apply-threshold-val">4.0</span>
     </div>
     <div class="modal-select-bar">
@@ -5548,13 +5194,15 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   function updateApplyBanner(apps) {
-    const ready = apps.filter(a => a.status === 'evaluated' && parseFloat(a.score) >= 4.0);
+    // Threshold removed at user request — all evaluated roles count as "ready to apply"
+    // (we vet each one during the apply/pipeline step anyway). Was: && score >= 4.0.
+    const ready = apps.filter(a => a.status === 'evaluated');
     const banner = document.getElementById('apply-banner');
     if (ready.length > 0) {
       banner.classList.add('show');
       document.getElementById('apply-banner-title').textContent = ready.length + ' role' + (ready.length > 1 ? 's' : '') + ' ready to apply';
       const top3 = ready.sort((a,b) => parseFloat(b.score) - parseFloat(a.score)).slice(0,3).map(a => a.company).join(', ');
-      document.getElementById('apply-banner-sub').textContent = 'Top: ' + top3 + ' — scored 4.0+ and waiting';
+      document.getElementById('apply-banner-sub').textContent = 'Top: ' + top3 + ' — evaluated and waiting for review';
     } else {
       banner.classList.remove('show');
     }
@@ -7678,7 +7326,7 @@ async function handleRequest(req, res) {
       if (!queue.length) return sendJsonError(res, 400, 'no valid URLs found in reports');
 
       const safeMode = mode === 'manual' ? 'manual' : 'auto';
-      autoApplyState = { active: true, mode: safeMode, queue, current: null, completed: [], startedAt: new Date().toISOString(), stoppable: true };
+      autoApplyState = { active: true, mode: safeMode, queue, current: null, completed: [], startedAt: new Date().toISOString(), stoppable: true, skipCurrent: false };
       setFastPolling(true);
 
       runAutoApply().catch(err => {
@@ -7714,6 +7362,14 @@ async function handleRequest(req, res) {
     autoApplyState.stoppable = false;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // ── API: Auto-apply skip current role (assisted mode) ──
+  if (pathname === '/api/auto-apply/skip' && req.method === 'POST') {
+    autoApplyState.skipCurrent = true;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, skipped: autoApplyState.current ? autoApplyState.current.num : null }));
     return;
   }
 
