@@ -2,18 +2,24 @@
 /**
  * auto-apply.mjs — Autonomous Application Engine (Phase 8)
  *
- * Finds assembled packages with "Evaluated" status in applications.md,
- * fills the form via Playwright, runs Kimi AI pre-submit review, submits.
- * Updates tracker to "Applied" on success.
+ * Finds assembled packages with "Evaluated" status in applications.md, fills the
+ * form via Playwright using LOCAL answer resolution (no LLM): per-role package
+ * answers (output/autoapply/{num}.json) + the global Q&A bank (qa-bank.json) +
+ * the profile post-processor, then a deterministic pre-submit validator, then
+ * submits. Flips tracker to "Applied" ONLY on confirmation, else "Submitted?".
  *
  * Usage:
  *   node auto-apply.mjs                     → process all eligible packages
  *   node auto-apply.mjs --num 062           → process single package
  *   node auto-apply.mjs --dry-run           → fill but do NOT submit
- *   node auto-apply.mjs --threshold 4.0     → min score (default: 4.0)
+ *   node auto-apply.mjs --threshold 4.0     → min score (default: 4.0; use 0 for all)
  *   node auto-apply.mjs --workers 1         → parallel instances (default: 1)
- *   node auto-apply.mjs --no-review         → skip Kimi pre-submit review
+ *   node auto-apply.mjs --no-review         → skip the deterministic pre-submit validator
+ *   node auto-apply.mjs --dump-fields       → (with --dry-run) list every extracted field
  *   node auto-apply.mjs --verbose           → detailed output
+ *
+ * No API keys required. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH if the Playwright
+ * headless-shell isn't installed (points at an existing Chromium binary).
  */
 
 import {
@@ -23,6 +29,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import { chromium } from 'playwright';
+import { createResolver, extractFieldsInPage } from './autoapply-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = __dirname;
@@ -44,7 +51,8 @@ const TODAY     = new Date().toISOString().split('T')[0];
 
 // ─── Paths ─────────────────────────────────────────────────────────────────────
 
-const PACKAGES_DIR = join(PROJECT_DIR, 'output', 'packages');
+const AUTOAPPLY_DIR = join(PROJECT_DIR, 'output', 'autoapply');   // JSON package format
+const SHOTS_DIR    = join(PROJECT_DIR, 'output', 'autoapply', 'screenshots');
 const TRACKER_FILE = join(PROJECT_DIR, 'data', 'applications.md');
 const LOG_DIR      = join(PROJECT_DIR, 'batch', 'logs');
 const LOG_FILE     = join(LOG_DIR, `auto-apply-${TODAY}.log`);
@@ -54,55 +62,15 @@ const GENERIC_RESUME_PDF = join(PROJECT_DIR, 'output', 'cv.pdf');
 const PROFILE_FILE = join(PROJECT_DIR, 'config', 'profile.yml');
 const TMP_DIR      = join(PROJECT_DIR, 'batch', 'tmp');
 
-// ─── Candidate identity (loaded from config/profile.yml — no PII in source) ──
-// Uses the same regex-based parser as dashboard-web/server.mjs:loadProfile.
-// Avoids a YAML dependency for a config that's just simple key/value pairs.
-
-function loadCandidateIdentity() {
-  if (!existsSync(PROFILE_FILE)) {
-    throw new Error(`config/profile.yml not found. Copy config/profile.example.yml and fill in your details.`);
-  }
-  const yml = readFileSync(PROFILE_FILE, 'utf8');
-  // Scope reads to the candidate: block so we don't accidentally pick up
-  // values from other top-level sections that share field names.
-  const candidateBlock = yml.match(/^candidate:\s*\n([\s\S]*?)(?=^\S|\Z)/m);
-  const scope = candidateBlock ? candidateBlock[1] : yml;
-  const get = (key) => {
-    const m = scope.match(new RegExp(`^\\s+${key}:\\s*"?([^"\\n]+?)"?\\s*$`, 'm'));
-    return m ? m[1].trim() : '';
-  };
-
-  const fullName = get('full_name');
-  const email    = get('email');
-  const phone    = get('phone');
-  const location = get('location');
-  const linkedinRaw = get('linkedin');
-  const linkedin = linkedinRaw && !/^https?:\/\//i.test(linkedinRaw)
-    ? `https://${linkedinRaw.replace(/^\/+/, '')}`
-    : linkedinRaw;
-
-  const missing = Object.entries({ full_name: fullName, email, phone }).filter(([, v]) => !v).map(([k]) => k);
-  if (missing.length) {
-    throw new Error(`config/profile.yml missing required fields under 'candidate:': ${missing.join(', ')}`);
-  }
-
-  const [firstName, ...rest] = fullName.split(/\s+/);
-  const lastName = rest.join(' ');
-  const locParts = location.split(',').map(s => s.trim()).filter(Boolean);
-
-  return {
-    firstName: firstName || '',
-    lastName:  lastName  || '',
-    email,
-    phone,
-    linkedin,
-    location,
-    city:    locParts[0] || '',
-    country: locParts[locParts.length - 1] || '',
-  };
-}
-
-const CANDIDATE = loadCandidateIdentity();
+// ─── Shared resolver (single source of truth — see autoapply-core.mjs) ───────
+// All answer-resolution logic lives in autoapply-core.mjs so the CLI and the
+// dashboard autopilot behave identically. We destructure what this file needs.
+const R = createResolver({ projectDir: PROJECT_DIR });
+const CANDIDATE = R.candidate;
+const {
+  resolveAnswers, mergeIdentity, applyProfileAnswers, validateApplication,
+  detectAts, norm,
+} = R;
 
 // ─── Resume PDF path (derived from profile, with legacy fallback) ────────────
 
@@ -192,37 +160,10 @@ function findEvaluatedEntries() {
   return candidates;
 }
 
-function findPackageDir(num) {
-  if (!existsSync(PACKAGES_DIR)) return null;
-  const match = readdirSync(PACKAGES_DIR).find(d => d.startsWith(num + '-') || d.startsWith(parseInt(num, 10) + '-'));
-  return match ? join(PACKAGES_DIR, match) : null;
-}
-
-function readPackage(pkgDir) {
-  const ctxPath = join(pkgDir, 'context.md');
-  if (!existsSync(ctxPath)) return null;
-
-  const ctx = readFileSync(ctxPath, 'utf8');
-  const urlMatch = ctx.match(/\*\*URL:\*\*\s*(https?:\/\/[^\s\n]+)/);
-  const url = urlMatch?.[1]?.trim() || '';
-
-  const clPath = join(pkgDir, 'cover-letter.md');
-  const coverLetter = existsSync(clPath) ? readFileSync(clPath, 'utf8') : '';
-
-  return { url, coverLetter, ctx };
-}
-
-// ─── ATS detection ────────────────────────────────────────────────────────────
-
-function detectAts(url) {
-  if (!url) return 'unknown';
-  if (/greenhouse\.io/i.test(url))       return 'greenhouse';
-  if (/ashbyhq\.com/i.test(url))         return 'ashby';
-  if (/lever\.co/i.test(url))            return 'lever';
-  if (/workday\.com|workdayjobs/i.test(url)) return 'workday';
-  if (/smartrecruiters/i.test(url))      return 'smartrecruiters';
-  return 'generic';
-}
+// Package lookup + normalization now live in autoapply-core.mjs (shared).
+// Thin wrappers preserve the call sites in applyToPackage.
+function findPackage(num) { return R.findPackage(num); }
+function readPackage(ref) { return ref?.kind === 'json' ? R.readPackageJson(ref.path) : null; }
 
 // ─── Resume PDF ───────────────────────────────────────────────────────────────
 
@@ -249,202 +190,74 @@ function writeCoverLetterFile(num, content) {
   return path;
 }
 
-// ─── Kimi API ─────────────────────────────────────────────────────────────────
+// ─── Guarantee CV/cover uploads ────────────────────────────────────────────────
 
-async function callKimi(system, user, maxTokens = 2000) {
-  const apiKey = process.env.KIMI_API_KEY;
-  if (!apiKey) throw new Error('KIMI_API_KEY not set');
+// After the labeled-field pass, attach the resume (and cover) to any file input
+// that's still empty, so an oddly-labeled upload control never silently skips.
+async function ensureUploads(page, resumePdf, coverPdf, num) {
+  const out = { resume: '', cover: '' };
+  try {
+    const inputs = page.locator('input[type="file"]');
+    const count = await inputs.count();
 
-  const base = (process.env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1').replace(/\/$/, '');
-  const resp = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: 'moonshot-v1-128k',
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      temperature: 0.1,
-      max_tokens: maxTokens,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
+    // First pass: collect each empty file input with its label/context, so we
+    // can resolve ambiguous ("Attach"/"Attach") pairs by ORDER afterwards.
+    const empties = [];
+    for (let i = 0; i < count; i++) {
+      const el = inputs.nth(i);
+      const hasFile = await el.evaluate(n => n.files && n.files.length > 0).catch(() => false);
+      if (hasFile) continue;
+      const ctx = norm(await el.evaluate(n => {
+        const lbl = n.id ? document.querySelector(`label[for="${n.id}"]`) : null;
+        return `${lbl?.textContent || ''} ${n.name || ''} ${n.id || ''} ${n.getAttribute('aria-label') || ''}`;
+      }).catch(() => ''));
+      empties.push({ i, el, ctx, isCover: /cover|motivation/.test(ctx), isResume: /resume|cv|curriculum/.test(ctx) });
+    }
 
-  if (!resp.ok) throw new Error(`Kimi ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-  const json = await resp.json();
-  return json.choices?.[0]?.message?.content || '';
-}
-
-// ─── Generate form answers via Kimi ──────────────────────────────────────────
-
-async function generateAnswers(fields, pkg, jobCtx) {
-  const profile = existsSync(PROFILE_FILE) ? readFileSync(PROFILE_FILE, 'utf8') : '';
-
-  const fullName = `${CANDIDATE.firstName} ${CANDIDATE.lastName}`.trim();
-  const system = `You are an expert job application assistant filling out forms for ${fullName}.
-Rules:
-- NEVER fabricate metrics or experiences not in the profile.
-- NEVER use em-dashes (—). Use commas or periods instead.
-- Be direct, confident, and concise.
-- Answer in first person as ${CANDIDATE.firstName}.
-- For salary: return "Competitive / Market rate".
-- For "How did you hear about us": return "LinkedIn".`;
-
-  const user = `Fill these application form fields for ${fullName}.
-
-ROLE CONTEXT: ${jobCtx}
-
-CANDIDATE PROFILE (profile.yml):
-${profile.slice(0, 4000)}
-
-COVER LETTER FOR THIS ROLE:
-${pkg.coverLetter?.slice(0, 2000) || '(not available)'}
-
-FORM FIELDS:
-${JSON.stringify(fields, null, 2)}
-
-Return ONLY a valid JSON object mapping each field's "id" to its fill value.
-Rules per field type:
-- file (resume): "FILE_UPLOAD_RESUME"
-- file (cover letter): "FILE_UPLOAD_COVER_LETTER"
-- checkbox (consent/privacy): "CHECK"
-- select: return exactly one of the listed options
-- radio: return exactly one of the listed options
-- text/email/tel: direct value
-- textarea: 2-4 sentence answer (or adapt from cover letter for "why this company" questions)
-- location/city: "${CANDIDATE.location}" or "${CANDIDATE.city}" or "${CANDIDATE.country}" as appropriate
-- first_name: "${CANDIDATE.firstName}", last_name: "${CANDIDATE.lastName}", email: "${CANDIDATE.email}", phone: "${CANDIDATE.phone}"
-- linkedin: "${CANDIDATE.linkedin}"
-
-Return ONLY the JSON object, no explanation or markdown.`;
-
-  const raw = await callKimi(system, user, 2500);
-  const match = raw.match(/\{[\s\S]+\}/);
-  if (!match) throw new Error(`No JSON in Kimi response: ${raw.slice(0, 300)}`);
-  return JSON.parse(match[0]);
-}
-
-// ─── Kimi pre-submit review ───────────────────────────────────────────────────
-
-async function reviewApplication(filledData, jobCtx, pkg) {
-  const candidateName = `${CANDIDATE.firstName} ${CANDIDATE.lastName}`.trim();
-  const system = `You are a quality reviewer for ${candidateName}'s job applications.
-Respond with EXACTLY "APPROVED" or "FLAGGED: [reason]" — nothing else.`;
-
-  const user = `Review this application before submission.
-
-ROLE: ${jobCtx}
-
-FILLED FORM DATA:
-${JSON.stringify(filledData, null, 2)}
-
-COVER LETTER:
-${pkg.coverLetter?.slice(0, 1000) || '(none)'}
-
-Check for: wrong name/email, empty required fields, obvious factual errors, em-dashes in answers.
-Respond with APPROVED or FLAGGED: [reason]`;
-
-  const raw = (await callKimi(system, user, 200)).trim();
-  return {
-    approved: raw.startsWith('APPROVED'),
-    reason: raw.startsWith('FLAGGED:') ? raw.replace('FLAGGED:', '').trim() : raw,
-  };
-}
-
-// ─── Form field extractor (runs in page context) ──────────────────────────────
-
-async function extractFields(page) {
-  return page.evaluate(() => {
-    const fields = [];
-    const seen = new Set();
-
-    const findLabel = (el) => {
-      if (el.id) {
-        const lbl = document.querySelector(`label[for="${el.id}"]`);
-        if (lbl) return lbl.textContent.replace(/\s+/g, ' ').trim();
-      }
-      const parent = el.closest('[class*="field"], [class*="question"], [class*="input"], li, .field-row');
-      if (parent) {
-        const lbl = parent.querySelector('label, legend');
-        if (lbl) return lbl.textContent.replace(/\s+/g, ' ').trim();
-      }
-      return el.placeholder || el.getAttribute('aria-label') || '';
+    const attach = async (el, file, kind, i) => {
+      await el.setInputFiles(file).catch(() => {});
+      out[kind] = file;
+      logDetail(num, `Fallback-attached ${kind} to file input #${i} (${kind === 'cover' ? coverPdf : resumePdf})`);
     };
 
-    const elements = document.querySelectorAll(
-      'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]), textarea, select'
-    );
-
-    for (const el of elements) {
-      const id   = el.id || el.name || `field_${fields.length}`;
-      const name = el.name || el.id || '';
-      if (seen.has(id + name)) continue;
-      seen.add(id + name);
-
-      const type = el.tagName === 'SELECT' ? 'select'
-        : el.tagName === 'TEXTAREA' ? 'textarea'
-        : (el.type || 'text').toLowerCase();
-
-      const options = type === 'select'
-        ? Array.from(el.options)
-            .map(o => o.text.trim())
-            .filter(t => t && !/^(--|select|choose|pick)/i.test(t))
-        : type === 'radio'
-        ? Array.from(document.querySelectorAll(`[name="${el.name}"]`)).map(r => r.value)
-        : [];
-
-      fields.push({
-        id, name, type,
-        label: findLabel(el),
-        options,
-        required: el.required || el.getAttribute('aria-required') === 'true',
-      });
+    // 1) Honor explicitly-labeled inputs first.
+    for (const e of empties) {
+      if (e.isResume && !out.resume) await attach(e.el, resumePdf, 'resume', e.i);
+      else if (e.isCover && coverPdf && !out.cover) await attach(e.el, coverPdf, 'cover', e.i);
     }
-
-    return fields;
-  });
-}
-
-// ─── Apply hardcoded identity values ─────────────────────────────────────────
-
-function mergeIdentity(answers, fields) {
-  const identity = {
-    first_name: CANDIDATE.firstName, firstname: CANDIDATE.firstName,
-    last_name:  CANDIDATE.lastName,  lastname:  CANDIDATE.lastName,
-    email:      CANDIDATE.email,     phone:     CANDIDATE.phone,
-    phone_number: CANDIDATE.phone,   linkedin_profile: CANDIDATE.linkedin,
-    linkedin:   CANDIDATE.linkedin,  'applicant[first_name]': CANDIDATE.firstName,
-    'applicant[last_name]': CANDIDATE.lastName, 'applicant[email]': CANDIDATE.email,
-    'applicant[phone]':     CANDIDATE.phone,
-  };
-
-  for (const [key, val] of Object.entries(identity)) {
-    if (fields.some(f => f.id === key || f.name === key)) {
-      answers[key] = val;
+    // 2) Fill remaining AMBIGUOUS inputs ("Attach"/"Attach") by order:
+    //    resume first, cover next. (Labeled inputs were handled in pass 1.)
+    for (const e of empties) {
+      if (e.isResume || e.isCover) continue;
+      if (!out.resume)                 await attach(e.el, resumePdf, 'resume', e.i);
+      else if (coverPdf && !out.cover) await attach(e.el, coverPdf, 'cover', e.i);
     }
+  } catch (err) {
+    logDetail(num, `ensureUploads error: ${err.message}`);
   }
-  return answers;
+  return out;
 }
 
 // ─── Fill one field ───────────────────────────────────────────────────────────
 
-async function fillField(page, field, value, resumePdf, coverTxt, num) {
+async function fillField(page, field, value, resumePdf, coverPdf, num) {
   if (!value || value === '') return;
 
-  const selector = field.id
-    ? `#${CSS.escape ? CSS.escape(field.id) : field.id}`
-    : `[name="${field.name}"]`;
+  // Attribute selector avoids needing CSS.escape (which doesn't exist in Node).
+  const selector = field.id ? `[id="${field.id}"]` : `[name="${field.name}"]`;
 
   try {
     if (field.type === 'file') {
-      const isResume = /resume|cv/i.test(field.label + field.id + field.name);
-      const isCL     = /cover.?letter|cover_letter/i.test(field.label + field.id + field.name);
+      const isResume = /resume|cv|curriculum/i.test(field.label + field.id + field.name);
+      const isCL     = /cover.?letter|cover_letter|motivation/i.test(field.label + field.id + field.name);
       if (isResume && value === 'FILE_UPLOAD_RESUME') {
         const el = page.locator(`${selector}, [name="${field.name}"]`).first();
         await el.setInputFiles(resumePdf);
-        logDetail(num, `Uploaded resume PDF`);
-      } else if (isCL && value === 'FILE_UPLOAD_COVER_LETTER') {
+        logDetail(num, `Uploaded resume PDF: ${resumePdf}`);
+      } else if (isCL && value === 'FILE_UPLOAD_COVER_LETTER' && coverPdf) {
         const el = page.locator(`${selector}, [name="${field.name}"]`).first();
-        await el.setInputFiles(coverTxt);
-        logDetail(num, `Uploaded cover letter`);
+        await el.setInputFiles(coverPdf);
+        logDetail(num, `Uploaded cover letter PDF: ${coverPdf}`);
       }
     } else if (field.type === 'select') {
       const el = page.locator(`${selector}, select[name="${field.name}"]`).first();
@@ -555,30 +368,39 @@ async function applyToPackage(candidate) {
   log(`[${tag}] ${company} — ${role} (${score}/5)`);
 
   // 1. Find package (by report/package number, NOT tracker #)
-  const pkgDir = findPackageDir(packageNum);
-  if (!pkgDir) {
-    log(`[${tag}] No package directory — skipping`, 'WARN');
-    return { num, packageNum, status: 'skipped', reason: 'no package dir' };
+  const pkgRef = findPackage(packageNum);
+  if (!pkgRef) {
+    log(`[${tag}] No package (output/autoapply/${parseInt(packageNum, 10)}.json) — skipping`, 'WARN');
+    return { num, packageNum, status: 'skipped', reason: 'no package' };
   }
 
-  const pkg = readPackage(pkgDir);
+  const pkg = readPackage(pkgRef);
   if (!pkg?.url) {
-    log(`[${tag}] No URL in package context — skipping`, 'WARN');
+    log(`[${tag}] No URL in package — skipping`, 'WARN');
     return { num, packageNum, status: 'skipped', reason: 'no url' };
   }
 
   const ats    = detectAts(pkg.url);
-  const jobCtx = `${company} — ${role} (Score: ${score}/5)`;
+  const salaryNote = pkg.salary ? ` | Salary: ${pkg.salary}` : '';
+  const jobCtx = `${company} — ${role} (Score: ${score}/5)${salaryNote}`;
   logDetail(packageNum, `ATS: ${ats} | URL: ${pkg.url}`);
 
-  // 2. Ensure resume PDF
-  let resumePdf;
-  try { resumePdf = ensureResumePdf(); } catch (err) {
-    log(`[${tag}] Resume PDF unavailable: ${err.message}`, 'ERROR');
-    return { num, packageNum, status: 'error', reason: err.message };
+  // 2. Resolve resume PDF — prefer the per-role tailored CV from the package,
+  // fall back to the generic resume only if the tailored one is missing.
+  let resumePdf = pkg.cvPath && existsSync(pkg.cvPath) ? pkg.cvPath : '';
+  if (!resumePdf) {
+    try { resumePdf = ensureResumePdf(); } catch (err) {
+      log(`[${tag}] Resume PDF unavailable: ${err.message}`, 'ERROR');
+      return { num, packageNum, status: 'error', reason: err.message };
+    }
+    logDetail(packageNum, `No per-role CV at ${pkg.cvPath || '(none)'} — using generic resume ${resumePdf}`);
+  } else {
+    logDetail(packageNum, `Resume (per-role): ${resumePdf}`);
   }
 
-  const coverTxt = writeCoverLetterFile(packageNum, pkg.coverLetter || '');
+  // Cover letter: use the per-role cover PDF from the package directly.
+  const coverPdf = pkg.coverPath && existsSync(pkg.coverPath) ? pkg.coverPath : '';
+  if (coverPdf) logDetail(packageNum, `Cover (per-role): ${coverPdf}`);
 
   // 3. Launch browser
   const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
@@ -610,8 +432,8 @@ async function applyToPackage(candidate) {
       return { num, packageNum, status: 'skipped', reason: 'no fillable form found' };
     }
 
-    // 6. Extract fields
-    const fields = await extractFields(activePage);
+    // 6. Extract fields (shared extractor — identical to the dashboard)
+    const fields = await activePage.evaluate(extractFieldsInPage);
     if (fields.length === 0) {
       await browser.close();
       log(`[${tag}] No input fields detected — skipping`, 'WARN');
@@ -620,24 +442,17 @@ async function applyToPackage(candidate) {
 
     logDetail(packageNum, `${fields.length} fields: ${fields.slice(0, 5).map(f => f.label || f.id).join(', ')}${fields.length > 5 ? '…' : ''}`);
 
-    // 7. Generate answers via Kimi (soft-fail in dry-run when key missing)
-    let answers;
-    const hasKimiKey = !!process.env.KIMI_API_KEY;
-    if (!hasKimiKey && DRY_RUN) {
-      logDetail(packageNum, 'KIMI_API_KEY not set — dry-run will show identity-only fields');
-      answers = {};
-    } else {
-      try {
-        answers = await generateAnswers(fields, pkg, jobCtx);
-      } catch (err) {
-        await browser.close();
-        log(`[${tag}] Kimi fill generation failed: ${err.message}`, 'ERROR');
-        return { num, packageNum, status: 'error', reason: err.message };
-      }
-    }
+    // 7. Resolve answers locally (NO LLM): per-role package answers + Q&A bank +
+    // role-pitch fallback for open essays. Identity + EEO/education filled below.
+    let answers = resolveAnswers(fields, pkg);
 
     // Hardcoded identity overrides
     answers = mergeIdentity(answers, fields);
+
+    // Profile-driven overrides: fill EEO/work-auth/education/logistics from
+    // profile.yml and replace any "Prefer not to say" with the real answer.
+    const overrides = applyProfileAnswers(answers, fields, packageNum);
+    if (overrides.length) logDetail(packageNum, `Profile overrides: ${overrides.join('; ')}`);
 
     logDetail(packageNum, `Generated ${Object.keys(answers).length} answers`);
 
@@ -648,6 +463,14 @@ async function applyToPackage(candidate) {
         const label = f?.label || k;
         log(`    ${label}: ${String(v).slice(0, 80)}`);
       }
+      if (process.argv.includes('--dump-fields')) {
+        log(`[${tag}] ALL EXTRACTED FIELDS:`);
+        for (const f of fields) {
+          const filled = (answers[f.id] ?? answers[f.name]) !== undefined ? ' ✓' : '';
+          log(`    [${f.type}]${f.required ? '*' : ''} ${f.label || f.id}${filled}`);
+          if (f.options?.length) log(`        opts: ${f.options.slice(0, 14).join(' | ')}`);
+        }
+      }
       await browser.close();
       return { num, packageNum, status: 'dry-run', company, role, fieldsCount: fields.length };
     }
@@ -657,24 +480,28 @@ async function applyToPackage(candidate) {
     for (const field of fields) {
       const value = answers[field.id] ?? answers[field.name];
       if (value === undefined || value === null || value === '') continue;
-      await fillField(activePage, field, value, resumePdf, coverTxt, packageNum);
+      await fillField(activePage, field, value, resumePdf, coverPdf, packageNum);
       filledLog[field.label || field.id] = String(value).slice(0, 100);
     }
 
-    // 9. Kimi pre-submit review
+    // 8b. Guarantee uploads — never leave the CV (or cover) un-attached because a
+    // file input wasn't clearly labeled. Attach the resume to the first empty
+    // file input, and the cover PDF to the next, as a fallback.
+    const uploadResult = await ensureUploads(activePage, resumePdf, coverPdf, packageNum);
+    if (uploadResult.resume) filledLog['__resume_uploaded'] = uploadResult.resume;
+    if (uploadResult.cover)  filledLog['__cover_uploaded']  = uploadResult.cover;
+
+    // 9. Deterministic pre-submit validation (no LLM): required fields filled,
+    // email present, no em-dashes, no lingering "Prefer not to say".
     if (!NO_REVIEW) {
-      try {
-        const review = await reviewApplication(filledLog, jobCtx, pkg);
-        logDetail(packageNum, `Review: ${review.approved ? 'APPROVED' : `FLAGGED — ${review.reason}`}`);
-        if (!review.approved) {
-          await browser.close();
-          log(`[${tag}] Flagged by AI review: ${review.reason}`, 'WARN');
-          return { num, packageNum, status: 'flagged', reason: review.reason };
-        }
-        log(`[${tag}] AI review: APPROVED`);
-      } catch (err) {
-        logDetail(packageNum, `Review failed (proceeding): ${err.message}`);
+      const review = validateApplication(answers, fields);
+      logDetail(packageNum, `Validation: ${review.approved ? 'OK' : `FLAGGED — ${review.reason}`}`);
+      if (!review.approved) {
+        await browser.close();
+        log(`[${tag}] Flagged by validator: ${review.reason}`, 'WARN');
+        return { num, packageNum, status: 'flagged', reason: review.reason };
       }
+      log(`[${tag}] Validation: OK`);
     }
 
     // 10. Submit
@@ -689,6 +516,7 @@ async function applyToPackage(candidate) {
       '[data-submit="true"]',
     ];
 
+    const urlBeforeSubmit = activePage.url();
     let submitted = false;
     for (const sel of submitSelectors) {
       const btn = activePage.locator(sel).last();
@@ -706,22 +534,41 @@ async function applyToPackage(candidate) {
       return { num, packageNum, status: 'skipped', reason: 'submit button not found' };
     }
 
-    // 11. Verify confirmation
-    await activePage.waitForTimeout(2000);
+    // 11. Verify confirmation — accept either confirmation TEXT or a URL change
+    // to a thank-you/confirmation page. Capture a screenshot for the audit trail.
+    await activePage.waitForTimeout(2500);
     const bodyText = await activePage.textContent('body').catch(() => '');
-    const confirmed = /thank you|application received|we.ve received|successfully submitted|your application/i.test(bodyText);
+    const urlAfterSubmit = activePage.url();
+    const textConfirmed = /thank you|thanks for applying|application (received|submitted|complete)|we.ve received|successfully submitted|your application has been|confirmation/i.test(bodyText);
+    const urlConfirmed  = urlAfterSubmit !== urlBeforeSubmit
+      && /thank|confirm|success|submitted|complete|received/i.test(urlAfterSubmit);
+    // A still-present, still-visible submit button usually means submit failed
+    // (validation errors). Treat that as NOT confirmed.
+    const stillOnForm = await activePage.locator('button[type="submit"], input[type="submit"]').first()
+      .isVisible().catch(() => false);
+    const confirmed = (textConfirmed || urlConfirmed) && !stillOnForm;
 
-    if (!confirmed) {
-      logDetail(packageNum, 'No confirmation text found — submission may have failed');
-    }
+    let shotPath = '';
+    try {
+      mkdirSync(SHOTS_DIR, { recursive: true });
+      shotPath = join(SHOTS_DIR, `${packageNum}-${confirmed ? 'confirmed' : 'unconfirmed'}-${TODAY}.png`);
+      await activePage.screenshot({ path: shotPath, fullPage: true });
+    } catch { /* screenshot is best-effort */ }
 
     await browser.close();
 
-    // 12. Update tracker (uses tracker # to find the row)
-    updateTrackerStatus(num, 'Applied');
+    // 12. Update tracker — ONLY flip to Applied when we actually saw confirmation.
+    // Unconfirmed submits get the "Submitted?" status so they're retryable and
+    // never falsely counted as Applied (the bug from the previous run).
+    if (confirmed) {
+      updateTrackerStatus(num, 'Applied');
+      log(`[${tag}] ✓ Applied → ${company} — ${role} (confirmed)${shotPath ? ` [${shotPath}]` : ''}`);
+      return { num, packageNum, status: 'applied', company, role, confirmed: true, shot: shotPath };
+    }
 
-    log(`[${tag}] ✓ Applied → ${company} — ${role}${confirmed ? ' (confirmed)' : ' (unverified)'}`);
-    return { num, packageNum, status: 'applied', company, role, confirmed };
+    updateTrackerStatus(num, 'Submitted?');
+    log(`[${tag}] ⚠ Submitted but UNCONFIRMED → ${company} — ${role} — marked "Submitted?" for manual verify${shotPath ? ` [${shotPath}]` : ''}`, 'WARN');
+    return { num, packageNum, status: 'submitted-unconfirmed', company, role, confirmed: false, shot: shotPath };
 
   } catch (err) {
     try { await browser?.close(); } catch { /* ignore */ }
@@ -813,18 +660,20 @@ async function main() {
     new Promise(r => setTimeout(r, i * 3000)).then(() => applyToPackage(c))
   );
 
-  const applied  = results.filter(r => r?.status === 'applied').length;
-  const skipped  = results.filter(r => r?.status === 'skipped').length;
-  const flagged  = results.filter(r => r?.status === 'flagged').length;
-  const errors   = results.filter(r => r?.status === 'error' || r?.error).length;
-  const dryRuns  = results.filter(r => r?.status === 'dry-run').length;
+  const applied     = results.filter(r => r?.status === 'applied').length;
+  const unconfirmed = results.filter(r => r?.status === 'submitted-unconfirmed').length;
+  const skipped     = results.filter(r => r?.status === 'skipped').length;
+  const flagged     = results.filter(r => r?.status === 'flagged').length;
+  const errors      = results.filter(r => r?.status === 'error' || r?.error).length;
+  const dryRuns     = results.filter(r => r?.status === 'dry-run').length;
 
   console.log(`\n┌${bar}┐\n│  Auto-Apply Summary${' '.repeat(38)}│\n└${bar}┘`);
-  log(`Applied: ${applied} | Skipped: ${skipped} | Flagged: ${flagged} | Errors: ${errors}${dryRuns ? ` | Dry-runs: ${dryRuns}` : ''}`);
+  log(`Applied: ${applied} | Submitted?: ${unconfirmed} | Skipped: ${skipped} | Flagged: ${flagged} | Errors: ${errors}${dryRuns ? ` | Dry-runs: ${dryRuns}` : ''}`);
 
+  if (unconfirmed > 0) log(`${unconfirmed} submit(s) UNCONFIRMED — marked "Submitted?"; verify via screenshots in output/autoapply/screenshots/`, 'WARN');
   if (flagged > 0) log(`${flagged} application(s) flagged by AI review — check batch/logs/apply-*-${TODAY}.log`, 'WARN');
 
-  console.log(JSON.stringify({ status: 'done', applied, skipped, flagged, errors, dryRuns }));
+  console.log(JSON.stringify({ status: 'done', applied, unconfirmed, skipped, flagged, errors, dryRuns }));
 }
 
 main().catch(err => {
