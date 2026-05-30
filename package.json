@@ -12,7 +12,7 @@
     "career-ops": "dashboard-web/server.mjs"
   },
   "scripts": {
-    "start": "node dashboard-web/server.mjs",
+    "start": "node --env-file=.env dashboard-web/server.mjs",
     "dev": "node --watch dashboard-web/server.mjs",
     "preview": "PORT=4749 HOST=127.0.0.1 CONFIG_DIR=./tmp/preview-config DATA_DIR=./tmp/preview-data node dashboard-web/server.mjs",
     "doctor": "node doctor.mjs",
@@ -60,6 +60,8 @@
   "license": "MIT",
   "dependencies": {
     "js-yaml": "^4.2.0",
+    "js-yaml": "^4.2.0",
+    "pdf-lib": "^1.17.1",
     "playwright": "^1.60.0"
   }
 }
