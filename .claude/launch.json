@@ -12,6 +12,12 @@
         "CONFIG_DIR": "./tmp/preview-config",
         "DATA_DIR": "./tmp/preview-data"
       }
+    },
+    {
+      "name": "cheatsheet-strip",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["interview-prep/_strip-serve.mjs"],
+      "port": 4760
     }
   ]
 }
