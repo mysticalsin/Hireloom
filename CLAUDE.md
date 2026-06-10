@@ -378,3 +378,54 @@ The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `
 6. **Review** — structured summary, one CTA writes `config/profile.yml` (snapshot to `.bak.{timestamp}` first; rotation keeps newest 10) and kicks off CV PDF generation in the background.
 
 Detect-existing-profile: `/api/onboard/profile-summary` is fetched on open; if a substantive profile exists, a banner warns the user that re-running will overwrite (with backup). Empty-state banner appears when extraction yields < 3 fields. A11y: `role=dialog`, `aria-modal`, `aria-labelledby`, focus trap, Escape closes, Enter advances, chips carry `aria-pressed` and activate on Enter/Space.
+
+---
+
+# Personal Memory System (per-user, local — NEVER committed)
+
+*Ships with Hireloom as machinery; each user's content stays on their machine. All memory files are plain, Obsidian-friendly markdown (dated entries `YYYY-MM-DD`, `[[wiki-links]]` for skills/roles, tags `#skill` `#role` `#milestone` `#preference-change`) — the project folder doubles as an Obsidian vault if the user wants it.*
+
+## The files (all gitignored — personal data never enters the repo)
+
+| File | Role |
+|------|------|
+| `CLAUDE.local.md` | **The user's personal layer** (auto-loaded by Claude Code every session): a **Current Profile** section (who they are — identity, experience, skills with honest internal depth, targets, preferences, rules) and a **How to work with me** section (voice, what frustrates them, what they respond well to). The Current Profile is the source of truth and is **overwritten in place** when facts change — never keep old versions. |
+| `WORKING.md` | **The one live state file** — overwritten at every checkpoint, never appended. What's done, what's mid-flight, exact next steps, open problems. |
+| `career-log.md` | **Append-only** dated history of learning and preference changes — narrative material, never current fact. |
+| `TOOLKIT.md` | Curated, annotated map of the local files/tools/methods. Before inferring or web-searching how something works, read the actual local file it points to. |
+
+**Wiring:** `CLAUDE.local.md` Current Profile is authoritative; `career-log.md` is history only; `WORKING.md` is the only live-state file. The user may edit any of these by hand between sessions — **treat file contents on disk as the latest truth**, even if they differ from what you remember writing.
+
+**Bootstrap:** if `CLAUDE.local.md` doesn't exist and the user wants persistent memory ("remember me between sessions"), create the four files in this structure and keep them current via the protocols below.
+
+**Corrections update memory immediately.** When the user corrects a fact or changes a preference mid-session, update `CLAUDE.local.md` right away (overwrite the old value) and append a dated entry to `career-log.md` — don't wait for a checkpoint.
+
+**Fresh sessions beat long threads.** Suggest checkpointing (`goodnight`) at natural task boundaries — around 60% context — rather than letting auto-compact fire mid-task; reload context from the files at session start rather than relying on conversational memory.
+
+## Keyword protocols
+
+Matching `/goodnight` and `/morning` slash commands exist in `.claude/commands/` as backups (and so a scheduled automation can call the checkpoint).
+
+**`goodnight` = full checkpoint.** Applies whether the user is done for the day OR just clearing a full context mid-day — behave identically. Do all of the following, then confirm what you wrote (list what you updated; don't summarize the day back):
+1. **`CLAUDE.local.md`** — if anything changed this session (new skills, changed preferences, corrected facts, new rules), update Current Profile by **OVERWRITING** old values; add newly-noticed tendencies to **How to work with me**.
+2. **`career-log.md`** — append a dated entry for anything learned or any goal/preference that shifted. Skip if nothing changed.
+3. **`WORKING.md`** — **overwrite** with current working state: finished, mid-flight, exact next steps, open problems, and any context the next session needs that isn't obvious from the code. Assume the next session knows nothing beyond the files.
+4. **`TOOLKIT.md`** — update the inventory if any files/tools were added, removed, or repurposed. Skip if nothing changed.
+5. **METHODS** — if a reusable workflow/recipe was developed or refined, save it as a procedure file (`modes/` or `.claude/commands/` per convention) and list it in `TOOLKIT.md`. A method that lives only in a conversation is a method lost.
+6. **Build-changelog** — if any files affecting **the project itself** changed (`*.mjs`, modes, templates, dashboard, configs), append an entry per the **Contribution Change-Log convention** below. Purely personal changes (skills/preferences/goals) go in `career-log.md`, NOT here. Skip if only routine data/memory files changed.
+
+**`morning` = full startup** (typically the first message of a fresh session). Read `CLAUDE.local.md`, `WORKING.md`, `TOOLKIT.md`, and `career-log.md`, plus glance at recent repo changes. Then give the user: a brief **"here's where we left off,"** today's **first next step** from `WORKING.md`, and **flag anything in `WORKING.md`/`TOOLKIT.md` that looks stale or contradicts the repo** — including anything they changed by hand since last session. Keep it short — orient, don't lecture.
+
+---
+# Contribution Change-Log (shippable convention — applies to EVERY user)
+
+*This is a general Hireloom convention, not specific to any one user — it ships with the repo so the maintainers receive a uniform, machine-readable contribution record from anyone.*
+
+**The behavior:** whenever you (the AI agent) change files that affect **the project itself** (system-layer `*.mjs` / modes / templates / dashboard / configs, or notable user-layer tooling), record it in the user's **build change-log** so their improvements are capturable upstream.
+
+1. **First project change in a fresh install:** copy `BUILD-CHANGELOG.template.md` → **`BUILD-CHANGELOG.md`** (fill the frontmatter: `hireloom_base_version` from the `VERSION` file, optional contributor/platform).
+2. **Each change** (and at every `goodnight`): append one entry in the template's **entry schema** — `Layer:` (system|user), `Files:`, `Change:`, **`Root cause:`** (the WHY), **`Upstream:`** (yes|no + one-line why/caveat), optional `Reproduce:`. Newest at the bottom.
+3. **One file = the whole contribution.** A user submits **just that one markdown file** to the maintainers; they don't need a PR or to understand the code. The maintainer side ingests it via **`/review-contribution`** (reads the file, maps entries to the repo, assesses each `Upstream: yes` entry for merge).
+4. **Keep personal data out of it** — a user's CV/profile/preferences are user-layer and go in their own logs, never in the upstream-bound change-log. Only project-affecting changes + root-causes belong here.
+
+**README is user-triggered, NOT auto-updated.** Do **not** rewrite `README.md` at every `goodnight` — the user says when to refresh it. Your job is to keep the *source information* available in the maintained mds (`BUILD-CHANGELOG.md` for what changed + why, `WORKING.md` for current state, `TOOLKIT.md` for the file/tool map) so that when they ask, a README update is a quick assembly job, not an archaeology dig.
