@@ -76,6 +76,33 @@ Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored
 | **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
 | **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
 
+## Requirements — what you need before installing
+
+Hireloom runs locally and drives an AI coding CLI. Here's exactly what to have, what it costs, and what's truly required vs. nice-to-have. *(Plan names, free-tier limits, and pricing change over time — verify the current terms at each provider before relying on them.)*
+
+### Required
+
+| Tool | Why it's needed | Cost / limits |
+|------|-----------------|---------------|
+| **An AI coding CLI — [Claude Code](https://claude.ai/code)** (or OpenCode) | This is the agent that runs *everything* — evaluation, tailoring, scanning, applying. | Needs a paid **Claude Pro or Max** subscription, **or** Anthropic **API** billing (pay-as-you-go). ⚠️ **The free Claude tier will not run Hireloom** at any real volume — **Pro is the practical floor**, and **Max is recommended** for the heavier work (batch scoring, portal scans, large tailoring runs) where token usage is high. *(Nobody tells you this up front — budget for at least Pro.)* |
+| **Node.js 20+** | All the scripts, the local server, and the PDF renderers. | Free. (See `.nvmrc`.) |
+| **Playwright + Chromium** — `npx playwright install chromium` | PDF generation and career-portal scraping/automation. | Free; the browser download is ~300 MB–1 GB. |
+
+### Optional (with a workaround) — and the benefit of adding each
+
+| Tool | What it unlocks | If you skip it | Cost / limits |
+|------|-----------------|----------------|---------------|
+| **Kimi / Moonshot LLM** (via **NVIDIA NIM**) | The batch **smart-fill autopilot** and large-scale per-JD résumé/cover tailoring — lets you process many roles fast. | Core **evaluate / tailor / scan still work on Claude alone**; you just do high-volume tailoring and form-filling more manually. | A Kimi API key is normally paid — **but you can get one free via [NVIDIA NIM](https://build.nvidia.com) developer testing keys, which host a usable Kimi model** (rate-limited). Great way to add the autopilot at $0. |
+| **[Obsidian](https://obsidian.md)** | Read/edit the memory vault (`CLAUDE.md`, `WORKING.md`, `career-log.md`, `TOOLKIT.md`) with graph view, backlinks, and search — turns your job-search context into a navigable knowledge base. | Everything is **plain markdown** — any text editor works; you just lose the graph/linking UX. | **Free for local/personal use.** (Sync & Publish are paid add-ons you don't need — a locally-hosted vault is enough.) |
+| **Go 1.21+** | The terminal **dashboard TUI** for browsing/filtering your pipeline. | Use the web dashboard or the CLI/tracker instead. | Free. |
+| **Gmail API credentials** | Email-cache / inbox features. | Skip entirely; not needed for the core flow. | Free. |
+
+### Minimum specs & storage
+
+- **OS:** any modern macOS, Linux, or Windows (WSL). **8 GB RAM works.** It only gets tight if you *also* run a **Parallels/VM Windows guest** for Windows-only BI tools (e.g. Power BI Desktop) — close other apps, or use a Mac-native/cloud BI alternative (Tableau, Looker Studio).
+- **Disk:** ~**2 GB free** for the repo + `node_modules` + the Chromium browser. Generated artifacts (tailored PDFs, reports) grow over a real search; the optional **interview voice-recording** feature produces large files (**1–5 GB per recording**) — prune those periodically.
+- **Network:** an internet connection (the agent calls career-portal APIs and your chosen AI provider).
+
 ## Install in 60 seconds
 
 Pick the path that matches your machine — both end on the **same 6-step onboarding wizard** at `http://localhost:4747`: drop your resume → AI confirms basics → pick target roles + comp → flag deal-breakers → narrative → ship.
