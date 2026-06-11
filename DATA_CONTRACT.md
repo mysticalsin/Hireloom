@@ -22,6 +22,14 @@ These files contain your personal data, customizations, and work product. Update
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+| `CLAUDE.local.md` | Your personal memory layer (Current Profile + How to work with me) — auto-loaded each session, gitignored |
+| `WORKING.md` | Your live working state (overwritten at each `goodnight` checkpoint) |
+| `career-log.md` | Your append-only history of learning and preference changes |
+| `TOOLKIT.md` | Your annotated map of local files/tools/methods |
+| `BUILD-CHANGELOG.md` | Your contribution change-log instance (submit upstream when you want) |
+| `BUILD-PROFILE.md`, `BUILD-LOG.md` | Second-brain build outputs |
+| `_brain_api/`, `_brain_index/`, `_agent_state/` | Second-brain machine layer (generated) |
+| `.obsidian/*` | Per-machine Obsidian settings + the built second-brain plugin |
 
 ## System Layer (safe to auto-update)
 
@@ -50,9 +58,13 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/ja/*` | Japanese language modes |
 | `modes/pt/*` | Portuguese language modes |
 | `modes/ru/*` | Russian language modes |
-| `CLAUDE.md` | Agent instructions |
+| `CLAUDE.md` | Agent instructions (incl. the generic memory-system + contribution-log machinery) |
 | `AGENTS.md` | Codex instructions |
 | `*.mjs` | Utility scripts |
+| `lib/*` | Shared libraries (`identity.mjs` reads the user's `config/profile.yml` — the library is system, the data it reads is user) |
+| `second-brain/*` | Second Brain build spec (what it GENERATES is user layer, above) |
+| `.claude/commands/*` | Method commands (`/second-brain`, `/goodnight`, `/morning`, …) |
+| `BUILD-CHANGELOG.template.md` | Contribution change-log template (your filled `BUILD-CHANGELOG.md` is user layer) |
 | `batch/batch-prompt.md` | Batch worker prompt |
 | `batch/batch-runner.sh` | Batch orchestrator |
 | `dashboard/*` | Go TUI dashboard |

@@ -21,6 +21,8 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 **User Layer (NEVER auto-updated, personalization goes HERE):**
 - `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
 - `data/*`, `reports/*`, `output/*`, `interview-prep/*`
+- Memory layer: `CLAUDE.local.md`, `WORKING.md`, `career-log.md`, `TOOLKIT.md`, `BUILD-CHANGELOG.md`
+- Second-brain outputs: `BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, `.obsidian/*`
 
 **System Layer (auto-updatable, DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
