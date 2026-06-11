@@ -2,16 +2,10 @@
 
 > *heir + loom · a quiet career atelier*
 
-[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md)
+[English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
 
 <p align="center">
-  <a href="https://github.com/mysticalsin"><img src="docs/hero-banner.jpg" alt="Hireloom — Career Atelier · Multi-Agent Job Search System" width="800"></a>
-</p>
-
-<p align="center">
-  <em>Companies use AI to filter candidates. Hireloom gives candidates AI to <strong>choose</strong> companies.</em><br>
-  Heritage-grade UX, oxblood palette, set-in-lead serif wordmark — and the ruthless senior-level
-  evaluation engine underneath. The atelier weaves; you decide.
+  <a href="https://github.com/mysticalsin/Hireloom"><img src="docs/hero-banner.jpg" alt="Hireloom — Career Atelier · Multi-Agent Job Search System" width="800"></a>
 </p>
 
 <p align="center">
@@ -21,16 +15,8 @@
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Obsidian-7C3AED?style=flat&logo=obsidian&logoColor=white" alt="Obsidian">
   <img src="https://img.shields.io/badge/License-PolyForm_Shield-blue.svg" alt="PolyForm Shield 1.0.0">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  <br>
-  <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
-  <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
-  <img src="https://img.shields.io/badge/DE-grey?style=flat" alt="DE">
-  <img src="https://img.shields.io/badge/FR-blue?style=flat" alt="FR">
-  <img src="https://img.shields.io/badge/PT--BR-green?style=flat" alt="PT-BR">
-  <img src="https://img.shields.io/badge/KO-white?style=flat" alt="KO">
-  <img src="https://img.shields.io/badge/JA-red?style=flat" alt="JA">
 </p>
 
 ---
@@ -39,43 +25,71 @@
   <img src="docs/demo.gif" alt="Hireloom Demo" width="800">
 </p>
 
-<p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
+## Why this exists
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
+Every application you send is read first by software. The hiring side has been automated for a decade; the candidate side is still a human alone with forty browser tabs and a spreadsheet.
 
-## What Is This
+Hireloom closes that asymmetry. It hands the candidate an AI agent of their own — one that reads job descriptions the way a sharp recruiter reads a CV: reasoning about fit, not matching keywords. You stay the decision-maker. The agent does the reading, the scoring, the tailoring, the tracking, and the remembering.
 
-Hireloom turns any AI coding CLI into a full career atelier. Instead of manually tracking applications in a spreadsheet, you get an AI-powered pipeline that:
+The grind it kills is the repetition: reading the two-hundredth JD, retyping the same work-authorization answers, rebuilding the same CV with slightly different keywords, updating the spreadsheet, forgetting to follow up. Hireloom automates that loop **at scale and without lying** — every CV it sends is built from your real record, tailored until it's impossible to ignore for the recruiter skimming 200 resumes *and* for the AI that grades applications before a human ever sees them. Mass application and quality aren't opposites here; the tailoring engine is what makes volume honest.
 
-- **Evaluates offers** with a structured A-F scoring system (10 weighted dimensions)
-- **Generates tailored PDFs** -- ATS-optimized CVs customized per job description
-- **Scans portals** automatically (Greenhouse, Ashby, Lever, company pages)
-- **Processes in batch** -- evaluate 10+ offers in parallel with sub-agents
-- **Tracks everything** in a single source of truth with integrity checks
+**Proof it survives contact with reality:** the engine ran one full search in AI/automation (740+ listings evaluated, 100+ tailored CVs, the target role landed), then was rebuilt and field-run a second time, end to end, in a completely different discipline. Two careers, one loom.
 
-> **Important: This is NOT a spray-and-pray tool.** Hireloom is a filter -- it helps you find the few offers worth your time out of hundreds. The system strongly recommends against applying to anything scoring below 4.0/5. Your time is valuable, and so is the recruiter's. Always review before submitting.
+## The designed workflow
 
-Hireloom is agentic: Claude Code navigates career pages with Playwright, evaluates fit by reasoning about your CV vs the job description (not keyword matching), and adapts your resume per listing.
+1. **Install and connect.** The CLI agent, Node, Playwright — plus your Gmail (the post-apply loop reads responses from it) and optionally a Kimi API key (the auto-applier's engine; see Requirements).
+2. **Teach it who you are.** The onboarding wizard reads your resume and asks for the rest: target roles, comp, deal-breakers, work authorization, narrative. Your identity lives in one config file — nothing personal is hardcoded in the engine.
+3. **Let the scanner loose.** `node scan.mjs` sweeps Greenhouse, Ashby, and Lever APIs directly — zero LLM tokens — using queries built from *your* targets, and saves every JD locally.
+4. **The pipeline ranks itself.** Each role is scored 0–5 against your real profile: fit, gaps and whether they're learnable, comp, posting legitimacy.
+5. **The tailor builds every package.** Per-JD CV + cover letter, truthful by construction — your proof points sharpened into the posting's language, never invented.
+6. **You choose what goes out.** Pick roles on the dashboard or in the CLI — by hand or by score floor (default 4.0+).
+7. **Dry runs before live runs.** The auto-applier fills real forms in front of you **without submitting** — `--dry-run`, as many passes as you want. Tell the agent what to fix until you're satisfied.
+8. **Then it applies for you.** A clean browser with no logins or cookies (so nothing autofills stale data), one role after another, only on flows it can complete cleanly — anything uncertain is left for you instead of forced. The tracker flips to `Applied` only on a verified confirmation page; unverified submits are flagged `Submitted?` for manual check, with a screenshot for the audit trail.
+9. **Non-ATS sites stay yours.** For portals the auto-applier can't drive cleanly (Indeed and friends), the assisted flow fills everything and hard-stops before Submit — the proven manual method.
+10. **The loop closes itself.** Dashboard and Second Brain track applied / failed / not-yet-applied; Gmail watching catches responses, rejections, and interview invites; interview prep runs on the built-in methods (story bank, company research, mock analysis); you report outcomes and the book-keeping stays true.
 
-> **Heads up: the first evaluations won't be great.** The system doesn't know you yet. Feed it context -- your CV, your career story, your proof points, your preferences, what you're good at, what you want to avoid. The more you nurture it, the better it gets. Think of it as onboarding a new recruiter: the first week they need to learn about you, then they become invaluable.
+## The rooms
 
-Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role.
+| Room | What happens there |
+|------|--------------------|
+| **Evaluate** | A–F structured scoring, archetype detection, comp research, legitimacy screening — for one role or a ranked comparison of several |
+| **Tailor** | Per-JD CV + cover letter PDFs (Space Grotesk / DM Sans), keyword-aware but honest — it sharpens your story, it doesn't invent one |
+| **Scan** | 45+ pre-configured companies and 19 query feeds across Ashby, Greenhouse, Lever, Wellfound — token-free, API-direct |
+| **Auto-apply** | The batch applier (Kimi-powered): dry runs you watch first, clean cookie-free browser, confirmation-verified tracking — runs only when you launch it |
+| **Assisted apply** | For everything the auto-applier shouldn't force: fills the form, hard-stops before Submit; work-authorization answers come from your profile, never guessed |
+| **Track** | One source of truth for every application, with merge, dedup, status normalization, and health checks built in |
+| **Prepare** | Deep company research, a story bank that accumulates STAR+R material across evaluations, negotiation scripts, follow-up cadence |
+| **Remember** | A per-user memory layer (`goodnight` / `morning`) so fresh sessions start fully briefed — no more re-explaining yourself to your own tools |
+| **See it all** | A web dashboard with an onboarding wizard, a Go terminal TUI, and an optional Obsidian command center built over your live data |
 
-## Features
+## What it refuses to do
 
-| Feature | Description |
-|---------|-------------|
-| **Auto-Pipeline** | Paste a URL, get a full evaluation + PDF + tracker entry |
-| **6-Block Evaluation** | Role summary, CV match, level strategy, comp research, personalization, interview prep (STAR+R) |
-| **Interview Story Bank** | Accumulates STAR+Reflection stories across evaluations -- 5-10 master stories that answer any behavioral question |
-| **Negotiation Scripts** | Salary negotiation frameworks, geographic discount pushback, competing offer leverage |
-| **ATS PDF Generation** | Keyword-injected CVs with Space Grotesk + DM Sans design |
-| **Portal Scanner** | 45+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom queries across Ashby, Greenhouse, Lever, Wellfound |
-| **Batch Processing** | Parallel evaluation with `claude -p` workers |
-| **Dashboard TUI** | Terminal UI to browse, filter, and sort your pipeline |
-| **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
-| **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
-| **Second Brain (optional)** | Say "set up my second brain" and your agent builds live dashboards over your pipeline inside [Obsidian](https://obsidian.md) (free) — what's hot, who's going cold, what's next. No new data entry; it visualizes what Hireloom already tracks. See `second-brain/`. |
+These aren't settings; they're the product's spine.
+
+- **It never applies without your say-so.** Automation runs only when *you* launch it, on roles *you* selected, after dry runs *you* watched and approved. Outside that flow — assisted mode, outreach, follow-ups — it drafts and fills but never sends; the final click is yours.
+- **It doesn't fake you.** The tailoring engine works from your CV and proof points on file. No invented metrics, no skills you don't have, no guessed work-authorization answers.
+- **It doesn't force a form it can't drive cleanly.** Uncertain application flows are handed to you, not bulldozed.
+- **It scores honestly.** The default floor is 4.0/5 — it will tell you when a role isn't worth a tailored package, and you can override it.
+
+## It learns you — and survives the session ending
+
+Out of the box, the first evaluations will be merely decent. The system improves the way a new recruiter does: by being told. *"That score's too high — I'd never relocate for that."* *"You missed that I've run greenfield supply chains."* Corrections land in your profile files immediately, and every evaluation after reads them.
+
+What makes this durable is the **file-based memory layer**. Long AI threads rot — context fills up, summaries get summarized, details quietly fall out. Hireloom sidesteps the problem: say **`goodnight`** and the agent checkpoints who you are (`CLAUDE.local.md`), what's mid-flight (`WORKING.md`), what changed and why (`career-log.md`), and the map of your local tooling (`TOOLKIT.md`). Say **`morning`** in a brand-new session and it reloads the lot, flags anything stale, and tells you the next step.
+
+Everything is plain, Obsidian-friendly markdown. Everything personal is gitignored. **The machinery ships with the repo; your life stays on your machine** — that split is contractual, not aspirational: see [DATA_CONTRACT.md](DATA_CONTRACT.md). System updates can replace the engine; they physically cannot touch your CV, profile, tracker, reports, or memory.
+
+## The Second Brain (optional)
+
+If you run [Obsidian](https://obsidian.md) — free, local, reads plain markdown folders — one sentence, *"set up my second brain,"* has your agent build a live command center over the pipeline Hireloom already maintains:
+
+- **Pipeline** — kanban of every application by status
+- **Apply Queue** — what's next, in ranked order
+- **Follow-up Radar** — who's going cold, with drafted (never auto-sent) nudges
+- **Interviews** — upcoming rounds and prep state
+- **Scan Feed · Patterns · Inbox** — fresh postings, rejection analytics, pending URLs
+
+Zero new data entry, and a strict no-fake-data law: every tile binds to a real file, and an empty tile names the exact command that fills it. The build interviews you only about taste — colors, rhythm, extras — because the data answers already live in your config. Everything is hosted locally by default (free Obsidian is all you need); if you have an Obsidian Sync subscription and want the vault on your other devices, just ask the agent to wire it. Spec: [second-brain/BUILD-SPEC.md](second-brain/BUILD-SPEC.md).
 
 ## Requirements — what you need before installing
 
@@ -88,15 +102,15 @@ Hireloom runs locally and drives an AI coding CLI. Here's exactly what to have, 
 | **An AI coding CLI — [Claude Code](https://claude.ai/code)** (or OpenCode) | This is the agent that runs *everything* — evaluation, tailoring, scanning, applying. | Needs a paid **Claude Pro or Max** subscription, **or** Anthropic **API** billing (pay-as-you-go). ⚠️ **The free Claude tier will not run Hireloom** at any real volume — **Pro is the practical floor**, and **Max is recommended** for the heavier work (batch scoring, portal scans, large tailoring runs) where token usage is high. *(Nobody tells you this up front — budget for at least Pro.)* |
 | **Node.js 20+** | All the scripts, the local server, and the PDF renderers. | Free. (See `.nvmrc`.) |
 | **Playwright + Chromium** — `npx playwright install chromium` | PDF generation and career-portal scraping/automation. | Free; the browser download is ~300 MB–1 GB. |
+| **Gmail API credentials** | The post-apply loop: Hireloom reads your inbox to track responses, rejections, and interview invites automatically. | Free. *(Technically skippable — but then you're updating every status by hand, which defeats the design. Connect it during setup.)* |
 
 ### Optional (with a workaround) — and the benefit of adding each
 
 | Tool | What it unlocks | If you skip it | Cost / limits |
 |------|-----------------|----------------|---------------|
-| **Kimi / Moonshot LLM** (via **NVIDIA NIM**) | The batch **smart-fill autopilot** and large-scale per-JD résumé/cover tailoring — lets you process many roles fast. | Core **evaluate / tailor / scan still work on Claude alone**; you just do high-volume tailoring and form-filling more manually. | A Kimi API key is normally paid — **but you can get one free via [NVIDIA NIM](https://build.nvidia.com) developer testing keys, which host a usable Kimi model** (rate-limited). Great way to add the autopilot at $0. |
-| **[Obsidian](https://obsidian.md)** | Read/edit the memory vault (`CLAUDE.md`, `WORKING.md`, `career-log.md`, `TOOLKIT.md`) with graph view, backlinks, and search — turns your job-search context into a navigable knowledge base. | Everything is **plain markdown** — any text editor works; you just lose the graph/linking UX. | **Free for local/personal use.** (Sync & Publish are paid add-ons you don't need — a locally-hosted vault is enough.) |
+| **Kimi / Moonshot LLM** (via **NVIDIA NIM**) | **The auto-applier.** This is the model that drives batch form-filling and large-scale per-JD tailoring — without a key, the auto-applier does not run, and the agent will tell you so. | Everything else still works — **evaluate / tailor / scan / track run on Claude alone**, and you can apply role-by-role with the assisted flow. Possible, just not the designed path. | A Kimi API key is normally paid — **but you can get one free via [NVIDIA NIM](https://build.nvidia.com) developer testing keys, which host a usable Kimi model** (rate-limited). Great way to add the autopilot at $0. |
+| **[Obsidian](https://obsidian.md)** | The **Second Brain** dashboards, plus graph view, backlinks, and search over the memory vault — your job-search context as a navigable knowledge base. | Everything is **plain markdown** — any text editor works; you just lose the dashboards and graph/linking UX. | **Free for local/personal use.** (Sync & Publish are paid add-ons you don't need — a locally-hosted vault is enough.) |
 | **Go 1.21+** | The terminal **dashboard TUI** for browsing/filtering your pipeline. | Use the web dashboard or the CLI/tracker instead. | Free. |
-| **Gmail API credentials** | Email-cache / inbox features. | Skip entirely; not needed for the core flow. | Free. |
 
 ### Minimum specs & storage
 
@@ -104,19 +118,19 @@ Hireloom runs locally and drives an AI coding CLI. Here's exactly what to have, 
 - **Disk:** ~**2 GB free** for the repo + `node_modules` + the Chromium browser. Generated artifacts (tailored PDFs, reports) grow over a real search; the optional **interview voice-recording** feature produces large files (**1–5 GB per recording**) — prune those periodically.
 - **Network:** an internet connection (the agent calls career-portal APIs and your chosen AI provider).
 
-## Install in 60 seconds
+## Installing
 
-Pick the path that matches your machine — both end on the **same 6-step onboarding wizard** at `http://localhost:4747`: drop your resume → AI confirms basics → pick target roles + comp → flag deal-breakers → narrative → ship.
+Every path below lands in the same place: a local server at `http://localhost:4747` with a six-step onboarding wizard — drop your resume in, confirm what it extracted, pick target roles and comp, flag deal-breakers and work authorization, add your narrative, ship. About two minutes, and the first tailored CV renders at the end of it.
 
 ### macOS / Linux / WSL
 
 ```bash
 git clone https://github.com/mysticalsin/Hireloom.git
-cd career-ops
+cd Hireloom
 bash install.sh                  # interactive: docker | local | doctor
 ```
 
-Or skip the prompt:
+Non-interactive variants:
 
 ```bash
 bash install.sh --docker         # Docker Compose, isolates Chromium + deps
@@ -129,176 +143,96 @@ bash install.sh --doctor         # diagnose without installing
 
 ```powershell
 git clone https://github.com/mysticalsin/Hireloom.git
-cd career-ops
+cd Hireloom
 .\install.ps1                    # interactive
 # or: .\install.ps1 -Mode docker
 ```
 
-### Make targets (macOS / Linux)
-
-```bash
-make            # show all targets
-make install    # interactive
-make docker     # docker compose up -d
-make docker-prod # adds the hardened production overlay
-make local      # npm install + tests + start
-make logs       # tail the docker logs
-make backup     # snapshot user data to ./backups/<timestamp>/
-make doctor     # environment diagnostic
-```
-
-### One-line bootstrap
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mysticalsin/Hireloom/main/install.sh | bash
-```
-
-> **What happens on first launch:** Open the URL the installer prints, click **⊕ Profile** (or press `⌘ ,`), drop your resume in. The wizard reads it, asks the few things it can't infer (target roles, comp, deal-breakers, narrative), then renders your tailored CV PDF and arms the pipeline. ~2 min, end-to-end.
-
-### Auto-start on boot (optional)
-
-- **Linux** — `sudo cp packaging/career-ops.service /etc/systemd/system/ && sudo systemctl enable --now career-ops`
-- **macOS** — `cp packaging/io.mysticalsin.hireloom.plist ~/Library/LaunchAgents/ && launchctl load -w ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist` (edit the user/path placeholders first)
-- **Docker** — already restarts unless stopped (`restart: unless-stopped`)
-
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide and customization options.
-
-## Manual install (if you want to skip the script)
+### By hand, if you'd rather see every step
 
 ```bash
 git clone https://github.com/mysticalsin/Hireloom.git
-cd career-ops
+cd Hireloom
 cp .env.example .env             # add ANTHROPIC_API_KEY, optional GMAIL_*
 npm install
 npx playwright install chromium  # required for PDF generation
-npm test                         # 116 unit tests, ~150ms
+npm test                         # 222 unit tests
+node doctor.mjs                  # validates the whole setup, profile included
 npm start                        # http://localhost:4747
 ```
 
-> **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts — just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
-
-## Usage
-
-Career-ops is a single slash command with multiple modes:
-
-```
-/career-ops                → Show all available commands
-/career-ops {paste a JD}   → Full auto-pipeline (evaluate + PDF + tracker)
-/career-ops scan           → Scan portals for new offers
-/career-ops pdf            → Generate ATS-optimized CV
-/career-ops batch          → Batch evaluate multiple offers
-/career-ops tracker        → View application status
-/career-ops apply          → Fill application forms with AI
-/career-ops pipeline       → Process pending URLs
-/career-ops contacto       → LinkedIn outreach message
-/career-ops deep           → Deep company research
-/career-ops training       → Evaluate a course/cert
-/career-ops project        → Evaluate a portfolio project
-```
-
-Or just paste a job URL or description directly -- career-ops auto-detects it and runs the full pipeline.
-
-## How It Works
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-F Evaluation  │  Match, gaps, comp research, STAR stories
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf   .tsv
-```
-
-## Pre-configured Portals
-
-The scanner comes with **45+ companies** ready to scan and **19 search queries** across major job boards. Copy `templates/portals.example.yml` to `portals.yml` and add your own:
-
-**AI Labs:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
-**Voice AI:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
-**AI Platforms:** Retool, Airtable, Vercel, Temporal, Glean, Arize AI
-**Contact Center:** Ada, LivePerson, Sierra, Decagon, Talkdesk, Genesys
-**Enterprise:** Salesforce, Twilio, Gong, Dialpad
-**LLMOps:** Langfuse, Weights & Biases, Lindy, Cognigy, Speechmatics
-**Automation:** n8n, Zapier, Make.com
-**European:** Factorial, Attio, Tinybird, Clarity AI, Travelperk
-
-**Job boards searched:** Ashby, Greenhouse, Lever, Wellfound, Workable, RemoteFront
-
-## Dashboard TUI
-
-The built-in terminal dashboard lets you browse your pipeline visually:
+### Extras
 
 ```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+make            # all targets: install / docker / local / logs / backup / doctor
 ```
 
-Features: 6 filter tabs, 4 sort modes, grouped/flat view, lazy-loaded previews, inline status changes.
+Auto-start on boot: `packaging/career-ops.service` (systemd) or `packaging/io.mysticalsin.hireloom.plist` (launchd); Docker restarts itself. Full setup guide: [docs/SETUP.md](docs/SETUP.md).
 
-## Project Structure
+## Driving it
+
+One slash command, many modes — or skip the command entirely and just paste a job URL; the agent recognizes it and runs the full pipeline.
 
 ```
-career-ops/
-├── CLAUDE.md                    # Agent instructions
-├── cv.md                        # Your CV (create this)
-├── article-digest.md            # Your proof points (optional)
-├── config/
-│   └── profile.example.yml      # Template for your profile
-├── modes/                       # 14 skill modes
-│   ├── _shared.md               # Shared context (customize this)
-│   ├── oferta.md                # Single evaluation
-│   ├── pdf.md                   # PDF generation
-│   ├── scan.md                  # Portal scanner
-│   ├── batch.md                 # Batch processing
-│   └── ...
-├── templates/
-│   ├── cv-template.html         # ATS-optimized CV template
-│   ├── portals.example.yml      # Scanner config template
-│   └── states.yml               # Canonical statuses
-├── batch/
-│   ├── batch-prompt.md          # Self-contained worker prompt
-│   └── batch-runner.sh          # Orchestrator script
-├── dashboard/                   # Go TUI pipeline viewer
-├── data/                        # Your tracking data (gitignored)
-├── reports/                     # Evaluation reports (gitignored)
-├── output/                      # Generated PDFs (gitignored)
-├── fonts/                       # Space Grotesk + DM Sans
-├── docs/                        # Setup, customization, architecture
-└── examples/                    # Sample CV, report, proof points
+/career-ops                → menu of everything below
+/career-ops {paste a JD}   → evaluate + report + PDF + tracker, end to end
+/career-ops scan           → sweep the portals for new postings
+/career-ops pdf            → tailored, ATS-clean CV
+/career-ops batch          → parallel evaluation with sub-agent workers
+/career-ops tracker        → pipeline status at a glance
+/career-ops apply          → fill the form, stop at Submit
+/career-ops deep           → company research before an interview
+/career-ops patterns       → what your rejections have in common
+/career-ops followup       → who to nudge, and when
 ```
 
-## Tech Stack
+The same modes run on [OpenCode](https://opencode.ai) via `.opencode/commands/` aliases.
 
-![Claude Code](https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
-![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
-![Bubble Tea](https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white)
+## Make it yours
 
-- **Agent**: Claude Code with custom skills and modes
-- **PDF**: Playwright/Puppeteer + HTML template
-- **Scanner**: Playwright + Greenhouse API + WebSearch
-- **Dashboard**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha theme)
-- **Data**: Markdown tables + YAML config + TSV batch files
+The defaults ship tuned for AI/automation roles because that's where the engine was first proven — and **changing that is a conversation, not a config dive.** Tell your agent *"my targets are data engineering roles"* or *"rewrite the archetypes for aviation program management"* and it edits the right layer itself.
 
-## About the Author
+- **One identity file.** `config/profile.yml` carries your name, contact line, education, certifications, even the order your jobs render in. Every PDF renderer reads it; the engine contains no one's personal data.
+- **A personalization layer updates can't touch.** Your archetypes, scoring weights, narrative, and deal-breakers live in `modes/_profile.md` and `config/profile.yml` — user layer, never overwritten.
+- **Native-language evaluation modes.** German (`modes/de/`), French (`modes/fr/`), and Japanese (`modes/ja/`) modes speak the market's actual vocabulary — Kündigungsfrist, convention collective SYNTEC, 賞与 — not translated English.
+- **Safe updates.** `node update-system.mjs check` fetches engine updates with your data outside the blast radius; `node doctor.mjs` confirms nothing's miswired, your profile's render block included.
 
-Hireloom is maintained by [Tony Walteur](https://www.linkedin.com/in/tonywalteur/).
+## Under the hood
 
-My portfolio and other open source projects → [github.com/mysticalsin](https://github.com/mysticalsin)
+```
+Hireloom/
+├── CLAUDE.md                    # The agent's rulebook + memory machinery
+├── cv.md                        # Your CV — the single source of truth (user layer)
+├── config/profile.example.yml   # Identity + cv: render block template
+├── lib/                         # identity, profile validation, shared engine libs
+├── modes/                       # Evaluation/apply/scan modes + de/ fr/ ja/
+├── second-brain/BUILD-SPEC.md   # The Obsidian command-center build spec
+├── batch/                       # Parallel workers + the tailoring engine
+├── dashboard/                   # Go TUI (Bubble Tea)
+├── dashboard-web/               # Web dashboard + onboarding wizard
+├── templates/                   # CV template, portal config, canonical states
+├── tests/                       # 222 unit tests — npm test
+├── data/ reports/ output/       # Yours, gitignored (user layer)
+└── docs/                        # Setup, customization, architecture
+```
 
+Node (ESM) for the engine · Playwright for rendering and browsing · Go + Bubble Tea for the TUI · YAML for config · markdown and TSV for data, so every byte of your pipeline stays human-readable, diffable, and Obsidian-navigable.
+
+## Contributing — code optional
+
+Hireloom installs are self-improving: when your agent fixes or extends something on your machine, it logs the change, the root cause, and an upstream-worthiness flag to your `BUILD-CHANGELOG.md` (schema: [BUILD-CHANGELOG.template.md](BUILD-CHANGELOG.template.md)). **Submitting that single markdown file is a complete contribution** — reach out to us on the community Discord and share it, or open an issue with it attached; maintainers triage it with a dedicated review command and port what generalizes. PRs are welcome too: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<a href="https://github.com/mysticalsin/Hireloom/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=mysticalsin/Hireloom" />
+</a>
+
+Landed a role with Hireloom in the loop? [Tell us the story.](https://github.com/mysticalsin/Hireloom/issues/new?template=i-got-hired.yml)
+
+## Maintainers
+
+Hireloom is maintained by [Tony Walteur](https://www.linkedin.com/in/tonywalteur/), with major contributions — the memory system, the Second Brain, the identity layer, and the batch/apply tooling — by [Ramy Sherif](https://github.com/ramysherifwork).
+
+More from the maintainer → [github.com/mysticalsin](https://github.com/mysticalsin)
 
 ## Star History
 
@@ -312,33 +246,10 @@ My portfolio and other open source projects → [github.com/mysticalsin](https:/
 
 ## Disclaimer
 
-**career-ops is a local, open-source tool — NOT a hosted service.** By using this software, you acknowledge:
-
-1. **You control your data.** Your CV, contact info, and personal data stay on your machine and are sent directly to the AI provider you choose (Anthropic, OpenAI, etc.). We do not collect, store, or have access to any of your data.
-2. **You control the AI.** The default prompts instruct the AI not to auto-submit applications, but AI models can behave unpredictably. If you modify the prompts or use different models, you do so at your own risk. **Always review AI-generated content for accuracy before submitting.**
-3. **You comply with third-party ToS.** You must use this tool in accordance with the Terms of Service of the career portals you interact with (Greenhouse, Lever, Workday, LinkedIn, etc.). Do not use this tool to spam employers or overwhelm ATS systems.
-4. **No guarantees.** Evaluations are recommendations, not truth. AI models may hallucinate skills or experience. The authors are not liable for employment outcomes, rejected applications, account restrictions, or any other consequences.
-
-See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software is provided under the [MIT License](LICENSE) "as is", without warranty of any kind.
-
-## Contributors
-
-<a href="https://github.com/mysticalsin/Hireloom/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=mysticalsin/Hireloom" />
-</a>
-
-Got hired using career-ops? [Share your story!](https://github.com/mysticalsin/Hireloom/issues/new?template=i-got-hired.yml)
+Hireloom is local, source-available software you run yourself — there is no hosted service behind it and nobody on this project can see your data. Your CV and profile travel only between your machine and the AI provider *you* configure. Automated applying runs only when you launch it, on roles you approved after watching the dry runs — and you are the operator: review what the AI generates before it goes out under your name, stay within the Terms of Service of every portal you touch, and treat evaluations as informed opinions, not promises — language models can be wrong about you and about the job. Full text: [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Provided "as is", without warranty, under the [PolyForm Shield 1.0.0 license](LICENSE).
 
 ## License
 
 PolyForm Shield 1.0.0 — free to use, copy, modify, and distribute, including commercially, for any purpose **except providing a product that competes with Hireloom**. Licensing and copyright notices must be preserved. Inherited portions of the original engine retain their MIT notice — see the Third-party notices section in [LICENSE](LICENSE). Versions released before this change remain MIT.
 
 > **Note:** this license applies to this branch's build and takes effect for the project upon maintainer merge; `main` remains MIT until then.
-
-## Let's Connect
-
-[![Website](https://img.shields.io/badge/github.com/mysticalsin-000?style=for-the-badge&logo=safari&logoColor=white)](https://github.com/mysticalsin)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://github.com/mysticalsin)
-[![X](https://img.shields.io/badge/X-000?style=for-the-badge&logo=x&logoColor=white)](https://github.com/mysticalsin)
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/8pRpHETxa4)
-[![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:github.com/mysticalsin (GitHub))
