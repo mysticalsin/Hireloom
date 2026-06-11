@@ -24,7 +24,7 @@ Each worker is a headless child process with a clean 200K token context. The con
 ## Files
 
 ```text
-batch/
+engine/batch/
   batch-input.tsv               # URLs (from conductor or manual)
   batch-state.tsv               # Progress (auto-generated, gitignored)
   batch-runner.sh               # Standalone orchestrator script
@@ -35,7 +35,7 @@ batch/
 
 ## Mode A: Conductor --chrome
 
-1. **Read state**: `batch/batch-state.tsv` → identify what has already been processed
+1. **Read state**: `engine/batch/batch-state.tsv` → identify what has already been processed
 2. **Navigate portal**: Chrome → search URL
 3. **Extract URLs**: Read results DOM → extract URL list → append to `batch-input.tsv`
 4. **For each pending URL**:
@@ -58,7 +58,7 @@ batch/
 ## Mode B: Standalone script
 
 ```bash
-batch/batch-runner.sh [OPTIONS]
+engine/batch/batch-runner.sh [OPTIONS]
 ```
 
 Options:
@@ -90,7 +90,7 @@ Each worker receives `batch-prompt.md` as a system prompt. It is self-contained.
 The worker produces:
 1. `.md` report in `reports/`
 2. PDF in `output/`
-3. Tracker line in `batch/tracker-additions/{id}.tsv`
+3. Tracker line in `engine/batch/tracker-additions/{id}.tsv`
 4. Result JSON via stdout
 
 ## Error handling

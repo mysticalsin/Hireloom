@@ -6,16 +6,16 @@ reports/*.md
 !reports/.gitkeep
 output/*
 !output/.gitkeep
-batch/logs/*
-!batch/logs/.gitkeep
-batch/batch-state.tsv
-batch/batch-input.tsv
-batch/tracker-additions/*.tsv
-!batch/tracker-additions/.gitkeep
+engine/batch/logs/*
+!engine/batch/logs/.gitkeep
+engine/batch/batch-state.tsv
+engine/batch/batch-input.tsv
+engine/batch/tracker-additions/*.tsv
+!engine/batch/tracker-additions/.gitkeep
 # Batch summaries + cover-letter prompts — generated per-user, contain PII
-batch/batch-*-summary.md
-batch/cover-letter-prompt.md
-batch/cover-letters/
+engine/batch/batch-*-summary.md
+engine/batch/cover-letter-prompt.md
+engine/batch/cover-letters/
 jds/*
 !jds/.gitkeep
 
@@ -96,7 +96,7 @@ data/errors.log.1
 .claude/scheduled_tasks.lock
 .claude/audit.log
 .conductor/
-dashboard-web/.conductor/
+apps/web/.conductor/
 # Session memory + planning scratch (per-user, contains paths + branch state)
 .planning/
 PROGRESS.md
@@ -116,7 +116,7 @@ E:/
 
 # ── Local experimental scripts (per-user, may contain PII) ──────────────────
 # These belong to individual user sessions / forks. The canonical features
-# they prototype eventually land in tracked scripts (auto-apply.mjs, scan.mjs,
+# they prototype eventually land in tracked scripts (engine/apply/auto-apply.mjs, engine/scan/scan.mjs,
 # etc.). Until then, keep them local.
 apply-one.mjs
 assemble-package.mjs
@@ -129,9 +129,82 @@ scan-portals.mjs
 tailor-resume.mjs
 test-llm-pipeline.mjs
 validate-readiness.mjs
-batch/.js-prompt-*.md
-batch/jobseeker.pid
-batch/tracker-additions/merged/
-batch/tmp/
+engine/batch/.js-prompt-*.md
+engine/batch/jobseeker.pid
+engine/batch/tracker-additions/merged/
+engine/batch/tmp/
 # (literal E + U+F03A, the Win32 encoding of the colon when E:/ leaks into a repo)
 E/
+
+# Obsidian vault (this project doubles as an Obsidian vault; per-machine settings)
+.obsidian/
+
+# --- Migration / git-readiness hardening (2026-06-10) ---
+# Persistent browser profiles — contain live login/session cookies, NEVER commit
+.apply-profile/
+.indeed-profile/
+.apply-session/
+.agents/
+.qwen/
+# Large interview recordings (1–5GB each)
+interview-prep/recordings/
+# Personal analysis spreadsheets
+*.xlsx
+
+# ── Personal memory layer (per-user instances — machinery ships in CLAUDE.md, content never does)
+CLAUDE.local.md
+WORKING.md
+TOOLKIT.md
+career-log.md
+BUILD-CHANGELOG.md
+Hireloom - Change Log*
+archive/
+portals.yml.bak.*
+
+# Interview prep is personal — ship only the generic tools
+interview-prep/*
+!interview-prep/transcribe.py
+!interview-prep/sample-frames.py
+!interview-prep/_strip-pdf.mjs
+!interview-prep/_strip-serve.mjs
+
+# More user-layer data
+data/hard-no.md
+data/verify-urls.txt
+reports/*/
+
+# Personal content corpora + one-off build-run scripts (candidate-specific CV/cover
+# content baked in — genericize before upstreaming, never commit as-is)
+engine/batch/wave*.mjs
+engine/batch/packages-data.mjs
+engine/batch/packages.mjs
+engine/batch/ports-data.mjs
+engine/batch/ports.mjs
+engine/batch/_experience-block.html
+engine/batch/build-cvs.mjs
+engine/batch/build-technical-variants.mjs
+engine/batch/regen74.mjs
+engine/batch/sample-accuratehd.mjs
+engine/batch/indeed-build.mjs
+engine/batch/indeed-covers.mjs
+engine/batch/build-pool-packages.mjs
+engine/batch/build-indeed-packages.mjs
+engine/batch/tailor-pool.mjs
+
+# Second-brain user-layer artifacts (the build spec in second-brain/ ships;
+# everything the build generates per-user stays local)
+BUILD-PROFILE.md
+BUILD-LOG.md
+_brain_index/
+_brain_api/
+_agent_state/
+
+# Backup artifacts must never enter the repo (tracker/profile backups)
+*.bak
+*.bak.*
+
+# Second Brain — per-user build outputs (spec: "What ships vs what stays local")
+.obsidian/
+_brain_api/
+_brain_index/
+_agent_state/

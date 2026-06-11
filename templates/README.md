@@ -1,15 +1,15 @@
 # Templates
 
-System-layer template files used by career-ops scripts and modes. These files are auto-updated when you run `npm run update` -- put user customizations in the user-layer files instead (see DATA_CONTRACT.md).
+System-layer template files used by career-ops scripts and modes. These files are auto-updated when you run `npm run update` -- put user customizations in the user-layer files instead (see docs/DATA_CONTRACT.md).
 
 ## Files
 
 | File | Used By | Purpose |
 |------|---------|---------|
-| `cv-template.html` | `generate-pdf.mjs` | HTML/CSS template for ATS-optimized CV PDFs |
-| `cv-template.tex` | `generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
+| `cv-template.html` | `engine/render/generate-pdf.mjs` | HTML/CSS template for ATS-optimized CV PDFs |
+| `cv-template.tex` | `engine/render/generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
 | `portals.example.yml` | Onboarding | Example portal scanner configuration (copy to `portals.yml` to activate) |
-| `states.yml` | `verify-pipeline.mjs`, `normalize-statuses.mjs`, `merge-tracker.mjs` | Canonical application states and their aliases |
+| `states.yml` | `engine/tracker/verify-pipeline.mjs`, `engine/tracker/normalize-statuses.mjs`, `engine/tracker/merge-tracker.mjs` | Canonical application states and their aliases |
 
 ### cv-template.html
 
@@ -17,7 +17,7 @@ The HTML template rendered by Playwright into PDF. Uses placeholder tokens (`{{N
 
 **Design:** Space Grotesk headings + DM Sans body, single-column ATS-safe layout, self-hosted fonts from `fonts/`.
 
-**Customization:** Edit this file to change colors, spacing, or section order. The placeholder tokens are documented in `batch/batch-prompt.md` under "Template placeholders."
+**Customization:** Edit this file to change colors, spacing, or section order. The placeholder tokens are documented in `engine/batch/batch-prompt.md` under "Template placeholders."
 
 ### cv-template.tex
 
@@ -28,10 +28,10 @@ LaTeX template for Overleaf-compatible CV generation. Based on the [sb2nov/resum
 **Usage:**
 ```bash
 # Validate and compile .tex → .pdf (requires pdflatex on PATH)
-node generate-latex.mjs output/cv-name-company-date.tex
+node engine/render/generate-latex.mjs output/cv-name-company-date.tex
 
 # Or specify a custom output path
-node generate-latex.mjs output/cv-name-company-date.tex output/custom-name.pdf
+node engine/render/generate-latex.mjs output/cv-name-company-date.tex output/custom-name.pdf
 ```
 
 **Prerequisites:** `pdflatex` via [MiKTeX](https://miktex.org/) (Windows) or TeX Live (Linux/macOS). First compilation may auto-install missing LaTeX packages. Alternatively, upload the `.tex` file directly to [Overleaf](https://www.overleaf.com) — no local install needed.

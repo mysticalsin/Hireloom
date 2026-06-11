@@ -3,8 +3,8 @@ node_modules
 .claude
 .conductor
 output
-batch/logs
-batch/tracker-additions/merged
+engine/batch/logs
+engine/batch/tracker-additions/merged
 *.mov
 *.mp4
 .DS_Store

@@ -5,14 +5,14 @@
 [English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Hireloom — 多代理求职系统" width="800"></a>
+  <a href="https://github.com/mysticalsin"><img src="docs/hero-banner.jpg" alt="Hireloom — 多代理求职系统" width="800"></a>
 </p>
 
 <p align="center">
   <em>公司用 AI 筛选候选人。Hireloom 把 AI 交给候选人，让他们去<strong>挑选</strong>公司。</em><br>
   传家级体验、酒红与香槟金调色、衬线品牌字 —— 内核仍是那台冷峻的高级岗位评估引擎。
   作坊负责编织，决定权在你。<br>
-  <em>构建于开源引擎 <a href="https://github.com/santifer/career-ops">career-ops</a> 之上。</em>
+  <em>构建于开源引擎 <a href="https://github.com/mysticalsin/Hireloom">career-ops</a> 之上。</em>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/3jEjwygjNG"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   <br>
   <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
   <img src="https://img.shields.io/badge/ES-red?style=flat" alt="ES">
@@ -44,7 +44,7 @@
 
 <p align="center"><strong>评估超过 740 个职位 · 生成超过 100 份个性化简历 · 成功拿下理想职位</strong></p>
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社区-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
+<p align="center"><a href="https://discord.gg/3jEjwygjNG"><img src="https://img.shields.io/badge/加入社区-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 ## 这是什么
 
@@ -62,7 +62,7 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 
 > **提醒：最开始几次评估不会特别准。** 系统还不了解你。请给它更多上下文，比如你的简历、职业故事、成果证明、个人偏好、擅长的事、想避开的事。你喂给它的信息越多，它就越准确。把它当成在培养一个新招聘顾问：第一周它需要先了解你，之后就会变得非常有价值。
 
-这个系统的作者曾用它评估 740 多个职位、生成 100 多份定制简历，并拿到一份 Head of Applied AI 的工作。[阅读完整案例研究](https://santifer.io/career-ops-system)。
+这个系统的作者曾用它评估 740 多个职位、生成 100 多份定制简历，并拿到一份 Head of Applied AI 的工作。
 
 ## 功能特性
 
@@ -83,7 +83,7 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 
 ```bash
 # 1. 克隆并安装
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops && npm install
 npx playwright install chromium   # 生成 PDF 所需
 
@@ -176,7 +176,7 @@ career-ops 是一个单一斜杠命令，带有多种模式：
 内置终端仪表盘可以让你更直观地浏览整个求职管道：
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -203,16 +203,16 @@ career-ops/
 │   ├── cv-template.html         # ATS 优化简历模板
 │   ├── portals.example.yml      # 扫描器配置模板
 │   └── states.yml               # 规范状态列表
-├── batch/
+├── engine/batch/
 │   ├── batch-prompt.md          # 自包含 worker 提示词
 │   └── batch-runner.sh          # 编排脚本
-├── dashboard/                   # Go TUI 管道查看器
+├── apps/tui/                   # Go TUI 管道查看器
 ├── data/                        # 你的追踪数据（已 gitignore）
 ├── reports/                     # 评估报告（已 gitignore）
 ├── output/                      # 生成的 PDF（已 gitignore）
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # 配置、定制、架构说明
-└── examples/                    # 示例简历、报告、成果证明
+└── docs/examples/                    # 示例简历、报告、成果证明
 ```
 
 ## 技术栈
@@ -229,23 +229,19 @@ career-ops/
 - **Dashboard**：Go + Bubble Tea + Lipgloss（Catppuccin Mocha 主题）
 - **数据**：Markdown 表格 + YAML 配置 + TSV 批处理文件
 
-## 也已开源
-
-- **[cv-santiago](https://github.com/santifer/cv-santiago)**：作者的作品集网站（santifer.io），包含 AI 聊天机器人、LLMOps Dashboard 和案例研究。如果你也需要一个能在求职时展示的作品集，可以 fork 它然后改成自己的版本。
-
 ## 关于作者
 
-我是 Santiago，现任 Head of Applied AI，也曾是一名创业者（创建并出售过一家公司，那家公司至今仍以我的名字运营）。我构建 career-ops 是为了管理我自己的求职流程，而它确实奏效了：我用它拿到了现在这份工作。
+Hireloom 由 [Tony Walteur](https://www.linkedin.com/in/tonywalteur/) 维护。
 
-我的作品集和其他开源项目 → [santifer.io](https://santifer.io)
+我的作品集和其他开源项目 → [github.com/mysticalsin](https://github.com/mysticalsin)
 
 ## Star 历史
 
-<a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
+<a href="https://www.star-history.com/?repos=mysticalsin%2FHireloom&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -258,4 +254,4 @@ career-ops/
 3. **你需要遵守第三方服务条款。** 你必须按照所使用招聘平台（Greenhouse、Lever、Workday、LinkedIn 等）的服务条款来使用本工具。不要用它向雇主发送垃圾申请，也不要对 ATS 系统造成过载。
 4. **不提供任何保证。** 评估结果只是建议，不是真相。AI 模型可能会幻觉出并不存在的技能或经历。作者不对任何求职结果、申请被拒、账号受限或其他后果承担责任。
 
-完整内容见 [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md)。本软件依据 [MIT License](LICENSE) 以“按现状”方式提供，不附带任何形式的担保。
+完整内容见 [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md)。本软件依据 [MIT License](LICENSE) 以“按现状”方式提供，不附带任何形式的担保。

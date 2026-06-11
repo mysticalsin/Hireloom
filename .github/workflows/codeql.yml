@@ -33,12 +33,12 @@ jobs:
         if: matrix.language == 'go'
         uses: actions/setup-go@v6
         with:
-          go-version-file: dashboard/go.mod
-          cache-dependency-path: dashboard/go.sum
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: apps/tui/go.sum
 
       - name: Build Go
         if: matrix.language == 'go'
-        run: cd dashboard && go build ./...
+        run: cd apps/tui && go build ./...
 
       - name: Autobuild
         if: matrix.language != 'go'

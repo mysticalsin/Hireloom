@@ -25,7 +25,7 @@ const HERE = (() => {
 })();
 
 // ─── Find a project root ────────────────────────────────────────────────────
-// 1. cwd if it has dashboard-web/server.mjs (running from clone)
+// 1. cwd if it has apps/web/server.mjs (running from clone)
 // 2. dirname(executable) for the bundled SEA case
 // 3. ~/CareerOps for a fresh install — initialized on first run
 function findProjectRoot() {
@@ -36,7 +36,7 @@ function findProjectRoot() {
     join(homedir(), 'CareerOps'),
   ];
   for (const dir of candidates) {
-    if (existsSync(join(dir, 'dashboard-web', 'server.mjs'))) {
+    if (existsSync(join(dir, 'apps', 'web', 'server.mjs'))) {
       return dir;
     }
   }
@@ -54,7 +54,7 @@ async function initFreshProject() {
     await fs.writeFile(readme,
       'Hireloom user data directory.\n\n' +
       'For a full install, clone:\n' +
-      '  git clone https://github.com/santifer/career-ops.git\n' +
+      '  git clone https://github.com/mysticalsin/Hireloom.git\n' +
       'Or run:\n' +
       '  bash install.sh\n', 'utf8');
   }
@@ -96,7 +96,7 @@ async function main() {
     console.log('\n⚠ No Hireloom project found in cwd or near the executable.');
     console.log('   Either:');
     console.log('     • cd into your Hireloom checkout, then run again, or');
-    console.log('     • git clone https://github.com/santifer/career-ops.git\n');
+    console.log('     • git clone https://github.com/mysticalsin/Hireloom.git\n');
     process.exit(2);
   }
 
@@ -135,7 +135,7 @@ async function main() {
     // Open browser shortly after the import completes; the server boots
     // synchronously enough that ~600ms is plenty.
     setTimeout(() => openBrowser(url), 600);
-    const serverUrl = `file://${join(root, 'dashboard-web', 'server.mjs').replace(/\\/g, '/')}`;
+    const serverUrl = `file://${join(root, 'apps', 'web', 'server.mjs').replace(/\\/g, '/')}`;
     await import(serverUrl);
     return;
   }
@@ -143,7 +143,7 @@ async function main() {
   // Dev mode: bare-node invocation — spawn the server in a child so we can
   // forward signals cleanly. (Useful when running `node scripts/launcher.mjs`
   // directly during development of the launcher itself.)
-  const serverPath = join(root, 'dashboard-web', 'server.mjs');
+  const serverPath = join(root, 'apps', 'web', 'server.mjs');
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
     env: { ...process.env },

@@ -4,7 +4,7 @@
     {
       "name": "wizard-preview",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["dashboard-web/server.mjs"],
+      "runtimeArgs": ["apps/web/server.mjs"],
       "port": 4749,
       "env": {
         "PORT": "4749",
@@ -12,6 +12,12 @@
         "CONFIG_DIR": "./tmp/preview-config",
         "DATA_DIR": "./tmp/preview-data"
       }
+    },
+    {
+      "name": "cheatsheet-strip",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["interview-prep/_strip-serve.mjs"],
+      "port": 4760
     }
   ]
 }

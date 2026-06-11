@@ -107,7 +107,7 @@ else
   echo "› Creating $VISIBILITY repo $OWNER/$REPO_NAME…"
   gh repo create "$REPO_NAME" $VISIBILITY \
     --description "$DESCRIPTION" \
-    --homepage "https://santifer.io" \
+    --homepage "https://github.com/mysticalsin" \
     --source=. \
     --push \
     --remote=origin

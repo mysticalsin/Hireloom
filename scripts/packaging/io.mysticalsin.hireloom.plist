@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for macOS — auto-starts the dashboard at login.
+
+  Install:
+    cp scripts/packaging/io.mysticalsin.hireloom.plist ~/Library/LaunchAgents/
+    # edit the WorkingDirectory + ProgramArguments paths first!
+    launchctl load -w ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist
+
+  Stop / unload:
+    launchctl unload ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist
+
+  Tail logs:
+    tail -f ~/Library/Logs/career-ops.out.log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.mysticalsin.hireloom</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/REPLACE_USER/Hireloom/apps/web/server.mjs</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/REPLACE_USER/career-ops</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PORT</key>
+        <string>4747</string>
+        <key>HOST</key>
+        <string>127.0.0.1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/REPLACE_USER/Library/Logs/career-ops.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/REPLACE_USER/Library/Logs/career-ops.err.log</string>
+</dict>
+</plist>

@@ -48,8 +48,8 @@
    - F: Interview prep (STAR stories)
 5. **Score**: Weighted average across 10 dimensions (1-5)
 6. **Report**: Save as `reports/{num}-{company}-{date}.md`
-7. **PDF**: Generate ATS-optimized CV (`generate-pdf.mjs`)
-8. **Track**: Write TSV to `batch/tracker-additions/`, auto-merged
+7. **PDF**: Generate ATS-optimized CV (`engine/render/generate-pdf.mjs`)
+8. **Track**: Write TSV to `engine/batch/tracker-additions/`, auto-merged
 
 ## Batch Processing
 
@@ -85,7 +85,7 @@ templates/cv-template.html → PDF generation template
 
 - Reports: `{###}-{company-slug}-{YYYY-MM-DD}.md` (3-digit zero-padded)
 - PDFs: `cv-candidate-{company-slug}-{YYYY-MM-DD}.pdf`
-- Tracker TSVs: `batch/tracker-additions/{id}.tsv`
+- Tracker TSVs: `engine/batch/tracker-additions/{id}.tsv`
 
 ## Pipeline Integrity
 
@@ -93,15 +93,15 @@ Scripts maintain data consistency:
 
 | Script | Purpose |
 |--------|---------|
-| `merge-tracker.mjs` | Merges batch TSV additions into applications.md |
-| `verify-pipeline.mjs` | Health check: statuses, duplicates, links |
-| `dedup-tracker.mjs` | Removes duplicate entries by company+role |
-| `normalize-statuses.mjs` | Maps status aliases to canonical values |
-| `cv-sync-check.mjs` | Validates setup consistency |
+| `engine/tracker/merge-tracker.mjs` | Merges batch TSV additions into applications.md |
+| `engine/tracker/verify-pipeline.mjs` | Health check: statuses, duplicates, links |
+| `engine/tracker/dedup-tracker.mjs` | Removes duplicate entries by company+role |
+| `engine/tracker/normalize-statuses.mjs` | Maps status aliases to canonical values |
+| `engine/tracker/cv-sync-check.mjs` | Validates setup consistency |
 
 ## Dashboard TUI
 
-The `dashboard/` directory contains a standalone Go TUI application that visualizes the pipeline:
+The `apps/tui/` directory contains a standalone Go TUI application that visualizes the pipeline:
 
 - Filter tabs: All, Evaluada, Aplicado, Entrevista, Top >=4, No Aplicar
 - Sort modes: Score, Date, Company, Status

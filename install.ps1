@@ -183,7 +183,7 @@ function Invoke-Local {
         Write-Host ''
         if (Read-YesNo 'Start the dashboard now?' 'y') {
             Open-Url $Url
-            node dashboard-web/server.mjs
+            node apps/web/server.mjs
         }
     } finally { Pop-Location }
 }
@@ -196,11 +196,11 @@ function Invoke-Update {
             try { git pull --ff-only } catch { Write-WarnX 'git pull failed; continuing' }
         }
         if (Test-Cmd node) {
-            Write-Log 'Running update-system.mjs apply…'
-            node update-system.mjs apply
+            Write-Log 'Running engine/update-system.mjs apply…'
+            node engine/update-system.mjs apply
             Write-Ok 'System files updated. Your data is untouched.'
         } else {
-            Write-WarnX 'Node not found; install it then run: node update-system.mjs apply'
+            Write-WarnX 'Node not found; install it then run: node engine/update-system.mjs apply'
         }
     } finally { Pop-Location }
 }

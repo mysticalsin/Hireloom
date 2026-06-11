@@ -17,12 +17,12 @@
 
 ## Checklist
 
-- [ ] I have read [CONTRIBUTING.md](https://github.com/santifer/career-ops/blob/main/CONTRIBUTING.md)
+- [ ] I have read [.github/CONTRIBUTING.md](https://github.com/mysticalsin/Hireloom/blob/main/CONTRIBUTING.md)
 - [ ] I linked a related issue above (required for features and architecture changes)
 - [ ] My PR does not include personal data (CV, email, real names)
-- [ ] I ran `node test-all.mjs` and all tests pass
-- [ ] My changes respect the [Data Contract](https://github.com/santifer/career-ops/blob/main/DATA_CONTRACT.md) (no modifications to user-layer files)
-- [ ] My changes align with the [project roadmap](https://github.com/santifer/career-ops/discussions/156)
+- [ ] I ran `node engine/test-all.mjs` and all tests pass
+- [ ] My changes respect the [Data Contract](https://github.com/mysticalsin/Hireloom/blob/main/DATA_CONTRACT.md) (no modifications to user-layer files)
+- [ ] My changes align with the [project roadmap](https://github.com/mysticalsin/Hireloom/discussions/156)
 
 ---
-Questions? [Join the Discord](https://discord.gg/8pRpHETxa4) for faster feedback.
+Questions? [Join the Discord](https://discord.gg/3jEjwygjNG) for faster feedback.

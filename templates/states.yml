@@ -19,6 +19,12 @@ states:
     description: Application submitted
     dashboard_group: applied
 
+  - id: submitted
+    label: Submitted?
+    aliases: [submitted, submitted-unconfirmed, unconfirmed]
+    description: Submit clicked but confirmation not detected; verify/retry manually
+    dashboard_group: applied
+
   - id: responded
     label: Responded
     aliases: [respondido]

@@ -46,15 +46,15 @@ local: ## Local install (npm install + tests + start)
 	@bash install.sh --local
 
 start: ## Start the dashboard (foreground, local)
-	@PORT=$(PORT) HOST=$(HOST) node dashboard-web/server.mjs
+	@PORT=$(PORT) HOST=$(HOST) node apps/web/server.mjs
 
 start-bg: ## Start the dashboard in the background (local)
-	@PORT=$(PORT) HOST=$(HOST) nohup node dashboard-web/server.mjs > .dashboard.log 2>&1 &
+	@PORT=$(PORT) HOST=$(HOST) nohup node apps/web/server.mjs > .dashboard.log 2>&1 &
 	@sleep 1; printf '\033[32m✓\033[0m Dashboard backgrounded — logs in .dashboard.log\n'
 
 stop: ## Stop docker stack + any local server
 	@$(DC) down 2>/dev/null || true
-	@pkill -f "dashboard-web/server.mjs" 2>/dev/null || true
+	@pkill -f "apps/web/server.mjs" 2>/dev/null || true
 	@printf '\033[32m✓\033[0m Stopped\n'
 
 restart: stop ## Stop, then start (docker)
@@ -87,7 +87,7 @@ backup: ## Snapshot user data to ./backups/<timestamp>/
 	  printf '\033[32m✓\033[0m Backed up to %s\n' "$$DEST"
 
 clean: ## Remove caches + scratch (does NOT touch user data)
-	@rm -rf tmp/ dashboard-web/.conductor/ batch/tmp/ .dashboard.log
+	@rm -rf tmp/ apps/web/.conductor/ engine/batch/tmp/ .dashboard.log
 	@printf '\033[32m✓\033[0m Removed transient state\n'
 
 rebuild: ## Force rebuild of the docker image (no cache)

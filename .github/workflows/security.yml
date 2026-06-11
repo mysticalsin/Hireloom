@@ -95,7 +95,7 @@ jobs:
           fi
 
           # 5. console.log in committed source (allowed in tests + scripts)
-          if grep -rn 'console\.log' dashboard-web/server.mjs dashboard-web/lib/ 2>/dev/null | grep -v '// allow:console'; then
+          if grep -rn 'console\.log' apps/web/server.mjs apps/web/lib/ 2>/dev/null | grep -v '// allow:console'; then
             echo "::warning::console.log in production source — prefer structured logger"
           fi
 

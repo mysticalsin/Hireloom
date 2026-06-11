@@ -10,23 +10,23 @@ don't break, but everything human-facing reads as Hireloom.
 
 ## Origin
 
-The engine was built and used by [santifer](https://santifer.io) to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. The archetypes, scoring logic, negotiation scripts, and proof point structure all reflect his specific career search in AI/automation roles.
-
-The portfolio that goes with this system is also open source: [cv-santiago](https://github.com/santifer/cv-santiago).
+The engine was battle-tested in a real career search: 740+ job offers evaluated, 100+ tailored CVs generated, and a Head of Applied AI role landed. The archetypes, scoring logic, negotiation scripts, and proof point structure all reflect that original search in AI/automation roles.
 
 **It will work out of the box, but it's designed to be made yours.** If the archetypes don't match your career, the modes are in the wrong language, or the scoring doesn't fit your priorities -- just ask. You (AI Agent) can edit the user's files. The user says "change the archetypes to data engineering roles" and you do it. That's the whole point.
 
 ## Data Contract (CRITICAL)
 
-There are two layers. Read `DATA_CONTRACT.md` for the full list.
+There are two layers. Read `docs/DATA_CONTRACT.md` for the full list.
 
 **User Layer (NEVER auto-updated, personalization goes HERE):**
 - `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
 - `data/*`, `reports/*`, `output/*`, `interview-prep/*`
+- Memory layer: `CLAUDE.local.md`, `WORKING.md`, `career-log.md`, `TOOLKIT.md`, `BUILD-CHANGELOG.md`
+- Second-brain outputs: `BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, `.obsidian/*`
 
 **System Layer (auto-updatable, DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `CLAUDE.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*`
+- `CLAUDE.md`, `*.mjs` scripts, `apps/tui/*`, `templates/*`, `engine/batch/*`
 
 **THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
@@ -35,19 +35,19 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 On the first message of each session, run the update checker silently:
 
 ```bash
-node update-system.mjs check
+node engine/update-system.mjs check
 ```
 
 Parse the JSON output:
 - `{"status": "update-available", "local": "1.0.0", "remote": "1.1.0", "changelog": "..."}` → tell the user:
   > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
-  If yes → run `node update-system.mjs apply`. If no → run `node update-system.mjs dismiss`.
+  If yes → run `node engine/update-system.mjs apply`. If no → run `node engine/update-system.mjs dismiss`.
 - `{"status": "up-to-date"}` → say nothing
 - `{"status": "dismissed"}` → say nothing
 - `{"status": "offline"}` → say nothing
 
 The user can also say "check for updates" or "update career-ops" at any time to force a check.
-To rollback: `node update-system.mjs rollback`
+To rollback: `node engine/update-system.mjs rollback`
 
 ## What is career-ops
 
@@ -62,42 +62,22 @@ AI-powered job search automation built on Claude Code: pipeline tracking, offer 
 | `data/scan-history.tsv` | Scanner dedup history |
 | `portals.yml` | Query and company config |
 | `templates/cv-template.html` | HTML template for CVs |
-| `generate-pdf.mjs` | Playwright: HTML to PDF |
+| `engine/render/generate-pdf.mjs` | Playwright: HTML to PDF |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
-| `analyze-patterns.mjs` | Pattern analysis script (JSON output) |
-| `followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
+| `engine/tracker/analyze-patterns.mjs` | Pattern analysis script (JSON output) |
+| `engine/tracker/followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
 | `data/follow-ups.md` | Follow-up history tracker |
-| `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
-| `check-liveness.mjs` | Job posting liveness checker |
-| `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `doctor.mjs` | Setup validation — JSON output for CI/scripts |
+| `engine/scan/scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
+| `engine/scan/check-liveness.mjs` | Job posting liveness checker |
+| `engine/scan/liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
+| `engine/doctor.mjs` | Setup validation — JSON output for CI/scripts |
 | `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
 
-### OpenCode Commands
+### Other CLIs (OpenCode, Codex, Gemini, Qwen)
 
-When using [OpenCode](https://opencode.ai), the following slash commands are available (defined in `.opencode/commands/`):
-
-| Command | Claude Code Equivalent | Description |
-|---------|------------------------|-------------|
-| `/career-ops` | `/career-ops` | Show menu or evaluate JD with args |
-| `/career-ops-pipeline` | `/career-ops pipeline` | Process pending URLs from inbox |
-| `/career-ops-evaluate` | `/career-ops oferta` | Evaluate job offer (A-F scoring) |
-| `/career-ops-compare` | `/career-ops ofertas` | Compare and rank multiple offers |
-| `/career-ops-contact` | `/career-ops contacto` | LinkedIn outreach (find contacts + draft) |
-| `/career-ops-deep` | `/career-ops deep` | Deep company research |
-| `/career-ops-pdf` | `/career-ops pdf` | Generate ATS-optimized CV |
-| `/career-ops-training` | `/career-ops training` | Evaluate course/cert against goals |
-| `/career-ops-project` | `/career-ops project` | Evaluate portfolio project idea |
-| `/career-ops-tracker` | `/career-ops tracker` | Application status overview |
-| `/career-ops-apply` | `/career-ops apply` | Live application assistant |
-| `/career-ops-scan` | `/career-ops scan` | Scan portals for new offers |
-| `/career-ops-batch` | `/career-ops batch` | Batch processing with parallel workers |
-| `/career-ops-patterns` | `/career-ops patterns` | Analyze rejection patterns and improve targeting |
-| `/career-ops-followup` | `/career-ops followup` | Follow-up cadence tracker |
-
-**Note:** OpenCode commands invoke the same `.claude/skills/career-ops/SKILL.md` skill used by Claude Code. The `modes/*` files are shared between both platforms.
+`AGENTS.md` is the canonical cross-CLI rulebook, and the career-ops skill ships in the open agent skill standard format (`.agents/skills/`, `.qwen/skills/`, mirroring `.claude/skills/`). The `modes/*` files are shared by every platform — on any CLI, invoke a mode by asking for it by name (`scan`, `oferta`, `pdf`, `apply`, …).
 
 ### First Run — Onboarding (IMPORTANT)
 
@@ -171,17 +151,17 @@ Store any insights the user shares in `config/profile.yml` (under narrative), `m
 Once all files exist, confirm:
 > "You're all set! You can now:
 > - Paste a job URL to evaluate it
-> - Run `/career-ops scan` (or `/career-ops-scan` if using OpenCode) to search portals
+> - Run `/career-ops scan` to search portals
 > - Run `/career-ops` to see all commands
 >
 > Everything is customizable — just ask me to change anything.
 >
-> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, the author's portfolio is also open source: github.com/santifer/cv-santiago — feel free to fork it and make it yours."
+> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, consider building a simple portfolio site and linking it in your profile."
 
 Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
 
-If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring `/career-ops scan` (or `/career-ops-scan` if using OpenCode). If those aren't available, suggest adding a cron job or remind them to run `/career-ops scan` (or `/career-ops-scan` if using OpenCode) periodically.
+If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring `/career-ops scan`. If those aren't available, suggest adding a cron job or remind them to run `/career-ops scan` periodically.
 
 ### Personalization
 
@@ -193,7 +173,7 @@ This system is designed to be customized by YOU (AI Agent). When the user asks y
 - "Add these companies to my portals" → edit `portals.yml`
 - "Update my profile" → edit `config/profile.yml`
 - "Change the CV template design" → edit `templates/cv-template.html`
-- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `batch/batch-prompt.md` only when changing the shared system defaults for everyone
+- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `engine/batch/batch-prompt.md` only when changing the shared system defaults for everyone
 
 ### Language Modes
 
@@ -251,12 +231,12 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## Ethical Use -- CRITICAL
 
-**This system is designed for quality, not quantity.** The goal is to help the user find and apply to roles where there is a genuine match -- not to spam companies with mass applications.
+**Hireloom automates applying -- it must never automate carelessness.** Auto-application is the product's headline feature; what we prevent is rushed or inaccurate applying, not volume. Volume is legitimate exactly when every package going out is truthful and properly aimed.
 
-- **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs -- but always STOP before clicking Submit/Send/Apply. The user makes the final call.
-- **Strongly discourage low-fit applications.** If a score is below 4.0/5, explicitly recommend against applying. The user's time and the recruiter's time are both valuable. Only proceed if the user has a specific reason to override the score.
-- **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50. Guide the user toward fewer, better applications.
-- **Respect recruiters' time.** Every application a human reads costs someone's attention. Only send what's worth reading.
+- **Automation runs only when the user launches it.** The auto-applier covers roles the user selected (by hand or by score floor), after dry runs they watched and approved. Outside that approved flow -- assisted apply, outreach, follow-ups -- fill forms, draft answers, generate PDFs, but always STOP before Submit/Send. The user makes the final call.
+- **Truthful tailoring, always.** Every CV, cover letter, and form answer comes from the user's real record. No invented metrics, no skills they don't have, no guessed work-authorization answers.
+- **Never force a flow.** If an application can't be completed cleanly (captcha, broken form, unfamiliar ATS), pause and hand it to the user rather than bulldozing it or silently marking it done. The user may ask to defer stuck roles to the end of a run and let the fully-autonomous ones go first.
+- **Respect the score.** Below 4.0/5, recommend against applying and say why -- recruiter attention is real, and low-fit volume helps no one. The user can override with a reason.
 
 ---
 
@@ -273,18 +253,18 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## CI/CD and Quality
 
-- **GitHub Actions** run on every PR: `test-all.mjs` (63+ checks), auto-labeler (risk-based: 🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), welcome bot for first-time contributors
+- **GitHub Actions** run on every PR: `engine/test-all.mjs` (63+ checks), auto-labeler (risk-based: 🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), welcome bot for first-time contributors
 - **Branch protection** on `main`: status checks must pass before merge. No direct pushes to main (except admin bypass).
 - **Dependabot** monitors npm, Go modules, and GitHub Actions for security updates
 - **Contributing process**: issue first → discussion → PR with linked issue → CI passes → maintainer review → merge
 
 ## Community and Governance
 
-- **Code of Conduct**: Contributor Covenant 2.1 with enforcement actions (see `CODE_OF_CONDUCT.md`)
-- **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `GOVERNANCE.md`)
-- **Security**: private vulnerability reporting via email (see `SECURITY.md`)
-- **Support**: help questions go to Discord/Discussions, not issues (see `SUPPORT.md`)
-- **Discord**: https://discord.gg/8pRpHETxa4
+- **Code of Conduct**: Contributor Covenant 2.1 with enforcement actions (see `.github/CODE_OF_CONDUCT.md`)
+- **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `.github/GOVERNANCE.md`)
+- **Security**: private vulnerability reporting via email (see `.github/SECURITY.md`)
+- **Support**: help questions go to Discord/Discussions, not issues (see `.github/SUPPORT.md`)
+- **Discord**: https://discord.gg/3jEjwygjNG
 
 ## Stack and Conventions
 
@@ -292,14 +272,14 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 - Scripts in `.mjs`, configuration in YAML
 - Output in `output/` (gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
-- Batch in `batch/` (gitignored except scripts and prompt)
+- Batch in `engine/batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: After each batch of evaluations, run `node engine/tracker/merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
-Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
+Write one TSV file per evaluation to `engine/batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
 
 ```
 {num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
@@ -320,13 +300,13 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 
 ### Pipeline Integrity
 
-1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `batch/tracker-additions/` and `merge-tracker.mjs` handles the merge.
+1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `engine/batch/tracker-additions/` and `engine/tracker/merge-tracker.mjs` handles the merge.
 2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
 3. All reports MUST include `**URL:**` in the header (between Score and PDF). Include `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs`
-6. Normalize statuses: `node normalize-statuses.mjs`
-7. Dedup: `node dedup-tracker.mjs`
+5. Health check: `node engine/tracker/verify-pipeline.mjs`
+6. Normalize statuses: `node engine/tracker/normalize-statuses.mjs`
+7. Dedup: `node engine/tracker/dedup-tracker.mjs`
 
 ### Canonical States (applications.md)
 
@@ -351,24 +331,27 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 ## Testing
 
 ```bash
-npm test                                # 56 unit tests over wizard helpers
+npm test                                # 222 unit tests across tests/
 node --test tests/onboard.test.mjs      # run a single suite
 ```
 
-Tests cover the pure helpers in `dashboard-web/lib/`:
+Tests cover the pure helpers in `apps/web/lib/` and `lib/`:
 - `onboard.mjs` — `yamlQuote`, `validateOnboardPayload`, `serializeProfileYaml`, `extractProfileFromResume`, `kebabCase`
 - `path-safety.mjs` — `makeSafeResolver` (path-traversal defense for `/reports/*` and `getCompForReport`)
+- `engine/lib/identity.mjs` — candidate identity for the renderers (`tests/identity.test.mjs`)
+- `engine/lib/profile-check.mjs` — doctor's profile.yml content validation (`tests/profile-check.test.mjs`)
+- plus http-utils, gmail-status, error-log, backup/restore, and rate-limit/CSRF e2e suites
 
-When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [MISTAKES.md](MISTAKES.md) for the cautionary tale:
+When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [docs/MISTAKES.md](docs/MISTAKES.md) for the cautionary tale:
 
 ```bash
 TEST_CFG=$(mktemp -d)
-PORT=4749 HOST=127.0.0.1 CONFIG_DIR="$TEST_CFG" node dashboard-web/server.mjs
+PORT=4749 HOST=127.0.0.1 CONFIG_DIR="$TEST_CFG" node apps/web/server.mjs
 ```
 
 ## Onboarding wizard
 
-The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `openOnboard()` → `wizGoTo(1..6)`):
+The `⊕ Profile` button opens a 6-step wizard (`apps/web/server.mjs` → `openOnboard()` → `wizGoTo(1..6)`):
 
 1. **Resume** — drop `.txt`/`.md` or paste; PDFs trigger a "Open in tab → ⌘+A → ⌘+C" assist with auto-paste detection.
 2. **Confirm basics** — name/email/phone/location/linkedin/headline pre-filled from extraction; user edits.
@@ -378,3 +361,74 @@ The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `
 6. **Review** — structured summary, one CTA writes `config/profile.yml` (snapshot to `.bak.{timestamp}` first; rotation keeps newest 10) and kicks off CV PDF generation in the background.
 
 Detect-existing-profile: `/api/onboard/profile-summary` is fetched on open; if a substantive profile exists, a banner warns the user that re-running will overwrite (with backup). Empty-state banner appears when extraction yields < 3 fields. A11y: `role=dialog`, `aria-modal`, `aria-labelledby`, focus trap, Escape closes, Enter advances, chips carry `aria-pressed` and activate on Enter/Space.
+
+---
+
+# Second Brain (optional built-in feature)
+
+Hireloom includes an agent-built **Second Brain**: live Obsidian dashboards
+over the user's real pipeline — applications kanban, apply queue, follow-up
+radar, upcoming interviews — with zero new data entry. The complete build
+instruction set is `second-brain/BUILD-SPEC.md`.
+
+**Trigger:** the user says "set up my second brain", "build the dashboard",
+mentions Obsidian dashboards, or invokes `/second-brain` → follow
+`.claude/commands/second-brain.md`, which reads `second-brain/BUILD-SPEC.md`
+(self-contained: design laws, phases, the tab-binding contract, self-test).
+Phase 0 derives the user's profile from `config/profile.yml` and
+`templates/states.yml` — only four taste/hardware questions get asked.
+
+The spec is system layer; everything the build GENERATES for the user
+(`BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, the built
+plugin, `.obsidian/`) is user layer and gitignored.
+
+---
+
+# Personal Memory System (per-user, local — NEVER committed)
+
+*Ships with Hireloom as machinery; each user's content stays on their machine. All memory files are plain, Obsidian-friendly markdown (dated entries `YYYY-MM-DD`, `[[wiki-links]]` for skills/roles, tags `#skill` `#role` `#milestone` `#preference-change`) — the project folder doubles as an Obsidian vault if the user wants it.*
+
+## The files (all gitignored — personal data never enters the repo)
+
+| File | Role |
+|------|------|
+| `CLAUDE.local.md` | **The user's personal layer** (auto-loaded by Claude Code every session): a **Current Profile** section (who they are — identity, experience, skills with honest internal depth, targets, preferences, rules) and a **How to work with me** section (voice, what frustrates them, what they respond well to). The Current Profile is the source of truth and is **overwritten in place** when facts change — never keep old versions. |
+| `WORKING.md` | **The one live state file** — overwritten at every checkpoint, never appended. What's done, what's mid-flight, exact next steps, open problems. |
+| `career-log.md` | **Append-only** dated history of learning and preference changes — narrative material, never current fact. |
+| `TOOLKIT.md` | Curated, annotated map of the local files/tools/methods. Before inferring or web-searching how something works, read the actual local file it points to. |
+
+**Wiring:** `CLAUDE.local.md` Current Profile is authoritative; `career-log.md` is history only; `WORKING.md` is the only live-state file. The user may edit any of these by hand between sessions — **treat file contents on disk as the latest truth**, even if they differ from what you remember writing.
+
+**Bootstrap:** if `CLAUDE.local.md` doesn't exist and the user wants persistent memory ("remember me between sessions"), create the four files in this structure and keep them current via the protocols below.
+
+**Corrections update memory immediately.** When the user corrects a fact or changes a preference mid-session, update `CLAUDE.local.md` right away (overwrite the old value) and append a dated entry to `career-log.md` — don't wait for a checkpoint.
+
+**Fresh sessions beat long threads.** Suggest checkpointing (`goodnight`) at natural task boundaries — around 60% context — rather than letting auto-compact fire mid-task; reload context from the files at session start rather than relying on conversational memory.
+
+## Keyword protocols
+
+Matching `/goodnight` and `/morning` slash commands exist in `.claude/commands/` as backups (and so a scheduled automation can call the checkpoint).
+
+**`goodnight` = full checkpoint.** Applies whether the user is done for the day OR just clearing a full context mid-day — behave identically. Do all of the following, then confirm what you wrote (list what you updated; don't summarize the day back):
+1. **`CLAUDE.local.md`** — if anything changed this session (new skills, changed preferences, corrected facts, new rules), update Current Profile by **OVERWRITING** old values; add newly-noticed tendencies to **How to work with me**.
+2. **`career-log.md`** — append a dated entry for anything learned or any goal/preference that shifted. Skip if nothing changed.
+3. **`WORKING.md`** — **overwrite** with current working state: finished, mid-flight, exact next steps, open problems, and any context the next session needs that isn't obvious from the code. Assume the next session knows nothing beyond the files.
+4. **`TOOLKIT.md`** — update the inventory if any files/tools were added, removed, or repurposed. Skip if nothing changed.
+5. **METHODS** — if a reusable workflow/recipe was developed or refined, save it as a procedure file (`modes/` or `.claude/commands/` per convention) and list it in `TOOLKIT.md`. A method that lives only in a conversation is a method lost.
+6. **Build-changelog** — if any files affecting **the project itself** changed (`*.mjs`, modes, templates, dashboard, configs), append an entry per the **Contribution Change-Log convention** below. Purely personal changes (skills/preferences/goals) go in `career-log.md`, NOT here. Skip if only routine data/memory files changed.
+
+**`morning` = full startup** (typically the first message of a fresh session). Read `CLAUDE.local.md`, `WORKING.md`, `TOOLKIT.md`, and `career-log.md`, plus glance at recent repo changes. Then give the user: a brief **"here's where we left off,"** today's **first next step** from `WORKING.md`, and **flag anything in `WORKING.md`/`TOOLKIT.md` that looks stale or contradicts the repo** — including anything they changed by hand since last session. Keep it short — orient, don't lecture.
+
+---
+# Contribution Change-Log (shippable convention — applies to EVERY user)
+
+*This is a general Hireloom convention, not specific to any one user — it ships with the repo so the maintainers receive a uniform, machine-readable contribution record from anyone.*
+
+**The behavior:** whenever you (the AI agent) change files that affect **the project itself** (system-layer `*.mjs` / modes / templates / dashboard / configs, or notable user-layer tooling), record it in the user's **build change-log** so their improvements are capturable upstream.
+
+1. **First project change in a fresh install:** copy `templates/BUILD-CHANGELOG.template.md` → **`BUILD-CHANGELOG.md`** (fill the frontmatter: `hireloom_base_version` from the `VERSION` file, optional contributor/platform).
+2. **Each change** (and at every `goodnight`): append one entry in the template's **entry schema** — `Layer:` (system|user), `Files:`, `Change:`, **`Root cause:`** (the WHY), **`Upstream:`** (yes|no + one-line why/caveat), optional `Reproduce:`. Newest at the bottom.
+3. **One file = the whole contribution.** A user submits **just that one markdown file** to the maintainers; they don't need a PR or to understand the code. The maintainer side ingests it via **`/review-contribution`** (reads the file, maps entries to the repo, assesses each `Upstream: yes` entry for merge).
+4. **Keep personal data out of it** — a user's CV/profile/preferences are user-layer and go in their own logs, never in the upstream-bound change-log. Only project-affecting changes + root-causes belong here.
+
+**README is user-triggered, NOT auto-updated.** Do **not** rewrite `README.md` at every `goodnight` — the user says when to refresh it. Your job is to keep the *source information* available in the maintained mds (`BUILD-CHANGELOG.md` for what changed + why, `WORKING.md` for current state, `TOOLKIT.md` for the file/tool map) so that when they ask, a README update is a quick assembly job, not an archaeology dig.

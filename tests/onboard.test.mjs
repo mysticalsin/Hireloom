@@ -18,10 +18,10 @@ import {
   extractProfileFromResume,
   kebabCase,
   parseProfileSummary,
-} from '../dashboard-web/lib/onboard.mjs';
-import { makeSafeResolver } from '../dashboard-web/lib/path-safety.mjs';
-import { readJsonBody, MAX_BODY_BYTES, isOriginAllowed } from '../dashboard-web/lib/http-utils.mjs';
-import { buildGmailStatus } from '../dashboard-web/lib/gmail-status.mjs';
+} from '../apps/web/lib/onboard.mjs';
+import { makeSafeResolver } from '../apps/web/lib/path-safety.mjs';
+import { readJsonBody, MAX_BODY_BYTES, isOriginAllowed } from '../apps/web/lib/http-utils.mjs';
+import { buildGmailStatus } from '../apps/web/lib/gmail-status.mjs';
 
 // ── yamlQuote ────────────────────────────────────────────────────────────────
 
@@ -862,7 +862,7 @@ describe('/api/health endpoint contract', () => {
     // Pick a port unlikely to clash with the user's running dashboard
     port = 14747 + Math.floor(Math.random() * 1000);
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const serverPath = path.join(here, '..', 'dashboard-web', 'server.mjs');
+    const serverPath = path.join(here, '..', 'apps', 'web', 'server.mjs');
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'health-'));
     proc = spawn(process.execPath, [serverPath], {
       env: {
@@ -948,7 +948,7 @@ describe('/api/onboard/finalize HTTP contract', () => {
     port = 15747 + Math.floor(Math.random() * 1000);
     configDir = mkdtempSync(path.join(os.tmpdir(), 'co-onb-'));
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const serverPath = path.join(here, '..', 'dashboard-web', 'server.mjs');
+    const serverPath = path.join(here, '..', 'apps', 'web', 'server.mjs');
     proc = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
@@ -1177,5 +1177,119 @@ describe('buildGmailStatus', () => {
     const s = buildGmailStatus(baseInput({ polling: undefined, fastPolling: undefined }));
     assert.equal(s.polling, false);
     assert.equal(s.fastPolling, false);
+  });
+});
+
+// ── cv: block (education / certifications → engine/lib/identity.mjs schema) ────────
+
+describe('cv block — serialize / validate / extract / round-trip', () => {
+  const payload = (cv) => ({
+    basics: { full_name: 'Test User', email: 't@example.com' },
+    target_roles: ['Engineer'],
+    cv,
+  });
+
+  test('serializeProfileYaml emits education + certifications', () => {
+    const yml = serializeProfileYaml(payload({
+      education: [{ degree: 'BSc, Physics', org: 'MIT', date: '2010 – 2014' }],
+      certifications: [{ title: 'PMP', org: 'PMI' }],
+    }));
+    assert.match(yml, /^cv:$/m);
+    assert.match(yml, /degree: "BSc, Physics"/);
+    assert.match(yml, /org: "MIT"/);
+    assert.match(yml, /title: "PMP"/);
+  });
+
+  test('serializeProfileYaml emits empty arrays when cv absent', () => {
+    const yml = serializeProfileYaml(payload(undefined));
+    assert.match(yml, /education: \[\]/);
+    assert.match(yml, /certifications: \[\]/);
+  });
+
+  test('entries with no degree/org/title are dropped', () => {
+    const yml = serializeProfileYaml(payload({
+      education: [{ degree: '', org: '', date: '2020' }],
+      certifications: [{ title: '', org: 'Nobody' }],
+    }));
+    assert.match(yml, /education: \[\]/);
+    assert.match(yml, /certifications: \[\]/);
+  });
+
+  test('validateOnboardPayload accepts a valid cv block', () => {
+    assert.deepEqual(validateOnboardPayload(payload({
+      education: [{ degree: 'BA', org: 'School', date: '2019' }],
+      certifications: [{ title: 'CSM', org: '' }],
+    })), []);
+  });
+
+  test('validateOnboardPayload rejects malformed cv entries', () => {
+    assert.ok(validateOnboardPayload(payload({ education: 'BSc' })).some(e => /cv\.education/.test(e)));
+    assert.ok(validateOnboardPayload(payload({
+      education: [{ degree: 'x'.repeat(301) }],
+    })).some(e => /cv\.education/.test(e)));
+    assert.ok(validateOnboardPayload(payload({
+      certifications: [{ title: 'ok', org: 'y'.repeat(301) }],
+    })).some(e => /cv\.certifications/.test(e)));
+  });
+
+  test('extractProfileFromResume pulls education and certifications', () => {
+    const resume = [
+      '# Jane Example',
+      'jane@example.com | 416-555-0100 | Toronto, ON',
+      '',
+      '## Experience',
+      '- Did things at BigCo',
+      '',
+      '## Education',
+      'BSc, Astrophysics — University of Toronto (2014 – 2018)',
+      '',
+      '## Certifications',
+      'PMP — Project Management Institute',
+      'Certified ScrumMaster — Scrum Alliance',
+    ].join('\n');
+    const p = extractProfileFromResume(resume);
+    assert.equal(p.education.length, 1);
+    assert.match(p.education[0].degree, /BSc/);
+    assert.match(p.education[0].org, /University of Toronto/);
+    assert.match(p.education[0].date, /2014/);
+    assert.equal(p.certifications.length, 2);
+    assert.equal(p.certifications[0].title, 'PMP');
+    assert.match(p.certifications[0].org, /Project Management Institute/);
+  });
+
+  test('extractProfileFromResume handles degree and org on separate lines', () => {
+    const resume = [
+      'John Smith',
+      '',
+      'EDUCATION',
+      'Master of Business Administration',
+      'Harvard Business School, 2008 – 2010',
+    ].join('\n');
+    const p = extractProfileFromResume(resume);
+    assert.equal(p.education.length, 1);
+    assert.match(p.education[0].degree, /Master of Business/);
+    assert.match(p.education[0].org, /Harvard/);
+    assert.match(p.education[0].date, /2008/);
+  });
+
+  test('round-trip: serialized yaml renders through engine/lib/identity.mjs', async () => {
+    const { loadIdentity } = await import('../engine/lib/identity.mjs');
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hireloom-cv-rt-'));
+    const yml = serializeProfileYaml(payload({
+      education: [{ degree: 'BSc, Physics & Math', org: 'U "of" T', date: '2010 – 2014' }],
+      certifications: [{ title: 'PMP', org: 'PMI (valid through 2030)' }],
+    }));
+    const p = path.join(dir, 'profile.yml');
+    writeFileSync(p, yml);
+    try {
+      const id = loadIdentity(p);
+      assert.equal(id.name, 'Test User');
+      assert.match(id.eduHtml, /BSc, Physics &amp; Math/);
+      assert.match(id.eduHtml, /U &quot;of&quot; T|U "of" T/);
+      assert.match(id.certsHtml, /PMP/);
+      assert.match(id.certsHtml, /valid through 2030/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

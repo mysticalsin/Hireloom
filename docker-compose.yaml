@@ -31,7 +31,7 @@ services:
     stdin_open: true
     tty: true
     # Default: launch the dashboard. Override via `docker compose run` for shell.
-    command: ["node", "dashboard-web/server.mjs"]
+    command: ["node", "apps/web/server.mjs"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4747/api/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -39,6 +39,6 @@ services:
       retries: 3
       start_period: 20s
     labels:
-      org.opencontainers.image.source: "https://github.com/santifer/career-ops"
+      org.opencontainers.image.source: "https://github.com/mysticalsin/Hireloom"
       org.opencontainers.image.description: "Career-Ops AI job-search dashboard"
       org.opencontainers.image.licenses: "MIT"

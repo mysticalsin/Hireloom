@@ -26,7 +26,7 @@ Exit gracefully.
 Execute:
 
 ```bash
-node analyze-patterns.mjs
+node engine/tracker/analyze-patterns.mjs
 ```
 
 Parse the JSON output. It contains:

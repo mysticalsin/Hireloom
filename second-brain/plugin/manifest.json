@@ -1,0 +1,9 @@
+{
+  "id": "hireloom-brain",
+  "name": "Hireloom Second Brain",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Live job-search command center over Hireloom's data files — pipeline kanban, apply queue, follow-up radar, interviews. Zero new data entry.",
+  "author": "Hireloom",
+  "isDesktopOnly": true
+}

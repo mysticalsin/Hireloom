@@ -225,7 +225,7 @@ run_local() {
   printf "    or in the background: ${C_DIM}npm start &${C_RESET}\n"
   if yesno "Start the dashboard now?" "y"; then
     open_url "$URL" 2>/dev/null || true
-    exec node dashboard-web/server.mjs
+    exec node apps/web/server.mjs
   fi
 }
 
@@ -236,11 +236,11 @@ run_update() {
     git pull --ff-only || warn "git pull failed; continuing"
   fi
   if have node; then
-    log "Running update-system.mjs apply…"
-    node update-system.mjs apply
+    log "Running engine/update-system.mjs apply…"
+    node engine/update-system.mjs apply
     ok "System files updated. Your data is untouched."
   else
-    warn "Node not found; install it then run: node update-system.mjs apply"
+    warn "Node not found; install it then run: node engine/update-system.mjs apply"
   fi
 }
 
@@ -259,7 +259,7 @@ run_uninstall() {
   # but Git Bash on Windows ships ps without -f arg parsing AND lacks pkill,
   # so fall back to ps + grep + kill which works in both worlds.
   local killed=0
-  if have pkill && pkill -f "dashboard-web/server.mjs" 2>/dev/null; then
+  if have pkill && pkill -f "apps/web/server.mjs" 2>/dev/null; then
     killed=1
   else
     local pids
