@@ -135,3 +135,58 @@ batch/tracker-additions/merged/
 batch/tmp/
 # (literal E + U+F03A, the Win32 encoding of the colon when E:/ leaks into a repo)
 E/
+
+# Obsidian vault (this project doubles as an Obsidian vault; per-machine settings)
+.obsidian/
+
+# --- Migration / git-readiness hardening (2026-06-10) ---
+# Persistent browser profiles — contain live login/session cookies, NEVER commit
+.apply-profile/
+.indeed-profile/
+.apply-session/
+.agents/
+.qwen/
+# Large interview recordings (1–5GB each)
+interview-prep/recordings/
+# Personal analysis spreadsheets
+*.xlsx
+
+# ── Personal memory layer (per-user instances — machinery ships in CLAUDE.md, content never does)
+CLAUDE.local.md
+WORKING.md
+TOOLKIT.md
+career-log.md
+BUILD-CHANGELOG.md
+Hireloom - Change Log*
+archive/
+portals.yml.bak.*
+
+# Interview prep is personal — ship only the generic tools
+interview-prep/*
+!interview-prep/transcribe.py
+!interview-prep/sample-frames.py
+!interview-prep/_strip-pdf.mjs
+!interview-prep/_strip-serve.mjs
+
+# More user-layer data
+data/hard-no.md
+data/verify-urls.txt
+reports/*/
+
+# Personal content corpora + one-off build-run scripts (candidate-specific CV/cover
+# content baked in — genericize before upstreaming, never commit as-is)
+batch/wave*.mjs
+batch/packages-data.mjs
+batch/packages.mjs
+batch/ports-data.mjs
+batch/ports.mjs
+batch/_experience-block.html
+batch/build-cvs.mjs
+batch/build-technical-variants.mjs
+batch/regen74.mjs
+batch/sample-accuratehd.mjs
+batch/indeed-build.mjs
+batch/indeed-covers.mjs
+batch/build-pool-packages.mjs
+batch/build-indeed-packages.mjs
+batch/tailor-pool.mjs
