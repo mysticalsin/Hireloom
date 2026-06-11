@@ -22,11 +22,12 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const SERVER_MJS = path.join(ROOT, 'dashboard-web', 'server.mjs');
 
-// Random port in the high range to dodge the dev server (4747) and any
-// previously-leaked port from a crashed test run.
-export function pickPort() {
-  return 5100 + Math.floor(Math.random() * 600);
-}
+// Tests use PORT=0 — the OS assigns a free ephemeral port, which makes
+// cross-process collisions impossible (test files run in parallel; a random
+// range had birthday-problem collisions: two servers picked the same port,
+// the loser failed to bind, and its tests silently talked to the WRONG
+// server with a different CONFIG_DIR). The bound port is parsed from the
+// server's startup line.
 
 // Internal helper: write a {filename: contents} map into a directory.
 // Creates parent directories on demand so callers can use nested paths.
@@ -75,7 +76,6 @@ export function fetchPort(port, pathname, opts = {}) {
  * @returns {Promise<{port:number, baseUrl:string, child:any, cleanup:Function}>}
  */
 export async function bootServer(env = {}, options = {}) {
-  const port = pickPort();
   const cfgDir     = await mkdtemp(path.join(tmpdir(), 'hireloom-test-cfg-'));
   const dataDir    = await mkdtemp(path.join(tmpdir(), 'hireloom-test-data-'));
   const reportsDir = await mkdtemp(path.join(tmpdir(), 'hireloom-test-rep-'));
@@ -90,7 +90,7 @@ export async function bootServer(env = {}, options = {}) {
   const child = spawn(process.execPath, [SERVER_MJS], {
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: '0',
       HOST: '127.0.0.1',
       CONFIG_DIR: cfgDir,
       DATA_DIR: dataDir,
@@ -106,13 +106,21 @@ export async function bootServer(env = {}, options = {}) {
   // Capture stderr for diagnostics — surface it on boot failure but stay
   // silent on success so passing tests don't pollute the log.
   let stderr = '';
-  child.stdout.on('data', () => {});
+  let stdout = '';
+  let port = 0;
+  child.stdout.on('data', c => { stdout += c.toString(); });
   child.stderr.on('data', c => { stderr += c.toString(); });
 
-  // Poll /api/health until ready or timeout.
+  // Wait for the startup line to learn the OS-assigned port, then poll
+  // /api/health until ready or timeout.
   const start = Date.now();
   const TIMEOUT_MS = 8000;
   while (Date.now() - start < TIMEOUT_MS) {
+    if (!port) {
+      const m = stdout.match(/http:\/\/[^:]+:(\d+)/);
+      if (m) port = parseInt(m[1], 10);
+      if (!port) { await new Promise(r => setTimeout(r, 50)); continue; }
+    }
     try {
       const r = await fetchPort(port, '/api/health', { timeout: 1500 });
       if (r.statusCode === 200) {

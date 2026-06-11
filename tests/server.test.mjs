@@ -33,20 +33,18 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SERVER_MJS = path.join(ROOT, 'dashboard-web', 'server.mjs');
 
-// Pick a random unused port to avoid colliding with the dev server.
-function pickPort() {
-  return 4800 + Math.floor(Math.random() * 199);
-}
-
+// PORT=0 — the OS assigns a free ephemeral port (test files run in parallel;
+// random ranges had birthday-problem collisions: the loser of a collision
+// failed to bind and its tests silently hit the other test's server). The
+// bound port is parsed from the server's startup line.
 async function bootServer(env = {}) {
-  const port = pickPort();
   const cfgDir = await mkdtemp(path.join(tmpdir(), 'hireloom-test-'));
   const dataDir = await mkdtemp(path.join(tmpdir(), 'hireloom-data-'));
   const reportsDir = await mkdtemp(path.join(tmpdir(), 'hireloom-rep-'));
   const child = spawn(process.execPath, [SERVER_MJS], {
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: '0',
       HOST: '127.0.0.1',
       CONFIG_DIR: cfgDir,
       DATA_DIR: dataDir,
@@ -57,12 +55,19 @@ async function bootServer(env = {}) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  // Drain stdout/stderr so the child doesn't block on a full pipe.
-  child.stdout.on('data', () => {});
+  // Drain stderr; watch stdout for the startup line to learn the bound port.
+  let stdout = '';
+  let port = 0;
+  child.stdout.on('data', c => { stdout += c.toString(); });
   child.stderr.on('data', () => {});
   // Wait until /api/health is reachable.
   const start = Date.now();
   while (Date.now() - start < 8000) {
+    if (!port) {
+      const m = stdout.match(/http:\/\/[^:]+:(\d+)/);
+      if (m) port = parseInt(m[1], 10);
+      if (!port) { await new Promise(r => setTimeout(r, 50)); continue; }
+    }
     try {
       const r = await fetchPort(port, '/api/health');
       if (r.statusCode === 200) {

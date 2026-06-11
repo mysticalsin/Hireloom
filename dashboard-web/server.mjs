@@ -8174,7 +8174,14 @@ async function start() {
   const server = http.createServer(handleRequest);
   server.listen(PORT, HOST, () => {
     const shownHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-    console.log(`Hireloom Atelier → http://${shownHost}:${PORT}  (bound to ${HOST})`);
+    // PORT=0 asks the OS for an ephemeral port (used by the test harness to
+    // avoid collisions) — report the port actually bound, not the request,
+    // and allow Origins on the bound port (the load-time allowlist was built
+    // from the PORT env, which is "0" in that case).
+    const actualPort = server.address().port;
+    ALLOWED_ORIGINS.add(`http://localhost:${actualPort}`);
+    ALLOWED_ORIGINS.add(`http://127.0.0.1:${actualPort}`);
+    console.log(`Hireloom Atelier → http://${shownHost}:${actualPort}  (bound to ${HOST})`);
     console.log(`Gmail: ${gmailTokens ? 'connected' : GMAIL_CLIENT_ID ? 'credentials set, not yet authorized' : 'not configured'}`);
     console.log(`Data: ${DATA_DIR} | Reports: ${REPORTS_DIR}`);
     console.log(`Autopilot: trying Visible browser (CAPTCHA-ready)...`);
