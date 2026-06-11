@@ -98,7 +98,7 @@ TMP_CWD=$(mktemp -d)
 TIMEOUT_BIN="timeout"
 if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then TIMEOUT_BIN="gtimeout"; fi
 if command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
-  if (cd "$TMP_CWD" && "$TIMEOUT_BIN" 5 "$OUT" 2>&1 | grep -qE "No Career-Ops project|Career-Ops is starting"); then
+  if (cd "$TMP_CWD" && "$TIMEOUT_BIN" 5 "$OUT" 2>&1 | grep -qE "No Hireloom project|Hireloom is starting"); then
     echo "✓ Built: $OUT ($SIZE_KB KiB)"
   else
     echo "⚠ Built but smoke-test inconclusive — verify manually: $OUT"

@@ -1,7 +1,7 @@
 services:
-  career-ops:
+  hireloom:
     build: .
-    container_name: career-ops
+    container_name: hireloom
     restart: unless-stopped
     volumes:
       # Mount the project directory so user data (CV, profile, reports,
@@ -40,5 +40,5 @@ services:
       start_period: 20s
     labels:
       org.opencontainers.image.source: "https://github.com/mysticalsin/Hireloom"
-      org.opencontainers.image.description: "Career-Ops AI job-search dashboard"
-      org.opencontainers.image.licenses: "MIT"
+      org.opencontainers.image.description: "Hireloom AI job-search dashboard"
+      org.opencontainers.image.licenses: "PolyForm-Shield-1.0.0"

@@ -11,7 +11,7 @@
     launchctl unload ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist
 
   Tail logs:
-    tail -f ~/Library/Logs/career-ops.out.log
+    tail -f ~/Library/Logs/hireloom.out.log
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,7 +26,7 @@
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/REPLACE_USER/career-ops</string>
+    <string>/Users/REPLACE_USER/Hireloom</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -56,8 +56,8 @@
     <string>Background</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/REPLACE_USER/Library/Logs/career-ops.out.log</string>
+    <string>/Users/REPLACE_USER/Library/Logs/hireloom.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/REPLACE_USER/Library/Logs/career-ops.err.log</string>
+    <string>/Users/REPLACE_USER/Library/Logs/hireloom.err.log</string>
 </dict>
 </plist>

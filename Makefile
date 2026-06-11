@@ -1,4 +1,4 @@
-# Career-Ops · JobSeeker — make targets
+# Hireloom — make targets
 #
 # Quick-reference:
 #   make            # show this help
@@ -27,7 +27,7 @@ URL  := http://$(HOST):$(PORT)
 DC := $(shell docker compose version >/dev/null 2>&1 && echo 'docker compose' || echo 'docker-compose')
 
 help:
-	@printf '\n  \033[36m\033[1mJobSeeker · Career-Ops\033[0m  ─  make targets\n\n'
+	@printf '\n  \033[36m\033[1mHireloom\033[0m  ─  make targets\n\n'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 	@printf '\n  After install: open \033[36m$(URL)\033[0m → click ⊕ Profile to start onboarding.\n\n'
@@ -62,10 +62,10 @@ restart: stop ## Stop, then start (docker)
 	@printf '\033[32m✓\033[0m Restarted at $(URL)\n'
 
 logs: ## Tail dashboard logs (docker stack)
-	@$(DC) logs -f --tail=100 career-ops
+	@$(DC) logs -f --tail=100 hireloom
 
 shell: ## Open a bash shell inside the running container
-	@$(DC) exec career-ops /bin/bash
+	@$(DC) exec hireloom /bin/bash
 
 test: ## Run unit tests (Node test runner)
 	@npm test

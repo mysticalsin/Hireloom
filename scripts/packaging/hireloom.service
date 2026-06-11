@@ -1,20 +1,20 @@
 # systemd unit for Linux servers / WSL2.
 #
 # Install:
-#   sudo cp scripts/packaging/career-ops.service /etc/systemd/system/
+#   sudo cp scripts/packaging/hireloom.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now career-ops
+#   sudo systemctl enable --now hireloom
 #
 # Tail logs:
-#   journalctl -u career-ops -f
+#   journalctl -u hireloom -f
 #
 # Edit before installing:
 #   - User=        the local user that owns the repo (NEVER root)
 #   - WorkingDirectory=  the absolute path to the repo
-#   - EnvironmentFile=   defaults to /etc/career-ops.env; remove if .env in repo
+#   - EnvironmentFile=   defaults to /etc/hireloom.env; remove if .env in repo
 
 [Unit]
-Description=Career-Ops · JobSeeker dashboard
+Description=Hireloom dashboard
 Documentation=https://github.com/mysticalsin/Hireloom
 Wants=network-online.target
 After=network-online.target
@@ -23,9 +23,9 @@ After=network-online.target
 Type=simple
 User=YOUR_USERNAME
 Group=YOUR_USERNAME
-WorkingDirectory=/home/YOUR_USERNAME/career-ops
-EnvironmentFile=-/etc/career-ops.env
-EnvironmentFile=/home/YOUR_USERNAME/career-ops/.env
+WorkingDirectory=/home/YOUR_USERNAME/hireloom
+EnvironmentFile=-/etc/hireloom.env
+EnvironmentFile=/home/YOUR_USERNAME/hireloom/.env
 Environment=NODE_ENV=production
 Environment=PORT=4747
 Environment=HOST=127.0.0.1
@@ -42,7 +42,7 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/YOUR_USERNAME/career-ops/data /home/YOUR_USERNAME/career-ops/reports /home/YOUR_USERNAME/career-ops/output /home/YOUR_USERNAME/career-ops/config /home/YOUR_USERNAME/career-ops/tmp
+ReadWritePaths=/home/YOUR_USERNAME/hireloom/data /home/YOUR_USERNAME/hireloom/reports /home/YOUR_USERNAME/hireloom/output /home/YOUR_USERNAME/hireloom/config /home/YOUR_USERNAME/hireloom/tmp
 PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true
@@ -63,7 +63,7 @@ CPUQuota=200%
 # Standard streams → journal
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=career-ops
+SyslogIdentifier=hireloom
 
 [Install]
 WantedBy=multi-user.target

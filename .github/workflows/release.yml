@@ -74,11 +74,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            asset: career-ops.exe
+            asset: hireloom.exe
           - os: macos-latest
-            asset: career-ops-macos
+            asset: hireloom-macos
           - os: ubuntu-latest
-            asset: career-ops-linux
+            asset: hireloom-linux
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -96,9 +96,9 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/career-ops.exe dist/${{ matrix.asset }}
+            cp dist/hireloom.exe dist/${{ matrix.asset }}
           else
-            cp dist/career-ops dist/${{ matrix.asset }}
+            cp dist/hireloom dist/${{ matrix.asset }}
           fi
       - name: SHA-256 sidecar
         shell: bash
@@ -128,29 +128,29 @@ jobs:
         with:
           path: artifacts
       - name: Source tarball
-        run: git archive --format=tar.gz --prefix=career-ops-${GITHUB_REF_NAME#v}/ -o artifacts/career-ops-${GITHUB_REF_NAME}.tar.gz HEAD
+        run: git archive --format=tar.gz --prefix=hireloom-${GITHUB_REF_NAME#v}/ -o artifacts/hireloom-${GITHUB_REF_NAME}.tar.gz HEAD
       - name: Create release + attach assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ -f CHANGELOG.md ]]; then
             gh release create "$GITHUB_REF_NAME" \
-              --title "JobSeeker $GITHUB_REF_NAME" \
+              --title "Hireloom $GITHUB_REF_NAME" \
               --notes-file CHANGELOG.md \
               --draft || gh release edit "$GITHUB_REF_NAME" --draft
           else
             gh release create "$GITHUB_REF_NAME" \
-              --title "JobSeeker $GITHUB_REF_NAME" \
+              --title "Hireloom $GITHUB_REF_NAME" \
               --generate-notes \
               --draft || gh release edit "$GITHUB_REF_NAME" --draft
           fi
           gh release upload "$GITHUB_REF_NAME" \
-            artifacts/career-ops.exe/career-ops.exe \
-            artifacts/career-ops.exe/career-ops.exe.sha256 \
-            artifacts/career-ops-macos/career-ops-macos \
-            artifacts/career-ops-macos/career-ops-macos.sha256 \
-            artifacts/career-ops-linux/career-ops-linux \
-            artifacts/career-ops-linux/career-ops-linux.sha256 \
-            "artifacts/career-ops-${GITHUB_REF_NAME}.tar.gz" \
+            artifacts/hireloom.exe/hireloom.exe \
+            artifacts/hireloom.exe/hireloom.exe.sha256 \
+            artifacts/hireloom-macos/hireloom-macos \
+            artifacts/hireloom-macos/hireloom-macos.sha256 \
+            artifacts/hireloom-linux/hireloom-linux \
+            artifacts/hireloom-linux/hireloom-linux.sha256 \
+            "artifacts/hireloom-${GITHUB_REF_NAME}.tar.gz" \
             --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false

@@ -5,7 +5,7 @@
 # instead of duplicating.
 #
 # Usage:
-#   bash scripts/publish-release.sh                  # repo: career-ops, tag: package.json version
+#   bash scripts/publish-release.sh                  # repo: Hireloom, tag: package.json version
 #   bash scripts/publish-release.sh -r my-repo       # custom repo name
 #   bash scripts/publish-release.sh -t v1.4.0        # custom tag
 #   bash scripts/publish-release.sh --private        # create as private (default: public)
@@ -21,11 +21,11 @@ readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # ── Args ────────────────────────────────────────────────────────────────────
-REPO_NAME="career-ops"
+REPO_NAME="Hireloom"
 TAG=""
 VISIBILITY="--public"
 BUILD_EXE=1
-DESCRIPTION="JobSeeker · Career-Ops — AI-powered senior-level job-search pipeline. Drop your resume, the AI handles the boring parts."
+DESCRIPTION="Hireloom — AI-powered senior-level job-search pipeline. Drop your resume, the AI handles the boring parts."
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -89,12 +89,12 @@ fi
 if ! git rev-parse HEAD >/dev/null 2>&1; then
   echo "› Creating initial commit…"
   git add -A
-  git commit -m "chore: initial public release of Career-Ops"
+  git commit -m "chore: initial public release of Hireloom"
 fi
 
 # ── Build EXE ───────────────────────────────────────────────────────────────
 if (( BUILD_EXE )); then
-  echo "› Building career-ops.exe…"
+  echo "› Building hireloom.exe…"
   bash scripts/build-exe.sh
 fi
 
@@ -148,28 +148,28 @@ else
   echo "› Creating release $TAG…"
   if [[ -n "$NOTES_FILE" ]]; then
     gh release create "$TAG" --repo "$OWNER/$REPO_NAME" \
-      --title "JobSeeker $TAG" \
+      --title "Hireloom $TAG" \
       --notes-file "$NOTES_FILE"
   else
     gh release create "$TAG" --repo "$OWNER/$REPO_NAME" \
-      --title "JobSeeker $TAG" \
+      --title "Hireloom $TAG" \
       --generate-notes
   fi
 fi
 
 # ── Upload assets ──────────────────────────────────────────────────────────
-if (( BUILD_EXE )) && [[ -f dist/career-ops.exe ]]; then
-  echo "› Uploading career-ops.exe…"
-  sha256sum dist/career-ops.exe | awk '{print $1}' > dist/career-ops.exe.sha256 2>/dev/null \
-    || shasum -a 256 dist/career-ops.exe | awk '{print $1}' > dist/career-ops.exe.sha256
-  gh release upload "$TAG" dist/career-ops.exe dist/career-ops.exe.sha256 \
+if (( BUILD_EXE )) && [[ -f dist/hireloom.exe ]]; then
+  echo "› Uploading hireloom.exe…"
+  sha256sum dist/hireloom.exe | awk '{print $1}' > dist/hireloom.exe.sha256 2>/dev/null \
+    || shasum -a 256 dist/hireloom.exe | awk '{print $1}' > dist/hireloom.exe.sha256
+  gh release upload "$TAG" dist/hireloom.exe dist/hireloom.exe.sha256 \
     --clobber --repo "$OWNER/$REPO_NAME"
 fi
 
 # Source bundle (zip + tar)
 echo "› Bundling source archive…"
-git archive --format=tar.gz --prefix="career-ops-${TAG#v}/" -o "dist/career-ops-${TAG}.tar.gz" "$TAG"
-gh release upload "$TAG" "dist/career-ops-${TAG}.tar.gz" --clobber --repo "$OWNER/$REPO_NAME"
+git archive --format=tar.gz --prefix="hireloom-${TAG#v}/" -o "dist/hireloom-${TAG}.tar.gz" "$TAG"
+gh release upload "$TAG" "dist/hireloom-${TAG}.tar.gz" --clobber --repo "$OWNER/$REPO_NAME"
 
 URL="https://github.com/$OWNER/$REPO_NAME/releases/tag/$TAG"
 echo

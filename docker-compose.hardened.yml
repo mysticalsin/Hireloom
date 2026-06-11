@@ -6,7 +6,7 @@
 # to a network beyond loopback.
 
 services:
-  career-ops:
+  hireloom:
     read_only: true
     cap_drop:
       - ALL

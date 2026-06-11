@@ -1,6 +1,6 @@
 @echo off
-echo Stopping Career Ops...
-cd /d "%~dp0"
+echo Stopping Hireloom...
+cd /d "%~dp0.."
 docker compose down
-echo Career Ops stopped.
+echo Hireloom stopped.
 pause

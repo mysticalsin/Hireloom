@@ -168,7 +168,7 @@ npm start                        # http://localhost:4747
 make            # all targets: install / docker / local / logs / backup / doctor
 ```
 
-Auto-start on boot: `scripts/packaging/career-ops.service` (systemd) or `scripts/packaging/io.mysticalsin.hireloom.plist` (launchd); Docker restarts itself. Full setup guide: [docs/SETUP.md](docs/SETUP.md).
+Auto-start on boot: `scripts/packaging/hireloom.service` (systemd) or `scripts/packaging/io.mysticalsin.hireloom.plist` (launchd); Docker restarts itself. Full setup guide: [docs/SETUP.md](docs/SETUP.md).
 
 ## Driving it
 
