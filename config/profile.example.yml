@@ -90,3 +90,11 @@ cv:
   # experience_order:
   #   - "most recent employer"
   #   - "title keyword+employer keyword"
+
+# Follow-up policy (optional). By default an Applied role you never followed
+# up on is NOT flagged as an overdue follow-up — silence is a normal outcome
+# of volume applying. Cadence tracking starts when you log the first follow-up
+# for that application in data/follow-ups.md, or when the company responds.
+# Applied rows carry no cadence at all unless you opt in below.
+# followups:
+#   auto_applied: true

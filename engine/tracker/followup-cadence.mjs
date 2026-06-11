@@ -29,14 +29,29 @@ const overdueOnly = args.includes('--overdue-only');
 const appliedDaysIdx = args.indexOf('--applied-days');
 const APPLIED_FIRST = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1]) || 7 : 7;
 
+// --- Follow-up policy ---
+// An Applied role you never followed up on is NOT an obligation: silence is
+// a normal outcome of volume applying, and nagging every application buries
+// the follow-ups that matter. Cadence tracking starts only once you log the
+// first follow-up for that application in data/follow-ups.md (or the company
+// responds). Users who DO want to chase every application can opt back in
+// with `followups: { auto_applied: true }` in config/profile.yml, or
+// --auto-applied for a single run.
+let AUTO_APPLIED = args.includes('--auto-applied');
+if (!AUTO_APPLIED) {
+  try {
+    const { load } = await import('js-yaml');
+    const prof = load(readFileSync(join(CAREER_OPS, 'config/profile.yml'), 'utf-8'));
+    AUTO_APPLIED = prof?.followups?.auto_applied === true;
+  } catch { /* no profile or no yaml — stay opt-in */ }
+}
+
 // --- Cadence config ---
 const CADENCE = {
   applied_first: APPLIED_FIRST,
   applied_subsequent: 7,
   applied_max_followups: 2,
-  responded_initial: 1,
-  responded_subsequent: 3,
-  interview_thankyou: 1,
+  conversation_silence: 7, // responded/interview: flag after a week of silence
 };
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
@@ -155,19 +170,21 @@ function resolveReportPath(reportField) {
 // --- Compute urgency ---
 function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
   if (status === 'applied') {
+    // Plain applications carry NO follow-up cadence — silence is a normal
+    // outcome of volume applying. Opt-in only (followups.auto_applied /
+    // --auto-applied) for users who want to chase every application.
+    if (!AUTO_APPLIED) return 'waiting';
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
     if (followupCount > 0 && daysSinceLastFollowup !== null && daysSinceLastFollowup >= CADENCE.applied_subsequent) return 'overdue';
     return 'waiting';
   }
-  if (status === 'responded') {
-    if (daysSinceApp < CADENCE.responded_initial) return 'urgent';
-    if (daysSinceApp >= CADENCE.responded_subsequent) return 'overdue';
-    return 'waiting';
-  }
-  if (status === 'interview') {
-    if (daysSinceApp >= CADENCE.interview_thankyou) return 'overdue';
-    return 'waiting';
+  if (status === 'responded' || status === 'interview') {
+    // Live conversations: flag after a week of silence. The clock anchors to
+    // the LAST logged touch (data/follow-ups.md), falling back to the
+    // application date — so logging a nudge or a held interview resets it.
+    const anchorDays = daysSinceLastFollowup !== null ? daysSinceLastFollowup : daysSinceApp;
+    return anchorDays >= CADENCE.conversation_silence ? 'overdue' : 'waiting';
   }
   return 'waiting';
 }
@@ -175,17 +192,15 @@ function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCou
 // --- Compute next follow-up date ---
 function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount) {
   if (status === 'applied') {
+    if (!AUTO_APPLIED) return null; // no cadence on plain applications
     if (followupCount >= CADENCE.applied_max_followups) return null; // cold
     if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.applied_first);
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.applied_subsequent);
     return addDays(parseDate(appDate), CADENCE.applied_first);
   }
-  if (status === 'responded') {
-    if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
-    return addDays(parseDate(appDate), CADENCE.responded_subsequent);
-  }
-  if (status === 'interview') {
-    return addDays(parseDate(appDate), CADENCE.interview_thankyou);
+  if (status === 'responded' || status === 'interview') {
+    const anchor = lastFollowupDate || appDate;
+    return addDays(parseDate(anchor), CADENCE.conversation_silence);
   }
   return null;
 }
