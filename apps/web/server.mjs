@@ -28,6 +28,7 @@ import {
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
+import { detectSignal, matchApplication } from './lib/gmail-signals.mjs';
 import { makeErrorLogger } from './lib/error-log.mjs';
 import { createResolver, extractFieldsInPage } from '../../engine/apply/autoapply-core.mjs';
 
@@ -610,28 +611,6 @@ function extractTextFromPayload(payload) {
   return '';
 }
 
-function extractVerificationCodes(bodyText, subject) {
-  const text = (bodyText || '') + ' ' + (subject || '');
-  const codes = [];
-  const patterns = [
-    { re: /(?:code|verification|OTP|confirm|pin|passcode)[\s:is]*(\d{4,8})/i, type: 'numeric' },
-    { re: /(\d{4,8})[\s]*(?:is your|verification|code|OTP|passcode)/i, type: 'numeric' },
-    { re: /(?:enter|use)[\s:]*(\d{4,8})/i, type: 'numeric' },
-  ];
-  for (const { re, type } of patterns) {
-    const m = text.match(re);
-    if (m) { codes.push({ type, value: m[1] }); break; }
-  }
-  if (!codes.length && /verif|confirm|code/i.test(subject)) {
-    const m = text.match(/\b(\d{6})\b/);
-    if (m) codes.push({ type: 'numeric', value: m[1] });
-  }
-  const linkRe = /https?:\/\/[^\s"'<>]+(?:verify|confirm|activate|validate)[^\s"'<>]*/i;
-  const linkM = text.match(linkRe);
-  if (linkM) codes.push({ type: 'link', value: linkM[0] });
-  return codes;
-}
-
 // ── Gmail: Token management ───────────────────────────────────────────────────
 
 let gmailTokens = null;
@@ -752,86 +731,6 @@ async function exchangeCode(code) {
 
 // Recall over precision (user decision 2026-06-11): a confirmation email
 // mis-flagged as a next-step beats a real invite mis-filed as a confirmation.
-// Bare "interview" / "next step" / "schedule" are deliberately IN, and this
-// list is checked BEFORE the ack-subject short-circuit in detectSignal.
-const INTERVIEW_SIGNALS = ['interview','next step','schedule','screening','assessment',
-  'coding challenge','take-home','availability','calendly','book a time','find a time',
-  'phone screen','speak with you','meet with','chat with','hiring manager','next round',
-  'set up a call','set up a time','like to connect','like to set up'];
-// Strict scheduling language = high confidence. A loose-only match inside an
-// ack-subject email still FLAGS as a possible next step (never filed as a
-// confirmation) but doesn't auto-write the tracker — that guard is what keeps
-// "thanks for applying, here's our interview process" auto-acks from minting
-// phantom Interview rows.
-const INTERVIEW_SIGNALS_STRICT = ['schedule an interview','schedule a call','schedule a time','schedule some time',
-  'set up a call','set up a time','set up an interview','book a time','find a time','phone screen','phone interview',
-  'video interview','technical assessment','coding challenge','take-home','availability for a call',
-  'availability to chat','your availability','invite you to interview','invitation to interview','interview invitation',
-  'like to interview you','like to speak with you','like to set up','next round','meet with the team','calendly'];
-// Unambiguous rejection language — always wins (even over an ack subject).
-const STRONG_REJECTION_SIGNALS = ['not moving forward','not be moving forward','won\'t be moving',
-  'will not be moving forward','not be progressing','decided not to proceed','decided not to move forward',
-  'were not selected','not been selected','not selected to move','position has been filled','position has been closed',
-  'decided to move in a different direction','pursue other candidates','moving forward with other candidates',
-  'no longer considering','no longer under consideration','unable to move forward','not be advancing your application',
-  'will not be advancing','regret to inform','not to move forward with your application'];
-// Soft words that ALSO appear in auto-ack disclaimers ("unfortunately we can't reply
-// to everyone"); only treated as a rejection when the subject isn't an acknowledgment.
-const WEAK_REJECTION_SIGNALS = ['unfortunately','other candidates','doesn\'t meet','does not meet'];
-const RECEIVED_SIGNALS  = ['received your application','thank you for applying','thanks for applying',
-  'we\'ll be in touch','application has been received','successfully received your application',
-  'we have received your application','we received your application','what happens next',
-  'application was sent','keep your application','thanks for your application','thank you for your application'];
-// Subject-line markers of an auto-acknowledgment. When the SUBJECT matches one of
-// these, it's a "received" confirmation — even if the body describes the interview
-// process — so it never gets mis-flagged as an interview invite.
-const ACK_SUBJECT_SIGNALS = ['thank you for applying','thanks for applying','thank you for your application',
-  'thanks for your application','application received','received your application','we received your application',
-  'we\'ve received your application','got your application','we\'ve got your application','what happens next',
-  'what to expect','application confirmation','application submitted','your application to','your application for',
-  'thanks for your interest','thank you for your interest'];
-// Job-alert newsletters / talent-community blasts are about NEW postings, not
-// the user's existing application — never classify them as signals. (A "New
-// jobs posted from Capgemini Group" digest auto-flipped a tracker row to
-// Interview before this guard existed: it matched company + "schedule".)
-const JOB_ALERT_SIGNALS = ['new jobs posted','jobs posted from','new jobs from','job alert',
-  'recommended jobs','jobs you may be interested','jobs for you','talent community',
-  'job recommendations','new opportunities at','daily job digest','weekly job digest'];
-const VERIFICATION_SIGNALS = ['verification code','verify your email','confirm your email',
-  'one-time password','security code','your code is','enter this code',
-  'otp','confirmation link','click to verify','verify your account','passcode'];
-
-function detectSignal(subject, snippet, bodyText, from) {
-  const text = (subject + ' ' + snippet + ' ' + (bodyText || '')).toLowerCase();
-  const subj = (subject || '').toLowerCase();
-  if (VERIFICATION_SIGNALS.some(s => text.includes(s))) {
-    const codes = extractVerificationCodes(bodyText || snippet, subject);
-    if (codes.length > 0) return { type: 'verification', codes };
-  }
-  // 0. Job-alert newsletters are never application signals.
-  if (JOB_ALERT_SIGNALS.some(s => text.includes(s))) return { type: 'other' };
-  // 1. Strong, unambiguous rejection wins outright.
-  if (STRONG_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
-  // 2. Interview/next-step language BEFORE the ack short-circuit — recall over
-  //    precision by design: yes, some auto-acks describe the interview process
-  //    and will land here, but the user would rather review a false next-step
-  //    than have a real invite silently filed as a confirmation.
-  if (INTERVIEW_SIGNALS.some(s => text.includes(s))) {
-    const strict = INTERVIEW_SIGNALS_STRICT.some(s => text.includes(s));
-    const ackSubj = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
-    return { type: 'interview', confident: strict || !ackSubj };
-  }
-  // 3. Acknowledgment by SUBJECT → "received" (auto-acks carry "unfortunately
-  //    we can't reply to everyone" disclaimers that would mis-flag below).
-  const isAck = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
-  if (isAck) return { type: 'received' };
-  // 4. Soft rejection words only count when it's NOT an acknowledgment email.
-  if (WEAK_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
-  // 5. Received (body-level acks) as the fallback.
-  if (RECEIVED_SIGNALS.some(s => text.includes(s))) return { type: 'received' };
-  return { type: 'other' };
-}
-
 let gmailCache = { signals: [], scanned_at: null };
 let verificationCodes = [];
 
@@ -863,7 +762,7 @@ async function scanGmailInbox() {
   try { appsContent = await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'); } catch { return; }
   const apps = parseMarkdownTable(appsContent)
     .filter(r => (r['num'] || r['#']) && /\d/.test(r['num'] || r['#'] || ''))
-    .map(r => ({ num: stripMd(r['num']||r['#']||''), company: stripMd(r['company']||''), status: stripMd(r['status']||'').toLowerCase() }));
+    .map(r => ({ num: stripMd(r['num']||r['#']||''), company: stripMd(r['company']||''), role: stripMd(r['role']||''), status: stripMd(r['status']||'').toLowerCase() }));
 
   if (!apps.length) return;
 
@@ -895,11 +794,9 @@ async function scanGmailInbox() {
     const snippet = parsed.snippet || '';
     const bodyText = extractTextFromPayload(parsed.payload);
 
-    // Match against companies
-    const matched = apps.find(a => {
-      const name = a.company.toLowerCase();
-      return from.toLowerCase().includes(name) || subject.toLowerCase().includes(name);
-    });
+    // Match against companies; with several applications at the same company,
+    // the row whose role title the email names wins (see matchApplication).
+    const matched = matchApplication(apps, { from, subject, text: snippet + ' ' + bodyText });
     if (!matched) continue;
 
     const signal = detectSignal(subject, snippet, bodyText, from);
