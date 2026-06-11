@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <img src="https://img.shields.io/badge/License-PolyForm_Shield-blue.svg" alt="PolyForm Shield 1.0.0">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   <br>
   <img src="https://img.shields.io/badge/EN-blue?style=flat" alt="EN">
@@ -331,7 +331,9 @@ Got hired using career-ops? [Share your story!](https://github.com/mysticalsin/H
 
 ## License
 
-MIT
+PolyForm Shield 1.0.0 — free to use, copy, modify, and distribute, including commercially, for any purpose **except providing a product that competes with Hireloom**. Licensing and copyright notices must be preserved. Inherited portions of the original engine retain their MIT notice — see the Third-party notices section in [LICENSE](LICENSE). Versions released before this change remain MIT.
+
+> **Note:** this license applies to this branch's build and takes effect for the project upon maintainer merge; `main` remains MIT until then.
 
 ## Let's Connect
 
