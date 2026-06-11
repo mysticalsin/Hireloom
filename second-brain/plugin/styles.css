@@ -29,3 +29,19 @@
 .hb-actions { margin-left: auto; display: flex; gap: 6px; }
 .hb-btn { font-size: 11px; padding: 3px 10px; border-radius: 999px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; transition: all .15s ease; }
 .hb-btn:hover { background: linear-gradient(135deg, var(--hb-accent), #5e1220); color: #fff; border-color: var(--hb-accent-hi); box-shadow: 0 0 10px var(--hb-glow); }
+/* Hero band — greeting + KPI cards (every number from _brain_api) */
+.hb-hero { margin-bottom: 14px; }
+.hb-greet { font-size: 21px; font-weight: 750; margin-bottom: 10px; letter-spacing: .01em; }
+.hb-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.hb-kpi { min-width: 108px; flex: 1; max-width: 170px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(160deg, var(--background-secondary), rgba(0,0,0,.22)); border: 1px solid var(--background-modifier-border); border-top: 2px solid var(--hb-kpi-accent, var(--hb-accent-hi)); transition: transform .12s ease, box-shadow .12s ease; }
+.hb-kpi:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.hb-kpi-v { font-size: 23px; font-weight: 800; color: var(--hb-kpi-accent, var(--text-normal)); line-height: 1.1; }
+.hb-kpi-l { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-top: 3px; }
+.hb-acc-ox { --hb-kpi-accent: #c0392b; }
+.hb-acc-ember { --hb-kpi-accent: #e67e22; }
+.hb-acc-gold { --hb-kpi-accent: #d4ac0d; }
+.hb-acc-sage { --hb-kpi-accent: #27ae60; }
+.hb-acc-slate { --hb-kpi-accent: #7f8c8d; }
+.hb-stack { display: flex; height: 10px; border-radius: 6px; overflow: hidden; gap: 2px; }
+.hb-seg { min-width: 4px; }
+.hb-seg-0 { background: #6e1322; } .hb-seg-1 { background: #c0392b; } .hb-seg-2 { background: #e67e22; } .hb-seg-3 { background: #d4ac0d; } .hb-seg-4 { background: #7f8c8d; }

@@ -145,8 +145,17 @@ writeJson('interviews.json', {
 });
 
 // ── 7. meta.json — build stamp + source freshness (no wall clock) ────────────
+// First name for the dashboard greeting — read from the profile, never hardcoded.
+let firstName = null;
+try {
+  const prof = readFileSync(join(ROOT, 'config', 'profile.yml'), 'utf8');
+  const m = prof.match(/^\s*full_name:\s*["']?([^"'\n]+)/m);
+  if (m) firstName = m[1].trim().split(/\s+/)[0];
+} catch { /* greeting falls back to no name */ }
+
 writeJson('meta.json', {
   buildStamp: 'brain-refresh-v1',
+  user: { firstName },
   sources: {
     applications: pipeline.sourceMtime,
     pool: mtime(POOL),

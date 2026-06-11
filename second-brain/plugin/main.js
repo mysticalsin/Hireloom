@@ -8,7 +8,7 @@
 
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice } = require('obsidian');
 
-const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.2';
+const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.3';
 const VIEW_TYPE = 'hireloom-brain-view';
 const API_DIR = '_brain_api';
 
@@ -209,6 +209,7 @@ class BrainView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass('hb-root');
+    await this.renderHero(root);
     const tabs = root.createDiv({ cls: 'hb-tabs' });
     const counts = await this.plugin.tabCounts();
     for (const t of TABS) {
@@ -222,6 +223,44 @@ class BrainView extends ItemView {
     refreshBtn.onClickEvent(() => this.plugin.runRefresh());
     const body = root.createDiv();
     await RENDERERS[this.activeTab](body, this.plugin.data);
+  }
+
+  // Greeting + KPI stat cards — every number binds to _brain_api (no theater).
+  async renderHero(root) {
+    const d = this.plugin.data;
+    const [meta, f, q, s] = await Promise.all([
+      d.json('meta'), d.json('followups'), d.json('queue'), d.json('scanfeed'),
+    ]);
+    const hero = root.createDiv({ cls: 'hb-hero' });
+    const h = new Date().getHours();
+    const part = h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    const name = meta && meta.user && meta.user.firstName ? `, ${meta.user.firstName}` : '';
+    hero.createDiv({ cls: 'hb-greet', text: `${part}${name}` });
+    const counts = (meta && meta.counts) || {};
+    const by = counts.byStatus || {};
+    const kpis = hero.createDiv({ cls: 'hb-kpis' });
+    const kpi = (label, value, accent) => {
+      const card = kpis.createDiv({ cls: `hb-kpi hb-acc-${accent}` });
+      card.createDiv({ cls: 'hb-kpi-v', text: String(value ?? '–') });
+      card.createDiv({ cls: 'hb-kpi-l', text: label });
+    };
+    kpi('tracked', counts.tracked, 'ox');
+    kpi('applied', by.Applied || 0, 'ember');
+    kpi('interviews', counts.interviews, 'gold');
+    kpi('responded', by.Responded || 0, 'sage');
+    kpi('overdue follow-ups', f && f.metadata ? f.metadata.overdue : '–', 'ox');
+    kpi('queue pending', q && q.pendingCount != null ? q.pendingCount : '–', 'ember');
+    kpi('scanned all-time', s && s.total != null ? s.total : '–', 'slate');
+    // Stacked pipeline bar — proportional, real counts, canonical order.
+    const total = Object.values(by).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      const bar = hero.createDiv({ cls: 'hb-stack' });
+      STATE_ORDER.forEach((st, i) => {
+        const v = by[st] || 0;
+        if (!v) return;
+        bar.createDiv({ cls: `hb-seg hb-seg-${i % 5}`, attr: { style: `flex:${v}`, title: `${st}: ${v}` } });
+      });
+    }
   }
 }
 
