@@ -82,12 +82,16 @@ if (existsSync(POOL)) {
   try {
     const pool = JSON.parse(readFileSync(POOL, 'utf8'));
     const rows = pool.rows || [];
-    const pending = rows.filter((r) => !r.applied && !r.skipped);
+    // a row is done when it carries any terminal marker: the engine writes a
+    // status string ('applied'/'discarded'/'rejected'); older pools used booleans
+    const pending = rows.filter((r) => !r.status && !r.applied && !r.skipped);
+    const applied = rows.filter((r) => /applied/i.test(r.status || '') || r.applied === true);
     writeJson('queue.json', {
       sourceMtime: mtime(POOL),
       nextRank: pool.nextRank ?? null,
       total: rows.length,
       pendingCount: pending.length,
+      appliedCount: applied.length,
       head: pending.slice(0, 15),
     });
   } catch (e) {

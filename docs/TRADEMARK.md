@@ -1,38 +1,45 @@
-# career-ops Trademark Policy
+# Hireloom Trademark Policy
 
-This document explains how the "career-ops" name and brand may be used.
-It complements — not replaces — the MIT [LICENSE](LICENSE) that governs
-the source code.
+This document explains how the "Hireloom" name and brand may be used.
+It complements — not replaces — the [PolyForm Shield 1.0.0 LICENSE](../LICENSE)
+that governs the source code.
 
 ## TL;DR
 
-- **MIT covers the code.** Use it, modify it, fork it, build on it.
+- **PolyForm Shield covers the code.** Use it, modify it, build on it —
+  for anything except a product that competes with Hireloom.
 - **This policy covers the name and brand.** It's intentionally
   permissive for community use and reserved for commercial product
   naming and endorsement.
 - **In doubt? Ask.** github.com/mysticalsin (GitHub), subject `Trademark request`.
 
-## The relationship with the MIT license
+## The relationship with the license
 
-The MIT license grants broad freedoms to use, copy, modify, and
-redistribute the source code. It does not grant rights to the name
-"career-ops," its visual identity, or any associated brand assets.
-Those are reserved by the project's maintainer, Tony Walteur, and any successor entity stewarding the project.
+The PolyForm Shield license grants broad freedoms to use, copy, modify,
+and redistribute the source code for any purpose that does not compete
+with the software. It does not grant rights to the name "Hireloom,"
+its visual identity, or any associated brand assets. Those are reserved
+by the project's maintainer, Tony Walteur, and any successor entity
+stewarding the project. (Third-party code retained from the MIT-licensed
+career-ops engine keeps its original notices in the LICENSE fine print;
+the "career-ops" name belongs to its original project and is not claimed
+here.)
 
 This is the model used by PostgreSQL, Apache, Mozilla, GitLab, and
-most mature open-source projects: the code is free, the brand is
+most mature open-source projects: the code is open, the brand is
 stewarded.
 
 ## What you can do without asking
 
 The following uses are explicitly welcome:
 
-- **Forking and modifying the code** — per MIT, no permission needed.
+- **Using and modifying the code** — per the LICENSE, no permission
+  needed within its terms.
 - **Describing compatibility, origin, and lineage** — "works with
-  career-ops," "based on career-ops," "fork of career-ops," "extends
-  career-ops" are all welcome and encouraged with attribution.
+  Hireloom," "based on Hireloom," "extends Hireloom" are all welcome
+  and encouraged with attribution.
 - **Naming a fork distinctly** — pick your own product name; mention
-  career-ops as origin if you like.
+  Hireloom as origin if you like.
 - **Educational, journalistic, and personal use** — blog posts,
   tutorials, videos, talks, papers, research.
 - **Community contributions** — using the name freely in PRs, issues,
@@ -44,27 +51,27 @@ The following uses are reserved because they cause — or can be
 reasonably perceived to cause — confusion about official affiliation,
 endorsement, or sponsorship:
 
-- **Product, service, or company names** that include "career-ops" or
+- **Product, service, or company names** that include "Hireloom" or
   close variants. This includes prefixes, suffixes, and capitalizations:
-  "career-ops Cloud," "career-ops Pro," "career-ops SaaS," "Career-Ops
-  Hosted," "CareerOps by [vendor]," "Cloud career-ops," etc.
+  "Hireloom Cloud," "Hireloom Pro," "Hireloom SaaS," "Hireloom
+  Hosted," "Hireloom by [vendor]," etc.
 - **Endorsement, sponsorship, or affiliation claims** in any context:
-  "Powered by career-ops," "Official career-ops," "Sponsored by
-  career-ops," "Partner of career-ops," "Featured by career-ops," and
+  "Powered by Hireloom," "Official Hireloom," "Sponsored by
+  Hireloom," "Partner of Hireloom," "Featured by Hireloom," and
   similar phrasings.
 - **Domain names, social handles, and app store listings** containing
-  "career-ops" or close variants for commercial purposes.
+  "Hireloom" or close variants for commercial purposes.
 - **Logos, wordmarks, color schemes, and visual identity assets** in
   any commercial context.
 - **Compatibility certifications** that imply official testing or
-  approval ("career-ops Certified," "career-ops Verified").
+  approval ("Hireloom Certified," "Hireloom Verified").
 
 This list is illustrative, not exhaustive. The principle is: if your
 use suggests an official relationship that doesn't exist, please ask.
 
 ## How to request permission
 
-Email **github.com/mysticalsin (GitHub)** with subject **"Trademark request — [your use case]"**
+Contact **github.com/mysticalsin (GitHub)** with subject **"Trademark request — [your use case]"**
 and include:
 
 1. What you'd like to use the name for
@@ -78,8 +85,7 @@ use case described.
 
 ## Why this policy exists
 
-career-ops is a community-built project used by tens of thousands of
-people. A clear brand allows the code to remain free, the documentation
+A clear brand allows the code to remain open, the documentation
 trustworthy, and contributors confident that no one is impersonating
 the project.
 
@@ -97,12 +103,8 @@ and the [GitLab Trademark Guidelines](https://about.gitlab.com/handbook/marketin
 ## Updates
 
 This policy may be updated as the project evolves. Material changes
-will be announced in [CHANGELOG.md](CHANGELOG.md).
+will be announced in [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
-© 2026 mysticalsin. "career-ops"™ is a trademark of
-mysticalsin. A trademark application has been filed
-with the Spanish Patent and Trademark Office (OEPM) in classes 9
-(downloadable software) and 42 (Software-as-a-Service); registration
-pending. International extensions under the Madrid Protocol may follow.
+© 2026 mysticalsin. "Hireloom"™ is a trademark of mysticalsin.

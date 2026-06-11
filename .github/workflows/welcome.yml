@@ -21,7 +21,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           pr_message: |
-            Welcome to career-ops, @${{ github.actor }}! Thanks for your first PR.
+            Welcome to Hireloom, @${{ github.actor }}! Thanks for your first PR.
 
             A few things to know:
             - Tests will run automatically — check the status below

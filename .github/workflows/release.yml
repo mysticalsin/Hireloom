@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the career-ops EXE and attaches it (plus a source tarball) to a
+# Builds the Hireloom EXE and attaches it (plus a source tarball) to a
 # GitHub Release whenever a v* tag lands. Also runs the install smoke-test
 # on every PR/push so the installers don't rot.
 
@@ -49,10 +49,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t career-ops:ci .
+        run: docker build -t hireloom:ci .
       - name: Boot + probe /api/health
         run: |
-          docker run -d --name co -p 4747:4747 -e PORT=4747 -e AUTH_TOKEN=ci-smoke-only-not-a-secret-0123456789 career-ops:ci
+          docker run -d --name co -p 4747:4747 -e PORT=4747 -e AUTH_TOKEN=ci-smoke-only-not-a-secret-0123456789 hireloom:ci
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:4747/api/health >/dev/null; then
               echo "✓ healthy"; exit 0
