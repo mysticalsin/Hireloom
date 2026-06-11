@@ -48,6 +48,27 @@ const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || '';
 const GMAIL_REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || `http://localhost:${PORT}/auth/gmail/callback`;
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 
+
+// ── ATS host detection ───────────────────────────────────────────────────────
+// Hostname-based, not substring-based: "evil.com/?greenhouse.io" must never
+// route to an ATS filler (CodeQL js/incomplete-url-substring-sanitization).
+function atsHostOf(rawUrl) {
+  try { return new URL(String(rawUrl)).hostname.toLowerCase(); } catch { return ''; }
+}
+function hostMatches(host, domain) {
+  return host === domain || host.endsWith('.' + domain);
+}
+function detectAts(rawUrl) {
+  const h = atsHostOf(rawUrl);
+  if (hostMatches(h, 'greenhouse.io')) return 'greenhouse';
+  if (hostMatches(h, 'lever.co')) return 'lever';
+  if (hostMatches(h, 'ashbyhq.com')) return 'ashby';
+  if (hostMatches(h, 'workable.com')) return 'workable';
+  if (hostMatches(h, 'recruitee.com')) return 'recruitee';
+  if (hostMatches(h, 'smartrecruiters.com')) return 'smartrecruiters';
+  return '';
+}
+
 // ── Application version + brand assets ───────────────────────────────────────
 //
 // APP_VERSION is the single source of truth used by /api/health and the
@@ -1237,21 +1258,21 @@ async function runAutoApply() {
         await page.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         autoApplyState.current.step = 'Detecting form fields';
 
-        // Detect platform from URL
-        const url = item.url.toLowerCase();
+        // Detect platform from the URL's HOSTNAME (never substring-match)
+        const ats = detectAts(item.url);
         let filled = false;
 
-        if (url.includes('greenhouse.io') || url.includes('boards.greenhouse')) {
+        if (ats === 'greenhouse') {
           filled = await fillGreenhouseForm(page, profile);
-        } else if (url.includes('lever.co') || url.includes('jobs.lever')) {
+        } else if (ats === 'lever') {
           filled = await fillLeverForm(page, profile);
-        } else if (url.includes('ashbyhq.com')) {
+        } else if (ats === 'ashby') {
           filled = await fillAshbyForm(page, profile);
-        } else if (url.includes('workable.com')) {
+        } else if (ats === 'workable') {
           filled = await fillWorkableForm(page, profile);
-        } else if (url.includes('recruitee.com')) {
+        } else if (ats === 'recruitee') {
           filled = await fillRecruiteeForm(page, profile);
-        } else if (url.includes('smartrecruiters')) {
+        } else if (ats === 'smartrecruiters') {
           filled = await fillSmartRecruitersForm(page, profile);
         } else {
           filled = await fillGenericForm(page, profile);
@@ -1486,19 +1507,19 @@ async function runAutopilot() {
 
             // Step 2: Fill the form
             autopilotState.currentStep = 'Filling form at ' + app.company;
-            const urlLower = url.toLowerCase();
+            const ats = detectAts(url);
             let filled = false;
-            if (urlLower.includes('greenhouse.io') || urlLower.includes('boards.greenhouse')) {
+            if (ats === 'greenhouse') {
               filled = await fillGreenhouseForm(page, profile);
-            } else if (urlLower.includes('lever.co') || urlLower.includes('jobs.lever')) {
+            } else if (ats === 'lever') {
               filled = await fillLeverForm(page, profile);
-            } else if (urlLower.includes('ashbyhq.com')) {
+            } else if (ats === 'ashby') {
               filled = await fillAshbyForm(page, profile);
-            } else if (urlLower.includes('workable.com')) {
+            } else if (ats === 'workable') {
               filled = await fillWorkableForm(page, profile);
-            } else if (urlLower.includes('recruitee.com')) {
+            } else if (ats === 'recruitee') {
               filled = await fillRecruiteeForm(page, profile);
-            } else if (urlLower.includes('smartrecruiters')) {
+            } else if (ats === 'smartrecruiters') {
               filled = await fillSmartRecruitersForm(page, profile);
             } else {
               filled = await fillGenericForm(page, profile);

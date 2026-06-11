@@ -124,7 +124,7 @@ async function selectComboboxes(frame, fields, answers) {
     const want = String(raw).trim();
     if (!want) continue;
 
-    const sel = `[id="${String(f.id).replace(/"/g, '\\"')}"]`;
+    const sel = `[id="${String(f.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
     const loc = frame.locator(sel).first();
     if (await loc.count().catch(() => 0) === 0) continue;
 
@@ -209,7 +209,7 @@ async function fillForward(page) {
         if (['select', 'radio', 'checkbox', 'file', 'textarea'].includes(f.type)) continue;
         const v = answers[f.id] ?? answers[f.name];
         if (v == null || v === '') continue;
-        const sel = `[id="${String(f.id).replace(/"/g, '\\"')}"]`;
+        const sel = `[id="${String(f.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
         const loc = frame.locator(sel).first();
         if (await loc.count().catch(() => 0) === 0) continue;
         const isCombo = await loc.evaluate(el => {

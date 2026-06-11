@@ -145,7 +145,7 @@ async function selectComboboxes(frame, fields, answers) {
     const want = String(raw).trim();
     if (!want) continue;
 
-    const sel = `[id="${String(f.id).replace(/"/g, '\\"')}"]`;
+    const sel = `[id="${String(f.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
     const loc = frame.locator(sel).first();
     if (await loc.count().catch(() => 0) === 0) continue;
 
