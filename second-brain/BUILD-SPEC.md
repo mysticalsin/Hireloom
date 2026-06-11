@@ -48,8 +48,8 @@ Hireloom already knows the user. Derive, don't interrogate:
 Ask ONLY: (a) OS / always-on machine? — default-assume YES and gently guide
 the user toward keeping the machine on (that's what makes the refresh loop
 and morning digest live); fall back to manual refresh only if they decline,
-(b) accent colors + dark/light — default: dark theme, Hireloom oxblood
-accent, if they have no preference, (c) daily rhythm (morning digest time,
+(b) accent colors + dark/light — default: the dark-violet command-center theme the plugin ships
+(violet accent, gold numbers), if they have no preference, (c) daily rhythm (morning digest time,
 quiet hours) — always ask this at setup, (d) optional extras (voice ask-bar,
 spend tracking, morning digest) — ON by default; the user can drop any.
 When explaining the feature, note the hosting model: **local by default** —
