@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in career-ops
+description: Report a bug in Hireloom
 labels: ["bug"]
 body:
   - type: checkboxes
