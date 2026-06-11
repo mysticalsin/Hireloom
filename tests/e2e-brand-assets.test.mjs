@@ -27,14 +27,14 @@ test('brand assets', async (t) => {
     assert.match(r.headers['content-type'], /image\/svg\+xml/);
     assert.match(r.headers['cache-control'], /public.*max-age=86400/);
     assert.ok(r.headers.etag, 'ETag header present');
-    assert.match(r.body.toString(), new RegExp(HEX_H_SIG.replace(/ /g, ' ')));
+    assert.match(r.body.toString(), new RegExp(HEX_H_SIG.replace(/ /g, '\\s+')));
   });
 
   await t.test('GET /favicon-light.svg returns light-mode variant', async () => {
     const r = await fetchPort(srv.port, '/favicon-light.svg');
     assert.equal(r.statusCode, 200);
     assert.match(r.body.toString(), /fill="#fafaf9"/, 'has cream backdrop');
-    assert.match(r.body.toString(), new RegExp(HEX_H_SIG.replace(/ /g, ' ')));
+    assert.match(r.body.toString(), new RegExp(HEX_H_SIG.replace(/ /g, '\\s+')));
   });
 
   await t.test('GET /og-image.svg returns 1200x630 OG card', async () => {
@@ -44,7 +44,7 @@ test('brand assets', async (t) => {
     assert.match(body, /viewBox="0 0 1200 630"/, 'OG card uses 1200x630 viewBox');
     assert.match(body, /HIRELOOM/, 'wordmark present');
     assert.match(body, /Your AI-Powered Career Accelerator/, 'tagline present');
-    assert.match(body, new RegExp(HEX_H_SIG.replace(/ /g, ' ')));
+    assert.match(body, new RegExp(HEX_H_SIG.replace(/ /g, '\\s+')));
   });
 
   await t.test('GET /manifest.webmanifest returns valid PWA manifest', async () => {

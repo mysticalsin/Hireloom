@@ -23,6 +23,7 @@ import {
   serializeProfileYaml,
   extractProfileFromResume,
   parseProfileSummary,
+  yamlQuote,
 } from './lib/onboard.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
@@ -7950,8 +7951,9 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
       try { yml = await fs.readFile(profilePath, 'utf8'); } catch {}
       const patch = (yaml, key, val) => {
         if (!val) return yaml;
-        const escaped = String(val).replace(/"/g, '\\"');
-        return yaml.replace(new RegExp(`(${key}:\\s*).*`), `$1"${escaped}"`);
+        // yamlQuote escapes backslashes/quotes/newlines; the replacer function
+        // keeps $-sequences in user values out of String.replace's pattern logic.
+        return yaml.replace(new RegExp(`(${key}:\\s*).*`), (_m, p1) => p1 + yamlQuote(val));
       };
       if (yml) {
         if (profile.full_name) yml = patch(yml, 'full_name', profile.full_name);
