@@ -32,8 +32,8 @@
     "followup": "node engine/tracker/followup-cadence.mjs",
     "eval:gemini": "node engine/gemini-eval.mjs",
     "latex": "node engine/render/generate-latex.mjs",
-    "test": "node --test \"tests/**/*.test.mjs\"",
-    "test:watch": "node --test --watch \"tests/**/*.test.mjs\""
+    "test": "node --test tests/*.test.mjs",
+    "test:watch": "node --test --watch tests/*.test.mjs"
   },
   "keywords": [
     "ai",
@@ -59,7 +59,6 @@
   },
   "license": "PolyForm-Shield-1.0.0",
   "dependencies": {
-    "js-yaml": "^4.2.0",
     "js-yaml": "^4.2.0",
     "pdf-lib": "^1.17.1",
     "playwright": "^1.60.0"
