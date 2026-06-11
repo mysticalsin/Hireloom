@@ -54,7 +54,7 @@ async function initFreshProject() {
     await fs.writeFile(readme,
       'Hireloom user data directory.\n\n' +
       'For a full install, clone:\n' +
-      '  git clone https://github.com/santifer/career-ops.git\n' +
+      '  git clone https://github.com/mysticalsin/Hireloom.git\n' +
       'Or run:\n' +
       '  bash install.sh\n', 'utf8');
   }
@@ -96,7 +96,7 @@ async function main() {
     console.log('\n⚠ No Hireloom project found in cwd or near the executable.');
     console.log('   Either:');
     console.log('     • cd into your Hireloom checkout, then run again, or');
-    console.log('     • git clone https://github.com/santifer/career-ops.git\n');
+    console.log('     • git clone https://github.com/mysticalsin/Hireloom.git\n');
     process.exit(2);
   }
 

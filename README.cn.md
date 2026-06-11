@@ -5,14 +5,14 @@
 [English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Hireloom — 多代理求职系统" width="800"></a>
+  <a href="https://github.com/mysticalsin"><img src="docs/hero-banner.jpg" alt="Hireloom — 多代理求职系统" width="800"></a>
 </p>
 
 <p align="center">
   <em>公司用 AI 筛选候选人。Hireloom 把 AI 交给候选人，让他们去<strong>挑选</strong>公司。</em><br>
   传家级体验、酒红与香槟金调色、衬线品牌字 —— 内核仍是那台冷峻的高级岗位评估引擎。
   作坊负责编织，决定权在你。<br>
-  <em>构建于开源引擎 <a href="https://github.com/santifer/career-ops">career-ops</a> 之上。</em>
+  <em>构建于开源引擎 <a href="https://github.com/mysticalsin/Hireloom">career-ops</a> 之上。</em>
 </p>
 
 <p align="center">
@@ -62,7 +62,7 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 
 > **提醒：最开始几次评估不会特别准。** 系统还不了解你。请给它更多上下文，比如你的简历、职业故事、成果证明、个人偏好、擅长的事、想避开的事。你喂给它的信息越多，它就越准确。把它当成在培养一个新招聘顾问：第一周它需要先了解你，之后就会变得非常有价值。
 
-这个系统的作者曾用它评估 740 多个职位、生成 100 多份定制简历，并拿到一份 Head of Applied AI 的工作。[阅读完整案例研究](https://santifer.io/career-ops-system)。
+这个系统的作者曾用它评估 740 多个职位、生成 100 多份定制简历，并拿到一份 Head of Applied AI 的工作。
 
 ## 功能特性
 
@@ -83,7 +83,7 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 
 ```bash
 # 1. 克隆并安装
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops && npm install
 npx playwright install chromium   # 生成 PDF 所需
 
@@ -229,23 +229,19 @@ career-ops/
 - **Dashboard**：Go + Bubble Tea + Lipgloss（Catppuccin Mocha 主题）
 - **数据**：Markdown 表格 + YAML 配置 + TSV 批处理文件
 
-## 也已开源
-
-- **[cv-santiago](https://github.com/santifer/cv-santiago)**：作者的作品集网站（santifer.io），包含 AI 聊天机器人、LLMOps Dashboard 和案例研究。如果你也需要一个能在求职时展示的作品集，可以 fork 它然后改成自己的版本。
-
 ## 关于作者
 
-我是 Santiago，现任 Head of Applied AI，也曾是一名创业者（创建并出售过一家公司，那家公司至今仍以我的名字运营）。我构建 career-ops 是为了管理我自己的求职流程，而它确实奏效了：我用它拿到了现在这份工作。
+Hireloom 由 [Tony Walteur](https://www.linkedin.com/in/tonywalteur/) 维护。
 
-我的作品集和其他开源项目 → [santifer.io](https://santifer.io)
+我的作品集和其他开源项目 → [github.com/mysticalsin](https://github.com/mysticalsin)
 
 ## Star 历史
 
-<a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
+<a href="https://www.star-history.com/?repos=mysticalsin%2FHireloom&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
  </picture>
 </a>
 

@@ -3,7 +3,7 @@
   "version": "1.7.0",
   "description": "Hireloom — AI career atelier. Evaluate offers, generate tailored CVs, scan portals, track applications.",
   "author": {
-    "name": "santifer + mysticalsin",
+    "name": "Tony Walteur",
     "url": "https://github.com/mysticalsin/career-ops"
   },
   "skills": [".claude/skills/"],

@@ -55,6 +55,6 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 # Default: launch the dashboard. Override with `docker run ... bash` for shell.
 CMD ["node", "dashboard-web/server.mjs"]
 
-LABEL org.opencontainers.image.source="https://github.com/santifer/career-ops" \
+LABEL org.opencontainers.image.source="https://github.com/mysticalsin/Hireloom" \
       org.opencontainers.image.description="JobSeeker · Career-Ops AI job-search dashboard" \
       org.opencontainers.image.licenses="MIT"

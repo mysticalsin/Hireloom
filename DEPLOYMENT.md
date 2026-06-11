@@ -23,7 +23,7 @@ that matches your situation.
 ### Install
 
 ```bash
-git clone https://github.com/santifer/career-ops.git hireloom
+git clone https://github.com/mysticalsin/Hireloom.git hireloom
 cd hireloom
 npm install                # installs deps + Playwright Chromium
 npx playwright install chromium  # if Playwright didn't auto-install

@@ -15,7 +15,7 @@
 
 [Unit]
 Description=Career-Ops · JobSeeker dashboard
-Documentation=https://github.com/santifer/career-ops
+Documentation=https://github.com/mysticalsin/Hireloom
 Wants=network-online.target
 After=network-online.target
 

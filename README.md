@@ -295,7 +295,7 @@ career-ops/
 
 ## About the Author
 
-Hireloom is maintained by [mysticalsin](https://github.com/mysticalsin).
+Hireloom is maintained by [Tony Walteur](https://www.linkedin.com/in/tonywalteur/).
 
 My portfolio and other open source projects → [github.com/mysticalsin](https://github.com/mysticalsin)
 

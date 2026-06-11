@@ -48,14 +48,14 @@
     "applicant-tracking",
     "automation"
   ],
-  "author": "Santiago Fernández de Valderrama <hi@santifer.io> (https://santifer.io)",
-  "homepage": "https://santifer.io",
+  "author": "Tony Walteur (https://www.linkedin.com/in/tonywalteur/)",
+  "homepage": "https://github.com/mysticalsin",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/santifer/career-ops.git"
+    "url": "git+https://github.com/mysticalsin/Hireloom.git"
   },
   "bugs": {
-    "url": "https://github.com/santifer/career-ops/issues"
+    "url": "https://github.com/mysticalsin/Hireloom/issues"
   },
   "license": "MIT",
   "dependencies": {

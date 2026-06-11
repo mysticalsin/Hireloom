@@ -39,6 +39,6 @@ services:
       retries: 3
       start_period: 20s
     labels:
-      org.opencontainers.image.source: "https://github.com/santifer/career-ops"
+      org.opencontainers.image.source: "https://github.com/mysticalsin/Hireloom"
       org.opencontainers.image.description: "Career-Ops AI job-search dashboard"
       org.opencontainers.image.licenses: "MIT"

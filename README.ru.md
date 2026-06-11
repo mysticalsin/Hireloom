@@ -7,7 +7,7 @@
 > *Компании используют ИИ для фильтрации кандидатов. Hireloom даёт кандидатам ИИ, чтобы **выбирать** компании.*
 > Палитра oxblood, серифный вордмарк, сдержанная анимация — и беспощадный senior-уровневый движок оценки внутри.
 > Ателье ткёт, решаешь ты.
-> *Построено на open-source движке [career-ops](https://github.com/santifer/career-ops).*
+> *Построено на open-source движке [career-ops](https://github.com/mysticalsin/Hireloom).*
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white)](https://claude.ai)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -49,7 +49,7 @@ Career-Ops превращает любой AI-CLI в полноценный ко
 
 ```bash
 # 1. Клонируй и установи
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops && npm install
 npx playwright install chromium   # Для генерации PDF
 
