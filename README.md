@@ -187,7 +187,7 @@ One slash command, many modes — or skip the command entirely and just paste a 
 /career-ops followup       → who to nudge, and when
 ```
 
-The same modes run on [OpenCode](https://opencode.ai) via `.opencode/commands/` aliases.
+Running [OpenCode](https://opencode.ai), Codex, Gemini, or Qwen instead? `AGENTS.md` carries the same rulebook and the career-ops skill ships in the open agent skill standard format (`.agents/`, `.qwen/`) — same modes, invoked by name.
 
 ## Make it yours
 

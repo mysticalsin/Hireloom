@@ -33,7 +33,7 @@ Assumes only `cv.md` + the JD. Read the user's Current Profile in `CLAUDE.local.
 ## 3. Render
 ```bash
 CHROME=$(ls -d "$HOME/Library/Caches/ms-playwright"/chromium*/chrome-mac-arm64/"Google Chrome for Testing.app"/Contents/MacOS/"Google Chrome for Testing" 2>/dev/null | head -1)
-PW_CHROMIUM_PATH="$CHROME" node render-aecom.mjs "<content.json>" "<outDir>" "<Candidate Name>" breaktail
+PW_CHROMIUM_PATH="$CHROME" node render-breaktail.mjs "<content.json>" "<outDir>" "<Candidate Name>" breaktail
 ```
 → `<outDir>/<Candidate Name> - Resume.pdf` + `… - Cover Letter.pdf`. `PW_CHROMIUM_PATH` REQUIRED. `breaktail` forces Edu+Certs+Competencies onto p2 together (omit only if the whole CV already fits one page cleanly).
 
