@@ -8,7 +8,7 @@
 
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice } = require('obsidian');
 
-const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.3';
+const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.4';
 const VIEW_TYPE = 'hireloom-brain-view';
 const API_DIR = '_brain_api';
 
@@ -27,6 +27,7 @@ const EMPTY = {
 };
 
 const TABS = [
+  { id: 'overview', label: 'Overview' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'queue', label: 'Apply Queue' },
   { id: 'radar', label: 'Follow-up Radar' },
@@ -66,6 +67,128 @@ function rowsOrEmpty(el, items, emptyText, renderRow) {
 }
 
 const RENDERERS = {
+  // Overview — the command-center landing: ask-bar + colored stat cards.
+  // Every number binds to _brain_api; absent sources show honest empty text.
+  async overview(el, data, plugin) {
+    // Ask bar
+    const ask = el.createDiv({ cls: 'hb-ask' });
+    const input = ask.createEl('input', { attr: { placeholder: 'Ask your second brain…' } });
+    const btn = ask.createEl('button', { cls: 'hb-ask-btn', text: 'Ask →' });
+    const chips = el.createDiv({ cls: 'hb-ask-chips' });
+    const answerHost = el.createDiv();
+    const fire = () => { if (input.value.trim() && plugin) plugin.ask(input.value.trim(), answerHost, btn); };
+    btn.onClickEvent(fire);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') fire(); });
+    ['Who is going cold?', "What's next in my queue?", 'How are my interviews looking?'].forEach((q) => {
+      const c = chips.createEl('button', { cls: 'hb-ask-chip', text: q });
+      c.onClickEvent(() => { input.value = q; fire(); });
+    });
+
+    const [p, f, q, s, iv, spend] = await Promise.all([
+      data.json('pipeline'), data.json('followups'), data.json('queue'),
+      data.json('scanfeed'), data.json('interviews'), data.json('spend'),
+    ]);
+    const grid = el.createDiv({ cls: 'hb-cards' });
+    const card = (color, title) => {
+      const c = grid.createDiv({ cls: `hb-ccard hb-cc-${color}` });
+      const h = c.createDiv({ cls: 'hb-ccard-h' });
+      h.createSpan({ cls: 'hb-cdot' });
+      h.createSpan({ text: title });
+      return c;
+    };
+
+    // 💸 Claude spend (API-equivalent, honestly labeled)
+    const cs = card('violet', '💸 Claude spend');
+    if (spend && spend.today) {
+      cs.createDiv({ cls: 'hb-big', text: `$${spend.today.usd.toFixed(2)}` });
+      cs.createDiv({ cls: 'hb-big-sub', text: 'today · API-equivalent value (subscription)' });
+      const g = cs.createDiv({ cls: 'hb-statgrid' });
+      [['7-day', `$${spend.last7d.usd.toFixed(2)}`], ['all-time', `$${spend.allTime.usd.toFixed(2)}`],
+       ['sessions', String(spend.allTime.sessions)], ['messages', String(spend.allTime.messages)]]
+        .forEach(([k, v]) => { g.createDiv({ cls: 'k', text: k }); g.createDiv({ cls: 'v', text: v }); });
+      const days = spend.days || [];
+      if (days.length > 1) {
+        const max = Math.max(...days.map((d) => d.usd), 0.01);
+        const mini = cs.createDiv({ cls: 'hb-mini' });
+        days.forEach((d) => mini.createDiv({ attr: { style: `height:${Math.max(6, Math.round((d.usd / max) * 100))}%`, title: `${d.date}: $${d.usd}` } }));
+      }
+    } else {
+      cs.createDiv({ cls: 'hb-empty', text: 'Spend card not generated — node second-brain/plugin/spend.mjs' });
+    }
+
+    // 🔥 Needs you now — overdue follow-ups
+    const cn = card('orange', '🔥 Needs you now');
+    const overdue = ((f && f.entries) || []).filter((e) => /overdue|urgent/i.test(e.urgency || ''))
+      .sort((a, b) => (b.daysSinceApplication || 0) - (a.daysSinceApplication || 0));
+    if (overdue.length === 0) cn.createDiv({ cls: 'hb-empty', text: EMPTY.radar });
+    else {
+      cn.createDiv({ cls: 'hb-big', text: String((f.metadata && f.metadata.overdue) || overdue.length) });
+      cn.createDiv({ cls: 'hb-big-sub', text: 'follow-ups overdue' });
+      overdue.slice(0, 5).forEach((e) => {
+        const l = cn.createDiv({ cls: 'hb-line' });
+        l.createSpan({ cls: 'hb-co', text: e.company });
+        l.createSpan({ cls: 'hb-num', text: `${e.daysSinceApplication}d` });
+      });
+    }
+
+    // 🎤 Interviews
+    const ci = card('gold', '🎤 Interviews');
+    const ivRows = (iv && iv.rows) || [];
+    if (ivRows.length === 0) ci.createDiv({ cls: 'hb-empty', text: EMPTY.interviews });
+    else {
+      ci.createDiv({ cls: 'hb-big', text: String(ivRows.length) });
+      ci.createDiv({ cls: 'hb-big-sub', text: 'in interview stage' });
+      ivRows.forEach((r) => {
+        const l = ci.createDiv({ cls: 'hb-line', attr: { title: r.notes || '' } });
+        l.createSpan({ cls: 'hb-co', text: r.company });
+        l.createSpan({ cls: 'hb-num', text: `${(r.prepFiles || []).length} prep files` });
+      });
+    }
+
+    // 🗂 Apply queue
+    const cq = card('teal', '🗂 Apply queue');
+    if (!q || !q.head || q.head.length === 0) cq.createDiv({ cls: 'hb-empty', text: EMPTY.queue });
+    else {
+      cq.createDiv({ cls: 'hb-big', text: String(q.pendingCount) });
+      cq.createDiv({ cls: 'hb-big-sub', text: `pending of ${q.total} ranked` });
+      q.head.slice(0, 4).forEach((r) => {
+        const l = cq.createDiv({ cls: 'hb-line' });
+        l.createSpan({ cls: 'hb-num', text: `#${r.rank}` });
+        l.createSpan({ cls: 'hb-co', text: r.company });
+      });
+    }
+
+    // 📊 Pipeline
+    const cp = card('green', '📊 Pipeline');
+    const by = (p && p.byStatus) || {};
+    const total = Object.values(by).reduce((a, b) => a + b, 0);
+    if (!total) cp.createDiv({ cls: 'hb-empty', text: EMPTY.pipeline });
+    else {
+      cp.createDiv({ cls: 'hb-big', text: String(total) });
+      cp.createDiv({ cls: 'hb-big-sub', text: 'applications tracked' });
+      const bar = cp.createDiv({ cls: 'hb-stack' });
+      STATE_ORDER.forEach((st, i) => {
+        const v = by[st] || 0;
+        if (v) bar.createDiv({ cls: `hb-seg hb-seg-${i % 5}`, attr: { style: `flex:${v}`, title: `${st}: ${v}` } });
+      });
+      const g = cp.createDiv({ cls: 'hb-statgrid' });
+      STATE_ORDER.filter((st) => by[st]).forEach((st) => { g.createDiv({ cls: 'k', text: st }); g.createDiv({ cls: 'v', text: String(by[st]) }); });
+    }
+
+    // 📡 Scanner
+    const cr = card('violet', '📡 Scanner');
+    if (!s || !s.total) cr.createDiv({ cls: 'hb-empty', text: EMPTY.scan });
+    else {
+      cr.createDiv({ cls: 'hb-big', text: String(s.total) });
+      cr.createDiv({ cls: 'hb-big-sub', text: `discoveries all-time · newest ${s.lastSeen}` });
+      (s.recent || []).slice(0, 3).forEach((r) => {
+        const l = cr.createDiv({ cls: 'hb-line' });
+        l.createSpan({ cls: 'hb-co', text: r.company });
+        l.createSpan({ cls: 'hb-num', text: r.first_seen });
+      });
+    }
+  },
+
   async pipeline(el, data) {
     const p = await data.json('pipeline');
     const rows = (p && p.rows) || [];
@@ -197,7 +320,7 @@ class BrainView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    this.activeTab = 'pipeline';
+    this.activeTab = 'overview';
   }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Hireloom Brain'; }
@@ -222,7 +345,7 @@ class BrainView extends ItemView {
     const refreshBtn = actions.createEl('button', { cls: 'hb-btn', text: '↻ refresh data' });
     refreshBtn.onClickEvent(() => this.plugin.runRefresh());
     const body = root.createDiv();
-    await RENDERERS[this.activeTab](body, this.plugin.data);
+    await RENDERERS[this.activeTab](body, this.plugin.data, this.plugin);
   }
 
   // Greeting + KPI stat cards — every number binds to _brain_api (no theater).
@@ -233,9 +356,34 @@ class BrainView extends ItemView {
     ]);
     const hero = root.createDiv({ cls: 'hb-hero' });
     const h = new Date().getHours();
-    const part = h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    const part = h < 5 ? '🦉 Up late' : h < 12 ? '🌅 Good morning' : h < 18 ? '🌤 Good afternoon' : '🌙 Good evening';
     const name = meta && meta.user && meta.user.firstName ? `, ${meta.user.firstName}` : '';
-    hero.createDiv({ cls: 'hb-greet', text: `${part}${name}` });
+    const top = hero.createDiv({ cls: 'hb-hero-top' });
+    top.createDiv({ cls: 'hb-greet', text: `${part}${name}` });
+    // Freshness: green dot if the machine layer ran in the last 35 min.
+    const right = top.createDiv({ cls: 'hb-hero-right' });
+    try {
+      const st = await this.app.vault.adapter.stat('_brain_api/meta.json');
+      const ageMin = st ? (Date.now() - st.mtime) / 60000 : Infinity;
+      right.createSpan({ cls: `hb-dot ${ageMin < 35 ? 'is-fresh' : 'is-stale'}` });
+      right.createSpan({ text: st ? `Updated ${new Date(st.mtime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'never refreshed' });
+    } catch (e) { /* stat unsupported — skip freshness */ }
+    // Where things stand — one honest sentence from real counts.
+    const counts0 = (meta && meta.counts) || {};
+    const standBits = [];
+    if (counts0.interviews) standBits.push(`${counts0.interviews} interview${counts0.interviews === 1 ? '' : 's'} live`);
+    if (f && f.metadata && f.metadata.overdue) standBits.push(`${f.metadata.overdue} follow-ups overdue`);
+    if (q && q.nextRank != null) standBits.push(`queue head #${q.nextRank}`);
+    hero.createDiv({
+      cls: 'hb-subline',
+      text: `${new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · Where things stand: ${standBits.join(' · ') || 'all quiet'}`,
+    });
+    // Action pills — REAL actions only (no theater buttons).
+    const pills = hero.createDiv({ cls: 'hb-pills' });
+    const pill = (label, fn) => { const b = pills.createEl('button', { cls: 'hb-pill', text: label }); b.onClickEvent(fn); };
+    pill('↻ Brain Refresh', () => this.plugin.runRefresh());
+    pill('🧪 Self-Test', () => this.plugin.selfTest());
+    pill('🌅 Morning Digest', () => this.app.workspace.openLinkText('_brain_api/digest.md', '/', true));
     const counts = (meta && meta.counts) || {};
     const by = counts.byStatus || {};
     const kpis = hero.createDiv({ cls: 'hb-kpis' });
@@ -308,6 +456,7 @@ module.exports = class HireloomBrain extends Plugin {
       d.json('pipeline'), d.json('queue'), d.json('followups'), d.json('interviews'), d.json('scanfeed'), d.json('inbox'),
     ]);
     return {
+      overview: null,
       pipeline: p && p.rows ? p.rows.length : 0,
       queue: q && q.pendingCount != null ? q.pendingCount : 0,
       radar: f && f.metadata ? (f.metadata.actionable ?? 0) : 0,
@@ -320,16 +469,50 @@ module.exports = class HireloomBrain extends Plugin {
 
   runRefresh() {
     try {
+      // Inside Obsidian's renderer, process.execPath is Obsidian itself — NOT
+      // node (user-test finding #7). Resolve node via a login shell so the
+      // user's real PATH (homebrew/nvm/asdf) applies.
       const { execFile } = require('child_process');
       const base = this.app.vault.adapter.basePath;
       new Notice('Hireloom Brain: refreshing…');
-      execFile(process.execPath, [`${base}/second-brain/plugin/refresh.mjs`], { cwd: base, timeout: 60000 }, (err, stdout) => {
-        if (err) new Notice(`Brain refresh failed: ${String(err.message).slice(0, 120)}`);
-        else new Notice(String(stdout || 'Brain refresh OK').slice(0, 120));
+      execFile('/bin/zsh', ['-lc', `node "${base}/second-brain/plugin/refresh.mjs"`], { cwd: base, timeout: 60000 }, (err, stdout, stderr) => {
+        if (err) new Notice(`Brain refresh failed: ${String(stderr || err.message).slice(0, 140)}`);
+        else new Notice(String(stdout || 'Brain refresh OK').slice(0, 140));
       });
     } catch (e) {
       new Notice(`Brain refresh unavailable: ${String(e.message).slice(0, 120)}`);
     }
+  }
+
+  // Ask-bar: question + compact real facts → the user's own Claude CLI.
+  // Answers ONLY from vault facts; one `claude -p` call per ask (user-initiated).
+  ask(question, hostEl, btn) {
+    const { spawn } = require('child_process');
+    const base = this.app.vault.adapter.basePath;
+    hostEl.empty();
+    const out = hostEl.createDiv({ cls: 'hb-ask-answer', text: '🧠 thinking…' });
+    if (btn) btn.disabled = true;
+    Promise.all([this.data.json('meta'), this.data.json('followups'), this.data.json('queue'), this.data.json('interviews')])
+      .then(([meta, f, q, iv]) => {
+        const facts = {
+          counts: meta && meta.counts,
+          overdueTop: ((f && f.entries) || []).filter((e) => /overdue|urgent/i.test(e.urgency || '')).slice(0, 10)
+            .map((e) => ({ company: e.company, role: e.role, days: e.daysSinceApplication, followups: e.followupCount })),
+          queueHead: ((q && q.head) || []).slice(0, 8).map((r) => ({ rank: r.rank, company: r.company, title: r.title })),
+          interviews: ((iv && iv.rows) || []).map((r) => ({ company: r.company, role: r.role, notes: (r.notes || '').slice(0, 200) })),
+        };
+        const prompt = `You are the Hireloom Second Brain ask-bar. Answer ONLY from these job-search facts (JSON below). 2-4 sentences, direct, no preamble, no markdown headers. If the facts can't answer it, say so plainly.\n\nFACTS: ${JSON.stringify(facts)}\n\nQUESTION: ${question}`;
+        const child = spawn('/bin/zsh', ['-lc', 'claude -p --max-turns 1 2>/dev/null'], { cwd: base, timeout: 120000 });
+        let buf = '';
+        child.stdout.on('data', (c) => { buf += c; });
+        child.on('close', (code) => {
+          out.setText(buf.trim() || `ask failed (exit ${code}) — is the claude CLI on your PATH?`);
+          if (btn) btn.disabled = false;
+        });
+        child.on('error', (e) => { out.setText(`ask unavailable: ${e.message}`); if (btn) btn.disabled = false; });
+        child.stdin.write(prompt);
+        child.stdin.end();
+      });
   }
 
   async selfTest() {

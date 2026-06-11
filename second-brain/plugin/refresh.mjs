@@ -16,9 +16,9 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
 
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const API = join(ROOT, '_brain_api');
@@ -171,4 +171,40 @@ writeJson('meta.json', {
   },
 });
 
-console.log(`brain refresh OK → ${API} (${pipeline.rows.length} tracked, ${interviewRows.length} in interview)`);
+// ── 8. spend.json — delegate to the transcript parser (cheap: <1s) ──────────
+try {
+  execFileSync(process.execPath, [join(ROOT, 'second-brain', 'plugin', 'spend.mjs')], { timeout: 60000 });
+} catch (e) {
+  writeJson('spend.json', { error: 'spend parser failed', detail: String(e.message).slice(0, 200) });
+}
+
+// ── 9. digest.md — the morning briefing, composed from the same real data ───
+// No timestamps in the body (idempotency); the `morning` protocol reads this.
+const overdueTop = (() => {
+  try {
+    const f = JSON.parse(readFileSync(join(API, 'followups.json'), 'utf8'));
+    return (f.entries || []).filter((e) => /overdue|urgent/i.test(e.urgency || ''))
+      .sort((a, b) => (b.daysSinceApplication || 0) - (a.daysSinceApplication || 0)).slice(0, 5);
+  } catch { return []; }
+})();
+const queueHead = (() => {
+  try { return (JSON.parse(readFileSync(join(API, 'queue.json'), 'utf8')).head || []).slice(0, 5); } catch { return []; }
+})();
+const digest = [
+  '# Morning digest',
+  '',
+  `**Pipeline:** ${pipeline.rows.length} tracked — ${Object.entries(pipeline.byStatus).map(([k, v]) => `${v} ${k}`).join(' · ')}`,
+  '',
+  '## 🎤 Interviews live',
+  ...(interviewRows.length ? interviewRows.map((r) => `- **${r.company}** — ${r.role}`) : ['- none in interview stage']),
+  '',
+  '## 🔥 Follow-ups due (top 5 overdue)',
+  ...(overdueTop.length ? overdueTop.map((e) => `- **${e.company}** — ${e.role} (${e.daysSinceApplication}d since apply, ${e.followupCount} follow-ups sent)`) : ['- nothing overdue']),
+  '',
+  '## 🗂 Queue head',
+  ...(queueHead.length ? queueHead.map((r) => `- #${r.rank} **${r.company}** — ${r.title}`) : ['- no ranked pool']),
+  '',
+].join('\n');
+writeFileSync(join(API, 'digest.md'), digest + '\n');
+
+console.log(`brain refresh OK → ${API} (${pipeline.rows.length} tracked, ${interviewRows.length} in interview, digest + spend written)`);
