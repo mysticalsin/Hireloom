@@ -83,6 +83,11 @@ manual step first (Obsidian → "Open folder as vault" → the Hireloom
 folder, then "Trust author and enable plugins"); deep-links work forever
 after that registration.
 
+Pre-seed `.obsidian/app.json` with `userIgnoreFilters` for the noise dirs
+(`node_modules/`, `tmp/`, `archive/`, `output/`, `_brain_api/`, browser
+profiles) so the file tree shows the user their career, not their tooling
+(user-test finding).
+
 Standard Obsidian community plugin: `manifest.json` + `main.js` (esbuild from
 `src/` — Node is guaranteed). A dashboard view with tabs, a memoized data
 layer over `_brain_api/` + direct file reads, debounced re-render on vault
