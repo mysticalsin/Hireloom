@@ -421,9 +421,25 @@ async function autoMergeTrackerAdditions() {
 
 async function loadData() {
   await autoMergeTrackerAdditions();
-  let appsContent = '', pipelineContent = '';
+  let appsContent = '', pipelineContent = '', followupsContent = '';
   try { appsContent = await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'); } catch {}
   try { pipelineContent = await fs.readFile(path.join(DATA_DIR, 'pipeline.md'), 'utf8'); } catch {}
+  try { followupsContent = await fs.readFile(path.join(DATA_DIR, 'follow-ups.md'), 'utf8'); } catch {}
+
+  // Last logged touch per application (data/follow-ups.md) — the cadence
+  // anchor. Header "App #" normalizes to key 'app_'.
+  const lastTouchByApp = new Map();
+  for (const row of parseMarkdownTable(followupsContent)) {
+    const appNum = stripMd(row['app_'] || row['app_num'] || '');
+    const date = stripMd(row['date'] || '');
+    if (!appNum || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!lastTouchByApp.has(appNum) || date > lastTouchByApp.get(appNum)) lastTouchByApp.set(appNum, date);
+  }
+  // Gmail next-step flags (low-confidence interview signals awaiting a human
+  // glance) — these ARE follow-ups, regardless of cadence math.
+  const nextStepNums = new Set((gmailCache.signals || [])
+    .filter(s => s.signal === 'interview' && !s.dismissed && !s.autoApplied)
+    .map(s => String(s.num)));
 
   const rawRows = parseMarkdownTable(appsContent)
     .filter(r => { const n = r['#']||r['num']||''; return n && /\d/.test(n); })
@@ -440,8 +456,17 @@ async function loadData() {
       const reportLink = report.match(/\[.*?\]\((.*?)\)/)?.[1] || '';
       const hasPdf  = pdf.includes('✅') || pdf.toLowerCase() === 'yes';
       const age     = daysSince(date);
-      const needsFollowUp = ['applied','responded'].includes(status) && age !== null && age >= 7;
-      return { num, date, company, role, score, status, hasPdf, reportLink, notes, age, needsFollowUp };
+      // Follow-up policy (mirrors engine/tracker/followup-cadence.mjs, PR #16):
+      // plain Applied rows carry NO obligation — silence is a normal outcome of
+      // volume applying. Live conversations (Responded/Interview) flag after 7
+      // days of silence, anchored to the last logged touch in follow-ups.md.
+      // A Gmail next-step flag overrides everything — the company may have moved.
+      const touchAge = lastTouchByApp.has(num) ? daysSince(lastTouchByApp.get(num)) : null;
+      const silence = touchAge !== null && age !== null ? Math.min(age, touchAge) : (touchAge ?? age);
+      const nextStepEmail = nextStepNums.has(num);
+      const needsFollowUp = nextStepEmail ||
+        (['responded','interview'].includes(status) && silence !== null && silence >= 7);
+      return { num, date, company, role, score, status, hasPdf, reportLink, notes, age, needsFollowUp, nextStepEmail };
     });
 
   // Attach comp data — concurrent reads, but capped to avoid file-handle blowup on 800+ reports
@@ -634,9 +659,24 @@ async function refreshAccessToken() {
     refresh_token: gmailTokens.refresh_token,
     grant_type: 'refresh_token',
   });
-  if (res.status !== 200) return null;
+  if (res.status !== 200) {
+    // A 4xx means the refresh token is permanently dead — e.g. the OAuth
+    // client in .env was rotated, so the stored token belongs to a different
+    // client and every refresh returns invalid_grant. Persist the failure so
+    // /api/gmail/status can surface a Reconnect button; without this the UI
+    // looks "connected" forever while polling silently fails. 5xx/network
+    // errors are transient and don't mark the tokens dead.
+    if (res.status >= 400 && res.status < 500 && !gmailTokens.refresh_failed) {
+      let reason = '';
+      try { reason = JSON.parse(res.body)?.error || ''; } catch { /* non-JSON error body */ }
+      gmailTokens = { ...gmailTokens, refresh_failed: { at: Date.now(), error: reason || `http_${res.status}` } };
+      try { await fs.writeFile(TOKENS_FILE, JSON.stringify(gmailTokens, null, 2), 'utf8'); } catch { /* non-fatal */ }
+    }
+    return null;
+  }
   const data = JSON.parse(res.body);
   gmailTokens = { ...gmailTokens, ...data, expiry: Date.now() + (data.expires_in * 1000) };
+  delete gmailTokens.refresh_failed;
   await fs.writeFile(TOKENS_FILE, JSON.stringify(gmailTokens, null, 2), 'utf8');
   return gmailTokens.access_token;
 }
@@ -710,10 +750,20 @@ async function exchangeCode(code) {
 
 // ── Gmail: Inbox scanner ──────────────────────────────────────────────────────
 
-// Genuine interview/scheduling language ONLY. Deliberately NO bare "interview"
-// or "next steps"/"move forward" — those appear in auto-acknowledgment emails
-// ("here's what the interview process looks like", "next steps: we'll review").
-const INTERVIEW_SIGNALS = ['schedule an interview','schedule a call','schedule a time','schedule some time',
+// Recall over precision (user decision 2026-06-11): a confirmation email
+// mis-flagged as a next-step beats a real invite mis-filed as a confirmation.
+// Bare "interview" / "next step" / "schedule" are deliberately IN, and this
+// list is checked BEFORE the ack-subject short-circuit in detectSignal.
+const INTERVIEW_SIGNALS = ['interview','next step','schedule','screening','assessment',
+  'coding challenge','take-home','availability','calendly','book a time','find a time',
+  'phone screen','speak with you','meet with','chat with','hiring manager','next round',
+  'set up a call','set up a time','like to connect','like to set up'];
+// Strict scheduling language = high confidence. A loose-only match inside an
+// ack-subject email still FLAGS as a possible next step (never filed as a
+// confirmation) but doesn't auto-write the tracker — that guard is what keeps
+// "thanks for applying, here's our interview process" auto-acks from minting
+// phantom Interview rows.
+const INTERVIEW_SIGNALS_STRICT = ['schedule an interview','schedule a call','schedule a time','schedule some time',
   'set up a call','set up a time','set up an interview','book a time','find a time','phone screen','phone interview',
   'video interview','technical assessment','coding challenge','take-home','availability for a call',
   'availability to chat','your availability','invite you to interview','invitation to interview','interview invitation',
@@ -740,6 +790,13 @@ const ACK_SUBJECT_SIGNALS = ['thank you for applying','thanks for applying','tha
   'we\'ve received your application','got your application','we\'ve got your application','what happens next',
   'what to expect','application confirmation','application submitted','your application to','your application for',
   'thanks for your interest','thank you for your interest'];
+// Job-alert newsletters / talent-community blasts are about NEW postings, not
+// the user's existing application — never classify them as signals. (A "New
+// jobs posted from Capgemini Group" digest auto-flipped a tracker row to
+// Interview before this guard existed: it matched company + "schedule".)
+const JOB_ALERT_SIGNALS = ['new jobs posted','jobs posted from','new jobs from','job alert',
+  'recommended jobs','jobs you may be interested','jobs for you','talent community',
+  'job recommendations','new opportunities at','daily job digest','weekly job digest'];
 const VERIFICATION_SIGNALS = ['verification code','verify your email','confirm your email',
   'one-time password','security code','your code is','enter this code',
   'otp','confirmation link','click to verify','verify your account','passcode'];
@@ -751,17 +808,25 @@ function detectSignal(subject, snippet, bodyText, from) {
     const codes = extractVerificationCodes(bodyText || snippet, subject);
     if (codes.length > 0) return { type: 'verification', codes };
   }
+  // 0. Job-alert newsletters are never application signals.
+  if (JOB_ALERT_SIGNALS.some(s => text.includes(s))) return { type: 'other' };
   // 1. Strong, unambiguous rejection wins outright.
   if (STRONG_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
-  // 2. Acknowledgment by SUBJECT short-circuits to "received": auto-acks describe
-  //    the interview process AND carry "unfortunately we can't reply to everyone"
-  //    disclaimers, either of which would otherwise mis-flag them. Settle by subject.
+  // 2. Interview/next-step language BEFORE the ack short-circuit — recall over
+  //    precision by design: yes, some auto-acks describe the interview process
+  //    and will land here, but the user would rather review a false next-step
+  //    than have a real invite silently filed as a confirmation.
+  if (INTERVIEW_SIGNALS.some(s => text.includes(s))) {
+    const strict = INTERVIEW_SIGNALS_STRICT.some(s => text.includes(s));
+    const ackSubj = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
+    return { type: 'interview', confident: strict || !ackSubj };
+  }
+  // 3. Acknowledgment by SUBJECT → "received" (auto-acks carry "unfortunately
+  //    we can't reply to everyone" disclaimers that would mis-flag below).
   const isAck = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
   if (isAck) return { type: 'received' };
-  // 3. Soft rejection words only count when it's NOT an acknowledgment email.
+  // 4. Soft rejection words only count when it's NOT an acknowledgment email.
   if (WEAK_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
-  // 4. Genuine interview/scheduling language (real invites, not process blurbs).
-  if (INTERVIEW_SIGNALS.some(s => text.includes(s))) return { type: 'interview' };
   // 5. Received (body-level acks) as the fallback.
   if (RECEIVED_SIGNALS.some(s => text.includes(s))) return { type: 'received' };
   return { type: 'other' };
@@ -811,6 +876,10 @@ async function scanGmailInbox() {
   try { messages = JSON.parse(listRes.body).messages || []; } catch { return; }
 
   const signals = [];
+  // Prior scan's signals, by message id — used both to carry forward the
+  // auto-applied marker (so a status is written once, not on every rescan)
+  // and for the dismissed-state merge at the end.
+  const existingById = Object.fromEntries((gmailCache.signals || []).map(s => [s.id, s]));
 
   for (const msg of messages.slice(0, 50)) {
     const msgRes = await gmailApiGet(`messages/${msg.id}?format=full`, token);
@@ -855,8 +924,39 @@ async function scanGmailInbox() {
       // response, so no status suggestion; the row stays Applied. Only a
       // genuine human/interview/rejection signal earns a "Mark as" button.
       suggestedStatus: signal.type === 'interview' ? 'Interview' : signal.type === 'rejected' ? 'Rejected' : signal.type === 'received' || signal.type === 'verification' ? null : 'Responded',
-      dismissed: false,
+      // Auto-acks ("we received your application") are informational only —
+      // filed as dismissed at scan time so they never demand a click. The UI
+      // shows them as a passive "N confirmations auto-filed" line instead of
+      // action cards. Real signals (interview/rejection) still surface live.
+      dismissed: signal.type === 'received',
     };
+
+    // Auto-sort (user decision 2026-06-11, replaces the Mark-as/Dismiss
+    // buttons): confident signals write the tracker status directly, once
+    // per message. Low-confidence next-step flags stay visible for review
+    // without touching the tracker.
+    const prior = existingById[msg.id];
+    if (prior?.autoApplied) {
+      signalObj.autoApplied = prior.autoApplied;
+      signalObj.dismissed = true;
+    } else if (signal.type === 'rejected' && ['applied', 'evaluated', 'responded', 'interview'].includes(matched.status)) {
+      try {
+        await updateApplicationStatus(matched.num, 'Rejected');
+        signalObj.autoApplied = 'Rejected';
+        signalObj.dismissed = true;
+      } catch { /* row vanished or malformed — leave the signal visible */ }
+    } else if (signal.type === 'interview' && signal.confident && ['applied', 'evaluated', 'responded'].includes(matched.status)) {
+      try {
+        await updateApplicationStatus(matched.num, 'Interview');
+        signalObj.autoApplied = 'Interview';
+        signalObj.dismissed = true;
+      } catch { /* ditto */ }
+    } else if ((signal.type === 'interview' && ['interview', 'offer'].includes(matched.status)) ||
+               (signal.type === 'rejected' && ['rejected', 'discarded', 'skip'].includes(matched.status))) {
+      // Status already reflects the signal (e.g. interview reminders for a
+      // row that's already Interview) — file quietly, nothing to review.
+      signalObj.dismissed = true;
+    }
     signals.push(signalObj);
 
     // Store verification codes for quick access
@@ -876,8 +976,7 @@ async function scanGmailInbox() {
   }
 
   // Merge with existing cache (keep dismissed state, avoid dups)
-  const existingById = Object.fromEntries((gmailCache.signals||[]).map(s => [s.id, s]));
-  const merged = signals.map(s => ({ ...s, dismissed: existingById[s.id]?.dismissed || false }));
+  const merged = signals.map(s => ({ ...s, dismissed: s.dismissed || existingById[s.id]?.dismissed || false }));
   gmailCache = { signals: merged, scanned_at: new Date().toISOString() };
   await saveGmailCache();
 }
@@ -3496,14 +3595,18 @@ const HTML = /* html */ `<!DOCTYPE html>
       color: var(--text);
     }
 
-    /* ── Table — solid surface, single border, no glass. */
+    /* ── Table — solid surface, single border, no glass.
+       overflow-x: auto (not hidden) — on narrow windows the columns
+       overflow and must scroll sideways; hidden just amputated them. */
     .table-card {
       background: var(--bg-elevated);
       border-radius: var(--r-md);
       border: 1px solid var(--separator2);
-      overflow: hidden;
+      overflow-x: auto;
+      overflow-y: hidden;
     }
     table { width: 100%; border-collapse: collapse; }
+    .table-card table { min-width: 880px; }
     thead th {
       padding: 11px 16px;
       text-align: left;
@@ -3516,7 +3619,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       white-space: nowrap;
       cursor: pointer;
       user-select: none;
-      position: sticky; top: 56px; z-index: 10;
+      /* NOT sticky: a sticky thead inside the card used to ride down over
+         the first rows on page scroll, hiding them under a "banner". */
       transition: color 120ms ease;
     }
     thead th:hover { color: var(--text-sec); }
@@ -5161,7 +5265,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       '<div class="followup-item">' +
         '<div class="followup-info">' +
           '<div class="followup-company">' + esc(a.company) + '</div>' +
-          '<div class="followup-age">' + a.age + 'd — follow up now</div>' +
+          '<div class="followup-age">' + (a.nextStepEmail ? '✉ possible next step — check email' : a.age + 'd — follow up now') + '</div>' +
         '</div>' +
         '<span class="status-badge ' + statusClass(a.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>' +
       '</div>'
@@ -5294,7 +5398,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       // panel with red rows. Only hit /inbox once we know we can authenticate.
       const statusRes = await fetch('/api/gmail/status');
       gmailStatus = statusRes.ok ? await statusRes.json() : null;
-      if (!gmailStatus || !gmailStatus.configured || !gmailStatus.hasTokens) {
+      if (!gmailStatus || !gmailStatus.configured || !gmailStatus.hasTokens || gmailStatus.refreshFailed) {
         renderGmailConnect();
         return;
       }
@@ -5315,6 +5419,8 @@ const HTML = /* html */ `<!DOCTYPE html>
         btn.innerHTML = '<a href="/auth/gmail" class="btn btn-gmail">🔗 Connect Gmail</a>';
       } else if (!s.configured) {
         btn.innerHTML = '<button class="btn btn-gmail" onclick="showGmailSetup()" title="Gmail credentials missing in .env">⚙ Gmail setup</button>';
+      } else if (s.refreshFailed) {
+        btn.innerHTML = '<a href="/auth/gmail" class="btn btn-gmail" title="Saved Gmail authorization is no longer valid — re-authorize">🔄 Reconnect Gmail</a>';
       } else {
         btn.innerHTML = '<a href="/auth/gmail" class="btn btn-gmail">🔗 Connect Gmail</a>';
       }
@@ -5328,6 +5434,13 @@ const HTML = /* html */ `<!DOCTYPE html>
             '<p style="font-size:11px;color:var(--text-ter);margin-bottom:14px">Missing: ' + s.missingEnv.map(m => '<code>' + esc(m) + '</code>').join(', ') + '</p>' +
             '<a class="btn btn-gmail" href="/auth/gmail" style="display:block;text-align:center">Open setup guide →</a>' +
             '<button onclick="showGmailSetup()" style="background:none;border:none;color:var(--link);font-size:11px;cursor:pointer;margin-top:8px;padding:0;width:100%">View status &amp; diagnostic</button>' +
+          '</div>';
+      } else if (s.refreshFailed) {
+        c.innerHTML =
+          '<div class="gmail-connect-card">' +
+            '<p style="font-size:13px;color:var(--text-sec);margin-bottom:10px">Gmail authorization is <strong style="color:var(--orange)">no longer valid</strong>' + (s.refreshError ? ' (<code>' + esc(s.refreshError) + '</code>)' : '') + '. This happens when the OAuth client in <code>.env</code> changes — the saved tokens can’t refresh anymore.</p>' +
+            '<a class="btn btn-gmail" href="/auth/gmail" style="display:block;text-align:center">🔄 Reconnect Gmail</a>' +
+            '<p style="font-size:11px;color:var(--text-ter);margin-top:10px">Scope: <code>gmail.readonly</code> · We never send or delete.</p>' +
           '</div>';
       } else {
         c.innerHTML =
@@ -5355,7 +5468,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       '<ul class="gsm-checklist">' +
         '<li>' + dot(s.hasClientId) + 'GMAIL_CLIENT_ID</li>' +
         '<li>' + dot(s.hasClientSecret) + 'GMAIL_CLIENT_SECRET</li>' +
-        '<li>' + dot(s.hasTokens) + 'OAuth tokens saved' + (s.tokenExpired ? ' <em>(expired — will auto-refresh)</em>' : '') + '</li>' +
+        '<li>' + dot(s.hasTokens && !s.refreshFailed) + 'OAuth tokens saved' + (s.refreshFailed ? ' <em>(refresh failing — reconnect required)</em>' : s.tokenExpired ? ' <em>(expired — will auto-refresh)</em>' : '') + '</li>' +
         '<li>' + dot(s.polling) + 'Inbox polling active' + (s.fastPolling ? ' <em>(fast mode)</em>' : '') + '</li>' +
       '</ul>' +
       '<div class="gsm-meta">' +
@@ -5368,7 +5481,7 @@ const HTML = /* html */ `<!DOCTYPE html>
         (!s.configured
           ? '<a class="btn btn-apply-batch" href="/auth/gmail">Open setup guide →</a>'
           : (s.hasTokens
-            ? '<a class="btn btn-ghost" href="/auth/gmail">Re-authorize</a><button class="btn btn-ghost" style="color:var(--red);border-color:rgba(255,69,58,.3)" onclick="disconnectGmail()">Disconnect</button>'
+            ? '<a class="' + (s.refreshFailed ? 'btn btn-apply-batch' : 'btn btn-ghost') + '" href="/auth/gmail">' + (s.refreshFailed ? 'Reconnect Gmail →' : 'Re-authorize') + '</a><button class="btn btn-ghost" style="color:var(--red);border-color:rgba(255,69,58,.3)" onclick="disconnectGmail()">Disconnect</button>'
             : '<a class="btn btn-apply-batch" href="/auth/gmail">Connect Gmail →</a>')) +
       '</div>'
     );
@@ -5419,15 +5532,26 @@ const HTML = /* html */ `<!DOCTYPE html>
 
     if (btn) btn.innerHTML = '<span class="gmail-dot"></span><span style="font-size:12px;color:var(--text-sec);margin-left:6px">Gmail</span>';
 
-    const active = signals.filter(s => !s.dismissed);
-    if (!active.length) {
-      c.innerHTML = '<div style="font-size:12px;color:var(--text-ter);text-align:center;padding:12px 0">' +
+    // Auto-sort feed: no Mark-as/Dismiss buttons. Confident signals already
+    // wrote the tracker at scan time; confirmations are auto-filed; only
+    // low-confidence "possible next step" flags ask for a human glance.
+    const acks = signals.filter(s => s.signal === 'received');
+    const ackLine = acks.length
+      ? '<div style="font-size:11px;color:var(--text-ter);text-align:center;padding:8px 0 2px" title="' + esc(acks.map(a => a.company).join(', ')) + '">✓ ' + acks.length + ' application confirmation' + (acks.length === 1 ? '' : 's') + ' auto-filed</div>'
+      : '';
+    // Feed = things worth a glance: auto-applied updates (✓ receipts) and
+    // low-confidence next-step flags. Quietly-filed signals (status already
+    // correct, or dismissed in the pre-auto-sort era) stay out.
+    const feed = signals.filter(s => s.signal !== 'received' && (!s.dismissed || s.autoApplied))
+      .sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0));
+    if (!feed.length) {
+      c.innerHTML = '<div style="font-size:12px;color:var(--text-ter);text-align:center;padding:12px 0 4px">' +
         (scannedAt ? 'No new signals since ' + new Date(scannedAt).toLocaleTimeString() : 'No signals detected yet.') +
-        '</div>';
+        '</div>' + ackLine;
       return;
     }
 
-    c.innerHTML = active.slice(0, 8).map(s => {
+    c.innerHTML = feed.slice(0, 8).map(s => {
       const typeClass = 'signal-' + s.signal;
       const typeLabel = s.signal.charAt(0).toUpperCase() + s.signal.slice(1);
       const codeDisplay = (s.signal === 'verification' && s.codes && s.codes.length)
@@ -5436,6 +5560,11 @@ const HTML = /* html */ `<!DOCTYPE html>
             : '<a class="vcode-link" href="' + esc(c.value) + '" target="_blank">Confirm link →</a>'
           ).join('')
         : '';
+      const outcome = s.autoApplied
+        ? '<div style="font-size:11px;color:var(--green,#34c759);padding-top:6px">✓ Tracker auto-updated: #' + esc(s.num) + ' → ' + esc(s.autoApplied) + '</div>'
+        : (s.signal === 'interview'
+          ? '<div style="font-size:11px;color:var(--orange,#ff9f0a);padding-top:6px">⚠ Possible next step — check the email</div>'
+          : '');
       return '<div class="signal-card" data-id="' + esc(s.id) + '">' +
         '<div class="signal-header">' +
           '<div class="signal-company">' + esc(s.company) + '</div>' +
@@ -5444,33 +5573,12 @@ const HTML = /* html */ `<!DOCTYPE html>
         '<div class="signal-subject">' + esc(s.subject) + '</div>' +
         codeDisplay +
         (codeDisplay ? '' : '<div class="signal-snippet">' + esc(s.snippet.substring(0,120)) + '…</div>') +
-        '<div class="signal-actions">' +
-          (s.suggestedStatus ? '<button class="signal-btn signal-btn-confirm" onclick="confirmSignal(\\'' + esc(s.id) + '\\',\\'' + esc(s.num) + '\\',\\'' + esc(s.suggestedStatus) + '\\')">Mark as ' + esc(s.suggestedStatus) + '</button>' : '') +
-          (s.signal === 'verification' && s.codes?.length && s.codes[0].type === 'numeric' ? '<button class="signal-btn signal-btn-confirm" style="background:var(--purple)" onclick="copyCode(\\'' + esc(s.codes[0].value) + '\\',this)">Copy code</button>' : '') +
-          '<button class="signal-btn signal-btn-dismiss" onclick="dismissSignal(\\'' + esc(s.id) + '\\')">Dismiss</button>' +
-        '</div>' +
+        (s.signal === 'verification' && s.codes?.length && s.codes[0].type === 'numeric'
+          ? '<div class="signal-actions"><button class="signal-btn signal-btn-confirm" style="background:var(--purple)" onclick="copyCode(\\'' + esc(s.codes[0].value) + '\\',this)">Copy code</button></div>'
+          : '') +
+        outcome +
       '</div>';
-    }).join('');
-  }
-
-  async function confirmSignal(id, num, newStatus) {
-    const res = await fetch('/api/update-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ num, status: newStatus }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      await fetch('/api/gmail/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-      showToast('Updated #' + num + ' → ' + newStatus, 'success');
-      refresh();
-      refreshGmail();
-    } else showToast(data.error || 'Update failed', 'error');
-  }
-
-  async function dismissSignal(id) {
-    await fetch('/api/gmail/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-    refreshGmail();
+    }).join('') + ackLine;
   }
 
   // showGmailSetup is defined above (in the Gmail block) — it now opens a
@@ -7113,7 +7221,10 @@ function isAuthorized(req) {
 // expire after 5 min idle to bound memory.
 const RATE_BUCKETS = new Map();
 const RATE_GET_PER_MIN  = Number(process.env.RATE_GET_PER_MIN  || 60);
-const RATE_POST_PER_MIN = Number(process.env.RATE_POST_PER_MIN || 10);
+// 60/min: a single user working the dashboard (dismiss sprees, batch status
+// updates) legitimately fires bursts of mutating requests; 10/min tripped 429s
+// in normal use. Still bounded enough to blunt abuse on exposed deployments.
+const RATE_POST_PER_MIN = Number(process.env.RATE_POST_PER_MIN || 60);
 const RATE_BUCKET_TTL_MS = 5 * 60_000;
 
 // Janitor: sweep stale rate-limit buckets every 60 s. Without this, a

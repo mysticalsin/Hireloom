@@ -20,6 +20,7 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
+const GMAIL_CACHE_FILE = join(CAREER_OPS, 'data/gmail-cache.json');
 
 
 // --- CLI args ---
@@ -140,6 +141,23 @@ function parseFollowups() {
     });
   }
   return entries;
+}
+
+// --- Parse Gmail next-step flags ---
+// The inbox scanner (apps/web/server.mjs) writes data/gmail-cache.json. A
+// signal with type 'interview' that was neither auto-applied to the tracker
+// nor filed quietly is a "possible next step" — an email that looks like the
+// company moved, pending a human glance. Those ARE the follow-ups that
+// matter most, so they surface here as urgent, ahead of cadence math.
+function parseNextStepFlags() {
+  if (!existsSync(GMAIL_CACHE_FILE)) return [];
+  try {
+    const cache = JSON.parse(readFileSync(GMAIL_CACHE_FILE, 'utf-8'));
+    return (cache.signals || [])
+      .filter(s => s.signal === 'interview' && !s.dismissed && !s.autoApplied)
+      .map(s => ({ num: parseInt(s.num), subject: s.subject || '', date: s.date || '', from: s.from || '' }))
+      .filter(s => Number.isFinite(s.num));
+  } catch { return []; }
 }
 
 // --- Extract contacts from notes ---
@@ -270,6 +288,21 @@ function analyze() {
       nextFollowupDate,
       daysUntilNext,
     });
+  }
+
+  // Gmail next-step flags upgrade their row to urgent — an email that looks
+  // like the company moved beats any cadence clock.
+  const flagsByNum = new Map();
+  for (const flag of parseNextStepFlags()) {
+    if (!flagsByNum.has(flag.num)) flagsByNum.set(flag.num, []);
+    flagsByNum.get(flag.num).push(flag);
+  }
+  for (const e of entries) {
+    const flags = flagsByNum.get(e.num);
+    if (flags?.length) {
+      e.urgency = 'urgent';
+      e.nextStepEmail = flags[flags.length - 1]; // newest-scanned flag for the row
+    }
   }
 
   // Sort by urgency priority: urgent > overdue > waiting > cold

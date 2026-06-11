@@ -203,7 +203,9 @@ const digest = [
   ...(interviewRows.length ? interviewRows.map((r) => `- **${r.company}** — ${r.role}`) : ['- none in interview stage']),
   '',
   '## 🔥 Follow-ups due (top 5 overdue)',
-  ...(overdueTop.length ? overdueTop.map((e) => `- **${e.company}** — ${e.role} (${e.daysSinceApplication}d since apply, ${e.followupCount} follow-ups sent)`) : ['- nothing overdue']),
+  ...(overdueTop.length ? overdueTop.map((e) => e.nextStepEmail
+    ? `- **${e.company}** — ${e.role} — ⚠ possible next-step email: “${e.nextStepEmail.subject}”`
+    : `- **${e.company}** — ${e.role} (${e.daysSinceApplication}d since apply, ${e.followupCount} follow-ups sent)`) : ['- nothing overdue']),
   '',
   '## 🗂 Queue head',
   ...(queueHead.length ? queueHead.map((r) => `- #${r.rank} **${r.company}** — ${r.title}`) : ['- no ranked pool']),
