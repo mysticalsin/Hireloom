@@ -198,3 +198,7 @@ BUILD-LOG.md
 _brain_index/
 _brain_api/
 _agent_state/
+
+# Backup artifacts must never enter the repo (tracker/profile backups)
+*.bak
+*.bak.*
