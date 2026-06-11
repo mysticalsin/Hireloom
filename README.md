@@ -253,4 +253,3 @@ Hireloom is local, source-available software you run yourself — there is no ho
 
 PolyForm Shield 1.0.0 — free to use, copy, modify, and distribute, including commercially, for any purpose **except providing a product that competes with Hireloom**. Licensing and copyright notices must be preserved. Inherited portions of the original engine retain their MIT notice — see the Third-party notices section in [LICENSE](LICENSE). Versions released before this change remain MIT.
 
-> **Note:** this license applies to this branch's build and takes effect for the project upon maintainer merge; `main` remains MIT until then.
