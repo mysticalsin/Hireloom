@@ -25,7 +25,7 @@ radar, upcoming interviews. Zero new data entry.
 - Reuse Hireloom's analyzers (`followup-cadence.mjs`, `analyze-patterns.mjs`);
   never re-implement their logic in the plugin.
 - Map the user's existing folders; never restructure them.
-- Nothing auto-sends or auto-submits — drafts only, human clicks send.
+- The dashboard itself never sends or submits anything — it drafts (nudges, cover letters) and visualizes; applying happens only through the apply pipeline the user launches.
 - User-layer outputs stay gitignored (`BUILD-PROFILE.md`, `BUILD-LOG.md`,
   `_brain_*`, `_agent_state/`, `.obsidian/`).
 

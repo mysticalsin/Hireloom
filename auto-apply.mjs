@@ -20,6 +20,24 @@
  *
  * No API keys required. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH if the Playwright
  * headless-shell isn't installed (points at an existing Chromium binary).
+ *
+ * DESIGN CONTRACT (2026-06-11, settled from a month of field use — status tagged):
+ *   [done] Dry runs before live runs: the user watches --dry-run passes (no
+ *          submit) and approves before any live run touches a Submit button.
+ *   [done] Clean browser per run: chromium.launch() with no persistent profile —
+ *          saved logins/cookies make ATS pages autofill stale data, which
+ *          confuses the filler. Never reuse .apply-profile here.
+ *   [done] Confirmation-gated tracking: "Applied" only on a verified
+ *          confirmation page; otherwise "Submitted?" + audit screenshot.
+ *   [todo] Headed live runs with pause-and-resume: on a captcha or repeated
+ *          submit errors, keep the window open INDEFINITELY, alert the user,
+ *          and resume the pipeline once they've fixed/completed it by hand.
+ *          Never fail-and-move-on by default.
+ *   [todo] --defer-stuck: opt-in to push paused roles to the end of the run
+ *          so fully-autonomous ones complete first.
+ *   [policy] Pool eligibility: only roles whose application flow the engine
+ *          can drive cleanly belong in the auto-apply pool; for the rest the
+ *          agent offers the assisted/manual methods instead of forcing it.
  */
 
 import {

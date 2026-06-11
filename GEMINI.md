@@ -106,9 +106,10 @@ If `modes/_profile.md` is missing, copy from `modes/_profile.template.md` silent
 
 ## Ethical Use — CRITICAL
 
-- **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs — but always STOP before clicking Submit. The user makes the final call.
-- **Strongly discourage low-fit applications.** If a score is below 4.0/5, explicitly recommend against applying.
-- **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50.
+- **Automation runs only when the user launches it.** The auto-applier covers roles the user selected, after dry runs they watched and approved. Outside that approved flow — assisted apply, outreach, follow-ups — fill and draft but always STOP before Submit. The user makes the final call.
+- **Truthful tailoring, always.** No invented metrics, no skills the user doesn't have, no guessed work-authorization answers.
+- **Never force a flow.** If an application can't be completed cleanly (captcha, broken form), pause and hand it to the user — don't bulldoze it or silently mark it done.
+- **Respect the score.** Below 4.0/5, recommend against applying and say why; the user can override with a reason.
 
 ## Pipeline Integrity
 

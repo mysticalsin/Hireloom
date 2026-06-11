@@ -15,7 +15,7 @@ For the **maintainer side**. A user ran Hireloom, their agent auto-kept a `BUILD
 4. **Assess each upstream candidate** against the current repo:
    - Does the named file/area still exist? Has it changed since `hireloom_base_version`?
    - Is the change genuinely general (helps any user) or coupled to that user's personal setup?
-   - Conflicts with current code? Honesty/ethics/data-contract violations? (Reject anything that auto-submits applications or overclaims.)
+   - Conflicts with current code? Honesty/ethics/data-contract violations? (Reject anything that bypasses the auto-applier's consent gates — role selection, dry-run approval, confirmation-verified tracking — or that overclaims.)
    - Risk tier: 🟢 safe drop-in · 🟡 needs adaptation · 🔴 don't merge (with reason).
 5. **Produce a merge plan** — a table: entry · files · what it adds · root-cause · risk tier · recommended action (merge as-is / adapt / skip). For 🟢/🟡 you may draft the actual edit against the current repo on request.
 6. **Never auto-apply** — present the plan; the maintainer decides what lands. Keep the contributor's framing/credit.

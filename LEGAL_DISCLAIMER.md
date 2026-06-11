@@ -20,7 +20,7 @@ The maintainers do not act as a Data Controller or Data Processor under GDPR or 
 This tool interfaces with AI models via third-party CLI tools. The maintainers do not control these models and cannot guarantee their behavior.
 
 - **Hallucinations:** AI models may fabricate skills, job history, qualifications, or company information. You must manually verify all generated documents before submitting them to an employer.
-- **Safety guardrails:** The default prompts instruct the AI never to auto-submit applications and to stop before the final send/apply action. However, AI compliance is not guaranteed. If you use different models, modify the system prompts, or override the safety instructions, you accept full responsibility for the AI's actions.
+- **Safety guardrails:** Automated application submission runs only through the auto-applier, on roles the user selected, after dry runs the user watched and approved; everywhere else the default prompts instruct the AI to stop before the final send/apply action. However, AI compliance is not guaranteed. If you use different models, modify the system prompts, or override the safety instructions, you accept full responsibility for the AI's actions.
 - **Evaluation accuracy:** Job offer scores and recommendations are AI-generated opinions based on pattern matching, not professional career advice. They should inform your judgment, not replace it.
 
 ## 4. Third-Party Platforms
@@ -29,22 +29,23 @@ career-ops interacts with career portals and job boards (Greenhouse, Lever, Ashb
 
 - Users must comply with the Terms of Service of every platform they interact with.
 - Do not use this tool to scrape platforms that prohibit automated access.
-- Do not use this tool to spam employers, overwhelm ATS systems, or submit mass applications.
+- Do not use this tool to spam employers or overwhelm ATS systems — volume is legitimate only when every application is individually tailored, truthful, and sent through the consent-gated flow.
 - Any consequences from ToS violations — including IP bans, account restrictions, or legal action from platforms — are solely the responsibility of the user.
 - The maintainers actively reject contributions that facilitate ToS violations (see CONTRIBUTING.md).
 
 ## 5. Acceptable Use
 
-career-ops is designed to help individuals make better career decisions, not to automate away human judgment. Acceptable use includes:
+Hireloom is designed to automate the repetitive mechanics of applying while keeping the human in command of what goes out under their name. Acceptable use includes:
 
 - Evaluating job offers to prioritize your time
-- Generating tailored CVs that you review and edit before submitting
+- Generating truthful tailored CVs from your real record
 - Scanning public career pages for open positions
+- Auto-applying to roles you selected, after dry runs you reviewed and approved
 - Tracking your application pipeline
 
 Unacceptable use includes:
 
-- Auto-submitting applications without human review
+- Running automated submission outside the consent-gated flow (unselected roles, no dry-run review), or modifying the tool to do so
 - Scraping platforms that prohibit automated access
 - Submitting AI-generated content without verifying its accuracy
 - Using the tool to discriminate, deceive, or misrepresent qualifications

@@ -251,12 +251,12 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## Ethical Use -- CRITICAL
 
-**This system is designed for quality, not quantity.** The goal is to help the user find and apply to roles where there is a genuine match -- not to spam companies with mass applications.
+**Hireloom automates applying -- it must never automate carelessness.** Auto-application is the product's headline feature; what we prevent is rushed or inaccurate applying, not volume. Volume is legitimate exactly when every package going out is truthful and properly aimed.
 
-- **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs -- but always STOP before clicking Submit/Send/Apply. The user makes the final call.
-- **Strongly discourage low-fit applications.** If a score is below 4.0/5, explicitly recommend against applying. The user's time and the recruiter's time are both valuable. Only proceed if the user has a specific reason to override the score.
-- **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50. Guide the user toward fewer, better applications.
-- **Respect recruiters' time.** Every application a human reads costs someone's attention. Only send what's worth reading.
+- **Automation runs only when the user launches it.** The auto-applier covers roles the user selected (by hand or by score floor), after dry runs they watched and approved. Outside that approved flow -- assisted apply, outreach, follow-ups -- fill forms, draft answers, generate PDFs, but always STOP before Submit/Send. The user makes the final call.
+- **Truthful tailoring, always.** Every CV, cover letter, and form answer comes from the user's real record. No invented metrics, no skills they don't have, no guessed work-authorization answers.
+- **Never force a flow.** If an application can't be completed cleanly (captcha, broken form, unfamiliar ATS), pause and hand it to the user rather than bulldozing it or silently marking it done. The user may ask to defer stuck roles to the end of a run and let the fully-autonomous ones go first.
+- **Respect the score.** Below 4.0/5, recommend against applying and say why -- recruiter attention is real, and low-fit volume helps no one. The user can override with a reason.
 
 ---
 

@@ -49,7 +49,7 @@ PRs without a corresponding issue may be closed if they don't align with the pro
 ## What we do NOT accept
 
 - **PRs that scrape platforms prohibiting automated access** (LinkedIn, etc.). We actively reject these to respect third-party ToS.
-- **PRs that enable auto-submitting applications** without human review. career-ops is a decision-support tool, not a spam bot.
+- **PRs that remove the auto-applier's consent gates** — role selection, watched dry runs, confirmation-verified tracking, the pause-and-hand-to-user rule for flows it can't drive cleanly. Hireloom automates applying; it must never automate carelessness.
 - **PRs that add external API dependencies** without prior discussion in an issue.
 - **PRs containing personal data** (real CVs, emails, phone numbers). Use `examples/` with fictional data instead.
 

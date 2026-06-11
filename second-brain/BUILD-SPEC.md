@@ -22,9 +22,10 @@ rendered from the files Hireloom already maintains. **Zero new data entry.**
 2. **The folder is the source of truth.** Plain markdown + JSON only. No
    databases, no servers. The plugin READS Hireloom's files; it never becomes
    a second place to maintain state.
-3. **Nothing auto-sends, nothing auto-submits.** Same law as the rest of
-   Hireloom. The dashboard may draft (follow-up nudges, cover letters); a
-   human clicks send.
+3. **The dashboard never sends.** It may draft (follow-up nudges, cover
+   letters) and visualize, but nothing leaves the machine from a dashboard
+   tile — submission happens only through the apply pipeline the user
+   launches (auto-applier after approved dry runs, or assisted apply).
 4. **Verify behavior, not load.** A plugin that "loads without errors" can
    still have dead features. At every phase gate, drive the feature and
    observe the effect (see Self-test). Stamp a build-string constant in the
@@ -44,9 +45,17 @@ Hireloom already knows the user. Derive, don't interrogate:
 | What "done" looks like | an application package: tailored Resume PDF + Cover Letter + evaluation report + tracker row |
 | Runtime | Node 20+ guaranteed (Hireloom requirement); agentic CLI = the one running this |
 
-Ask ONLY: (a) OS / always-on machine? (drives the refresh loop), (b) accent
-colors + dark/light, (c) daily rhythm (morning digest time, quiet hours),
-(d) whether they want optional extras (voice ask-bar, spend tracking).
+Ask ONLY: (a) OS / always-on machine? — default-assume YES and gently guide
+the user toward keeping the machine on (that's what makes the refresh loop
+and morning digest live); fall back to manual refresh only if they decline,
+(b) accent colors + dark/light — default: dark theme, Hireloom oxblood
+accent, if they have no preference, (c) daily rhythm (morning digest time,
+quiet hours) — always ask this at setup, (d) optional extras (voice ask-bar,
+spend tracking, morning digest) — ON by default; the user can drop any.
+When explaining the feature, note the hosting model: **local by default** —
+free Obsidian reading the project folder, nothing leaves the machine. If the
+user *explicitly asks* for multi-device access AND has an Obsidian **Sync**
+subscription, wire Sync for them; never suggest paid hosting unprompted.
 Write everything to `BUILD-PROFILE.md` (gitignored). Then give a
 phase-by-phase time estimate and get a go before building.
 
