@@ -91,16 +91,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
-      - name: APP_VERSION must match package.json + tests
+      - name: APP_VERSION must match package.json + tests + VERSION file
         run: |
           # Read package.json with grep+sed instead of node -p (ESM-only sandbox)
           PKG=$(grep -m1 '"version"' package.json | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
           SRV=$(grep -E "^const APP_VERSION = '[^']+';$" apps/web/server.mjs | sed -E "s/.*'([^']+)'.*/\1/")
           TST=$(grep -oE "json.version, '[^']+'" tests/server.test.mjs | sed -E "s/.*'([^']+)'.*/\1/")
+          VER=$(tr -d '[:space:]' < VERSION)
           echo "package.json:  $PKG"
           echo "APP_VERSION:   $SRV"
           echo "test asserts:  $TST"
-          if [ "$PKG" != "$SRV" ] || [ "$PKG" != "$TST" ]; then
-            echo "::error::Version mismatch — bump all three together"
+          echo "VERSION file:  $VER"
+          if [ "$PKG" != "$SRV" ] || [ "$PKG" != "$TST" ] || [ "$PKG" != "$VER" ]; then
+            echo "::error::Version mismatch — bump all four together (VERSION is what update-system.mjs shows users)"
             exit 1
           fi
