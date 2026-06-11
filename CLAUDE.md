@@ -92,6 +92,9 @@ If `modes/_profile.md` is missing, copy from `modes/_profile.template.md` silent
 
 **If ANY of these is missing, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
+#### Step 0: Read the README (fresh install)
+On a fresh install (any of the four files above missing), **read `README.md` in full BEFORE saying anything to the user** — it is the product tour: what Hireloom does, the modes, the dashboard, the data contract. You cannot onboard someone into a product you haven't read the front door of. Then greet the user with a one-paragraph "here's what this is and here's what I need from you" grounded in it. (On an already-set-up install, skip this — the rulebooks and the user's own files are the context.)
+
 #### Step 1: CV (required)
 If `cv.md` is missing, ask:
 > "I don't have your CV yet. You can either:
