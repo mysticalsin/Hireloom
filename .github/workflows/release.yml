@@ -96,9 +96,14 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/hireloom.exe dist/${{ matrix.asset }}
+            SRC=dist/hireloom.exe
           else
-            cp dist/hireloom dist/${{ matrix.asset }}
+            SRC=dist/hireloom
+          fi
+          # On Windows the asset name equals the build output — cp errors on
+          # "same file", so only copy when the names actually differ.
+          if [[ "$SRC" != "dist/${{ matrix.asset }}" ]]; then
+            cp "$SRC" "dist/${{ matrix.asset }}"
           fi
       - name: SHA-256 sidecar
         shell: bash
