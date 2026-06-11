@@ -26,6 +26,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
       - name: Doctor (no install)
         if: runner.os != 'Windows'
         run: bash install.sh --doctor
@@ -33,9 +36,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\install.ps1 -Mode doctor
-      - name: Install deps
-        run: npm ci --no-audit --no-fund
-
       - name: Run unit tests
         run: npm test
       - name: Syntax-check shell installers
@@ -52,7 +52,7 @@ jobs:
         run: docker build -t career-ops:ci .
       - name: Boot + probe /api/health
         run: |
-          docker run -d --name co -p 4747:4747 -e PORT=4747 career-ops:ci
+          docker run -d --name co -p 4747:4747 -e PORT=4747 -e AUTH_TOKEN=ci-smoke-only-not-a-secret-0123456789 career-ops:ci
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:4747/api/health >/dev/null; then
               echo "✓ healthy"; exit 0
