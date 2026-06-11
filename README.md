@@ -17,6 +17,7 @@
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
   <img src="https://img.shields.io/badge/Obsidian-7C3AED?style=flat&logo=obsidian&logoColor=white" alt="Obsidian">
   <img src="https://img.shields.io/badge/License-PolyForm_Shield-blue.svg" alt="PolyForm Shield 1.0.0">
+  <a href="https://discord.gg/3jEjwygjNG"><img src="https://img.shields.io/badge/Discord_·_Sin_City-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord — Sin City"></a>
 </p>
 
 ---
@@ -220,7 +221,7 @@ Node (ESM) for the engine · Playwright for rendering and browsing · Go + Bubbl
 
 ## Contributing — code optional
 
-Hireloom installs are self-improving: when your agent fixes or extends something on your machine, it logs the change, the root cause, and an upstream-worthiness flag to your `BUILD-CHANGELOG.md` (schema: [BUILD-CHANGELOG.template.md](BUILD-CHANGELOG.template.md)). **Submitting that single markdown file is a complete contribution** — reach out to us on the community Discord and share it, or open an issue with it attached; maintainers triage it with a dedicated review command and port what generalizes. PRs are welcome too: [CONTRIBUTING.md](CONTRIBUTING.md).
+Hireloom installs are self-improving: when your agent fixes or extends something on your machine, it logs the change, the root cause, and an upstream-worthiness flag to your `BUILD-CHANGELOG.md` (schema: [BUILD-CHANGELOG.template.md](BUILD-CHANGELOG.template.md)). **Submitting that single markdown file is a complete contribution** — share it with us on the [Sin City Discord](https://discord.gg/3jEjwygjNG), or open an issue with it attached; maintainers triage it with a dedicated review command and port what generalizes. PRs are welcome too: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 <a href="https://github.com/mysticalsin/Hireloom/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=mysticalsin/Hireloom" />
