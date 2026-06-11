@@ -41,3 +41,21 @@
 - **Root cause:** The fill → submit pipeline had no read-back verification. The code assumed fills were correct without checking.
 - **Prevention rule:** ALWAYS validate form fields by reading them back BEFORE clicking submit. Check: (1) First Name is a short name not a paragraph, (2) Email contains @, (3) Phone is digits, (4) No catch-all leak patterns in basic fields, (5) Resume is attached. Block submission if ANY check fails.
 - **Files affected:** `dashboard-web/server.mjs` — added `validateFormBeforeSubmit()` supervisor function
+
+## The tracker backup that walked into a public commit (2026-06-11)
+
+A broad `git add -A` metadata commit swept in `data/applications.md.bak` — a
+real tracker backup auto-written by `dedup-tracker.mjs`/`normalize-statuses.mjs`
+before they mutate `applications.md`. Two defenses failed at once:
+
+1. `.gitignore` listed *specific* data/ filenames (`data/applications.md`, …)
+   instead of the directory or the `*.bak` class — the backup wasn't on the list.
+2. The pre-commit PII grep checked for the user's name/phone/address — tracker
+   rows contain company names, recruiter names, and statuses, none of which
+   match those patterns. The scan passed; the personal data shipped anyway.
+
+Remediation took a 13-commit history rewrite (`git filter-branch --index-filter`)
+plus a force-push. **Lessons, now enforced:** `*.bak` / `*.bak.*` are ignored
+repo-wide; PII scans must ALSO flag any staged path under user-layer dirs
+(`data/`, `reports/`, `output/`, `interview-prep/`, `jds/`) — match on
+*where it lives*, not just *what it says*.
