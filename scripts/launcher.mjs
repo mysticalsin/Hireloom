@@ -25,7 +25,7 @@ const HERE = (() => {
 })();
 
 // ─── Find a project root ────────────────────────────────────────────────────
-// 1. cwd if it has dashboard-web/server.mjs (running from clone)
+// 1. cwd if it has apps/web/server.mjs (running from clone)
 // 2. dirname(executable) for the bundled SEA case
 // 3. ~/CareerOps for a fresh install — initialized on first run
 function findProjectRoot() {
@@ -36,7 +36,7 @@ function findProjectRoot() {
     join(homedir(), 'CareerOps'),
   ];
   for (const dir of candidates) {
-    if (existsSync(join(dir, 'dashboard-web', 'server.mjs'))) {
+    if (existsSync(join(dir, 'apps', 'web', 'server.mjs'))) {
       return dir;
     }
   }
@@ -135,7 +135,7 @@ async function main() {
     // Open browser shortly after the import completes; the server boots
     // synchronously enough that ~600ms is plenty.
     setTimeout(() => openBrowser(url), 600);
-    const serverUrl = `file://${join(root, 'dashboard-web', 'server.mjs').replace(/\\/g, '/')}`;
+    const serverUrl = `file://${join(root, 'apps', 'web', 'server.mjs').replace(/\\/g, '/')}`;
     await import(serverUrl);
     return;
   }
@@ -143,7 +143,7 @@ async function main() {
   // Dev mode: bare-node invocation — spawn the server in a child so we can
   // forward signals cleanly. (Useful when running `node scripts/launcher.mjs`
   // directly during development of the launcher itself.)
-  const serverPath = join(root, 'dashboard-web', 'server.mjs');
+  const serverPath = join(root, 'apps', 'web', 'server.mjs');
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
     env: { ...process.env },

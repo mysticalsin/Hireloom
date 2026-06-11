@@ -22,7 +22,7 @@ radar, upcoming interviews. Zero new data entry.
 ## Hard rules (from the spec — non-negotiable)
 
 - Every pixel binds to a real Hireloom file; honest empty states otherwise.
-- Reuse Hireloom's analyzers (`followup-cadence.mjs`, `analyze-patterns.mjs`);
+- Reuse Hireloom's analyzers (`engine/tracker/followup-cadence.mjs`, `engine/tracker/analyze-patterns.mjs`);
   never re-implement their logic in the plugin.
 - Map the user's existing folders; never restructure them.
 - The dashboard itself never sends or submits anything — it drafts (nudges, cover letters) and visualizes; applying happens only through the apply pipeline the user launches.

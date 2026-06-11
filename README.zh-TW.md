@@ -176,7 +176,7 @@ career-ops 是一個具有多種模式的單一斜線指令：
 內建的終端機儀表板讓你以視覺化方式瀏覽求職管道：
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -203,16 +203,16 @@ career-ops/
 │   ├── cv-template.html         # ATS 最佳化履歷範本
 │   ├── portals.example.yml      # 掃描器設定範本
 │   └── states.yml               # 標準狀態清單
-├── batch/
+├── engine/batch/
 │   ├── batch-prompt.md          # 自包含工作器提示
 │   └── batch-runner.sh          # 協調器腳本
-├── dashboard/                   # Go TUI 管道檢視器
+├── apps/tui/                   # Go TUI 管道檢視器
 ├── data/                        # 你的追蹤資料（已 gitignore）
 ├── reports/                     # 評估報告（已 gitignore）
 ├── output/                      # 生成的 PDF（已 gitignore）
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # 設定、自訂化、架構說明
-└── examples/                    # 範例履歷、報告、成就佐證
+└── docs/examples/                    # 範例履歷、報告、成就佐證
 ```
 
 ## 技術堆疊
@@ -254,7 +254,7 @@ Hireloom 由 [Tony Walteur](https://www.linkedin.com/in/tonywalteur/) 維護。
 3. **你須遵守第三方服務條款。** 你必須依據你所操作的求職平台（Greenhouse、Lever、Workday、LinkedIn 等）的服務條款使用本工具。請勿使用本工具向雇主發送垃圾訊息或對 ATS 系統造成過多負擔。
 4. **不提供任何保證。** 評估結果僅為建議，並非事實。AI 模型可能會產生幻覺，錯誤描述技能或經歷。作者對於任何就業結果、應徵被拒、帳號限制或其他後果概不負責。
 
-詳細內容請參閱 [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md)。本軟體依 [MIT 授權條款](LICENSE) 以「現狀」提供，不附帶任何形式的保證。
+詳細內容請參閱 [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md)。本軟體依 [MIT 授權條款](LICENSE) 以「現狀」提供，不附帶任何形式的保證。
 
 ## 貢獻者
 

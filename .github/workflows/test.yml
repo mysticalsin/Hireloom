@@ -35,8 +35,8 @@ jobs:
       - name: Run unit + HTTP integration tests
         run: npm test
 
-      - name: Quick smoke (test-all.mjs)
-        run: node test-all.mjs --quick
+      - name: Quick smoke (engine/test-all.mjs)
+        run: node engine/test-all.mjs --quick
 
   go-build:
     name: Go build (TUI dashboard)
@@ -48,19 +48,19 @@ jobs:
         with:
           go-version: '1.22'
           cache: true
-          cache-dependency-path: dashboard/go.sum
+          cache-dependency-path: apps/tui/go.sum
       - name: Verify go.mod is tidy
         run: |
-          cd dashboard
+          cd apps/tui
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: Build TUI binary
         run: |
-          cd dashboard
+          cd apps/tui
           go build -v ./...
       - name: Run Go tests (if present)
         run: |
-          cd dashboard
+          cd apps/tui
           go test ./... || [ $? -eq 1 ]  # tolerate "no test files"
 
   brand-assets:
@@ -72,15 +72,15 @@ jobs:
       - name: Verify brand assets are well-formed
         run: |
           # Each asset must exist + be non-empty + parse-able
-          test -s dashboard-web/assets/favicon.svg
-          test -s dashboard-web/assets/favicon-light.svg
-          test -s dashboard-web/assets/og-image.svg
-          test -s dashboard-web/assets/manifest.webmanifest
+          test -s apps/web/assets/favicon.svg
+          test -s apps/web/assets/favicon-light.svg
+          test -s apps/web/assets/og-image.svg
+          test -s apps/web/assets/manifest.webmanifest
           # Manifest must be valid JSON (ESM-friendly check)
-          node --input-type=module -e "import { readFileSync } from 'node:fs'; JSON.parse(readFileSync('dashboard-web/assets/manifest.webmanifest','utf8'));"
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; JSON.parse(readFileSync('apps/web/assets/manifest.webmanifest','utf8'));"
           # SVGs must contain the hex-H path signature (catch silent overwrites)
-          grep -q "M4 12 L9 4 L14 12" dashboard-web/assets/favicon.svg
-          grep -q "M4 12 L9 4 L14 12" dashboard-web/assets/og-image.svg
+          grep -q "M4 12 L9 4 L14 12" apps/web/assets/favicon.svg
+          grep -q "M4 12 L9 4 L14 12" apps/web/assets/og-image.svg
 
   version-sync:
     name: Version sync (package.json ↔ server.mjs ↔ tests)
@@ -95,7 +95,7 @@ jobs:
         run: |
           # Read package.json with grep+sed instead of node -p (ESM-only sandbox)
           PKG=$(grep -m1 '"version"' package.json | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
-          SRV=$(grep -E "^const APP_VERSION = '[^']+';$" dashboard-web/server.mjs | sed -E "s/.*'([^']+)'.*/\1/")
+          SRV=$(grep -E "^const APP_VERSION = '[^']+';$" apps/web/server.mjs | sed -E "s/.*'([^']+)'.*/\1/")
           TST=$(grep -oE "json.version, '[^']+'" tests/server.test.mjs | sed -E "s/.*'([^']+)'.*/\1/")
           echo "package.json:  $PKG"
           echo "APP_VERSION:   $SRV"

@@ -20,7 +20,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-const SERVER_MJS = path.join(ROOT, 'dashboard-web', 'server.mjs');
+const SERVER_MJS = path.join(ROOT, 'apps', 'web', 'server.mjs');
 
 // Tests use PORT=0 — the OS assigns a free ephemeral port, which makes
 // cross-process collisions impossible (test files run in parallel; a random

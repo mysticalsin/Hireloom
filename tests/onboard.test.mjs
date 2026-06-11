@@ -18,10 +18,10 @@ import {
   extractProfileFromResume,
   kebabCase,
   parseProfileSummary,
-} from '../dashboard-web/lib/onboard.mjs';
-import { makeSafeResolver } from '../dashboard-web/lib/path-safety.mjs';
-import { readJsonBody, MAX_BODY_BYTES, isOriginAllowed } from '../dashboard-web/lib/http-utils.mjs';
-import { buildGmailStatus } from '../dashboard-web/lib/gmail-status.mjs';
+} from '../apps/web/lib/onboard.mjs';
+import { makeSafeResolver } from '../apps/web/lib/path-safety.mjs';
+import { readJsonBody, MAX_BODY_BYTES, isOriginAllowed } from '../apps/web/lib/http-utils.mjs';
+import { buildGmailStatus } from '../apps/web/lib/gmail-status.mjs';
 
 // ── yamlQuote ────────────────────────────────────────────────────────────────
 
@@ -862,7 +862,7 @@ describe('/api/health endpoint contract', () => {
     // Pick a port unlikely to clash with the user's running dashboard
     port = 14747 + Math.floor(Math.random() * 1000);
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const serverPath = path.join(here, '..', 'dashboard-web', 'server.mjs');
+    const serverPath = path.join(here, '..', 'apps', 'web', 'server.mjs');
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'health-'));
     proc = spawn(process.execPath, [serverPath], {
       env: {
@@ -948,7 +948,7 @@ describe('/api/onboard/finalize HTTP contract', () => {
     port = 15747 + Math.floor(Math.random() * 1000);
     configDir = mkdtempSync(path.join(os.tmpdir(), 'co-onb-'));
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const serverPath = path.join(here, '..', 'dashboard-web', 'server.mjs');
+    const serverPath = path.join(here, '..', 'apps', 'web', 'server.mjs');
     proc = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
@@ -1180,7 +1180,7 @@ describe('buildGmailStatus', () => {
   });
 });
 
-// ── cv: block (education / certifications → lib/identity.mjs schema) ────────
+// ── cv: block (education / certifications → engine/lib/identity.mjs schema) ────────
 
 describe('cv block — serialize / validate / extract / round-trip', () => {
   const payload = (cv) => ({
@@ -1272,8 +1272,8 @@ describe('cv block — serialize / validate / extract / round-trip', () => {
     assert.match(p.education[0].date, /2008/);
   });
 
-  test('round-trip: serialized yaml renders through lib/identity.mjs', async () => {
-    const { loadIdentity } = await import('../lib/identity.mjs');
+  test('round-trip: serialized yaml renders through engine/lib/identity.mjs', async () => {
+    const { loadIdentity } = await import('../engine/lib/identity.mjs');
     const dir = mkdtempSync(path.join(os.tmpdir(), 'hireloom-cv-rt-'));
     const yml = serializeProfileYaml(payload({
       education: [{ degree: 'BSc, Physics & Math', org: 'U "of" T', date: '2010 – 2014' }],

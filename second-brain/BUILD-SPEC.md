@@ -68,8 +68,8 @@ Create (all gitignored — see "What ships vs what stays local"):
   build step copies/symlinks it into `.obsidian/plugins/hireloom-brain/`)
 
 The refresh script (`second-brain/plugin/refresh.mjs`) shells out to the
-analyzers Hireloom already has — `node followup-cadence.mjs` and
-`node analyze-patterns.mjs` both emit JSON — and parses the tracker table
+analyzers Hireloom already has — `node engine/tracker/followup-cadence.mjs` and
+`node engine/tracker/analyze-patterns.mjs` both emit JSON — and parses the tracker table
 into `_brain_api/pipeline.json`. **Reuse them; never re-implement their
 logic inside the plugin.** Schedule it per OS (launchd/cron/Task Scheduler)
 if the machine is always-on; otherwise document the manual command.
@@ -87,10 +87,10 @@ file changes (skip-prefix the generated dirs), and a hot-reload dev loop.
 |---|---|---|
 | **Pipeline** (kanban by state) | `data/applications.md` per `templates/states.yml` | "No applications tracked — paste a job URL or run /career-ops scan" |
 | **Apply Queue** (next up) | `output/pool-apply-order.json` when present | "No ranked pool — run the batch pipeline or paste URLs into data/pipeline.md" |
-| **Follow-up Radar** (going cold) | `node followup-cadence.mjs` JSON + `data/follow-ups.md` | "No applied roles awaiting response" |
+| **Follow-up Radar** (going cold) | `node engine/tracker/followup-cadence.mjs` JSON + `data/follow-ups.md` | "No applied roles awaiting response" |
 | **Interviews** (upcoming + prep state) | tracker rows with status `Interview` + `interview-prep/` contents | "Nothing in interview stage yet" |
-| **Scan Feed** (fresh postings) | `data/scan-history.tsv` + last-scan timestamp | "Scanner hasn't run — node scan.mjs" |
-| **Patterns** (rejection analytics) | `node analyze-patterns.mjs` JSON | "Too few outcomes to analyze yet" |
+| **Scan Feed** (fresh postings) | `data/scan-history.tsv` + last-scan timestamp | "Scanner hasn't run — node engine/scan/scan.mjs" |
+| **Patterns** (rejection analytics) | `node engine/tracker/analyze-patterns.mjs` JSON | "Too few outcomes to analyze yet" |
 | **Inbox** (pending URLs) | `data/pipeline.md` | "Inbox empty" |
 
 Gate: the tabs show the user's actual tracker rows, and the build stamp in

@@ -15,7 +15,7 @@ import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { makeErrorLogger } from '../dashboard-web/lib/error-log.mjs';
+import { makeErrorLogger } from '../apps/web/lib/error-log.mjs';
 
 test('error-log', async (t) => {
   await t.test('log() writes a JSON line and updates recent()', async () => {

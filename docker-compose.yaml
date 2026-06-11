@@ -31,7 +31,7 @@ services:
     stdin_open: true
     tty: true
     # Default: launch the dashboard. Override via `docker compose run` for shell.
-    command: ["node", "dashboard-web/server.mjs"]
+    command: ["node", "apps/web/server.mjs"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4747/api/health >/dev/null 2>&1 || exit 1"]
       interval: 30s

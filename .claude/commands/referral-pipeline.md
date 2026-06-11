@@ -19,4 +19,4 @@ Reusable for any company where a contact supplies referral links or you can scan
 6. **Balance by recruiter — don't overload one.** Many roles (esp. a wide $ spread) to one recruiter reads as spray-and-pray and dilutes the referral; trim to a focused ~3–4 each; cut junior/under-valuing and effectively-gated roles.
 7. **Organize:** `output/<co>/applications/<N> - <Recruiter> - <Role>/`, numbered & sorted by recruiter. Move cuts to `applications/_excluded/` (don't delete).
 8. **Write `output/<co>/APPLY-INDEX.md`** — table (# · recruiter · role · fit · comp · mode · referral link) + recruiter-balance line + excluded list with reasons. (Worked example: `output/aecom/APPLY-INDEX.md` + `FIT-SCAN.md`.)
-9. **Tracker:** add entries via TSV → `merge-tracker.mjs`, never by editing `applications.md`.
+9. **Tracker:** add entries via TSV → `engine/tracker/merge-tracker.mjs`, never by editing `applications.md`.

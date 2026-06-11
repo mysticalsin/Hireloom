@@ -2,7 +2,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - CLAUDE.md
-          - DATA_CONTRACT.md
+          - docs/DATA_CONTRACT.md
           - modes/_shared.md
 
 "⚠️ agent-behavior":
@@ -16,18 +16,18 @@
   - changed-files:
       - any-glob-to-any-file:
           - "*.mjs"
-          - batch/**
+          - engine/batch/**
 
 "📄 docs":
   - changed-files:
       - any-glob-to-any-file:
           - docs/**
           - "README*.md"
-          - CONTRIBUTING.md
-          - GOVERNANCE.md
-          - CODE_OF_CONDUCT.md
-          - SECURITY.md
-          - SUPPORT.md
+          - .github/CONTRIBUTING.md
+          - .github/GOVERNANCE.md
+          - .github/CODE_OF_CONDUCT.md
+          - .github/SECURITY.md
+          - .github/SUPPORT.md
 
 "🌐 i18n":
   - changed-files:
@@ -41,7 +41,7 @@
 "📊 dashboard":
   - changed-files:
       - any-glob-to-any-file:
-          - dashboard/**
+          - apps/tui/**
 
 "📦 dependencies":
   - changed-files:

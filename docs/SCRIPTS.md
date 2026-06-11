@@ -6,18 +6,18 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 
 | Command | Script | Purpose |
 |---------|--------|---------|
-| `npm run doctor` | `doctor.mjs` | Validate setup prerequisites |
-| `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
-| `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
-| `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
-| `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
-| `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
-| `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
-| `npm run update:check` | `update-system.mjs check` | Check for upstream updates |
-| `npm run update` | `update-system.mjs apply` | Apply upstream update |
-| `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
-| `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
-| `npm run scan` | `scan.mjs` | Zero-token portal scanner |
+| `npm run doctor` | `engine/doctor.mjs` | Validate setup prerequisites |
+| `npm run verify` | `engine/tracker/verify-pipeline.mjs` | Check pipeline data integrity |
+| `npm run normalize` | `engine/tracker/normalize-statuses.mjs` | Fix non-canonical statuses |
+| `npm run dedup` | `engine/tracker/dedup-tracker.mjs` | Remove duplicate tracker entries |
+| `npm run merge` | `engine/tracker/merge-tracker.mjs` | Merge batch TSVs into applications.md |
+| `npm run pdf` | `engine/render/generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
+| `npm run sync-check` | `engine/tracker/cv-sync-check.mjs` | Validate CV/profile consistency |
+| `npm run update:check` | `engine/update-system.mjs check` | Check for upstream updates |
+| `npm run update` | `engine/update-system.mjs apply` | Apply upstream update |
+| `npm run rollback` | `engine/update-system.mjs rollback` | Rollback last update |
+| `npm run liveness` | `engine/scan/check-liveness.mjs` | Test if job URLs are still active |
+| `npm run scan` | `engine/scan/scan.mjs` | Zero-token portal scanner |
 
 ---
 
@@ -35,7 +35,7 @@ npm run doctor
 
 ## verify
 
-Health check for pipeline data integrity. Validates `data/applications.md` against seven rules: canonical statuses (per `templates/states.yml`), no duplicate company+role pairs, all report links point to existing files, scores match `X.XX/5` / `N/A` / `DUP`, rows have proper pipe-delimited format, no pending TSVs in `batch/tracker-additions/`, and no markdown bold in scores.
+Health check for pipeline data integrity. Validates `data/applications.md` against seven rules: canonical statuses (per `templates/states.yml`), no duplicate company+role pairs, all report links point to existing files, scores match `X.XX/5` / `N/A` / `DUP`, rows have proper pipe-delimited format, no pending TSVs in `engine/batch/tracker-additions/`, and no markdown bold in scores.
 
 ```bash
 npm run verify
@@ -77,7 +77,7 @@ Creates a `.bak` backup before writing.
 
 ## merge
 
-Merges batch tracker additions (`batch/tracker-additions/*.tsv`) into `applications.md`. Handles 9-column TSV, 8-column TSV, and pipe-delimited markdown formats. Detects duplicates by report number, entry number, and company+role fuzzy match. Higher-scored re-evaluations update existing entries in place.
+Merges batch tracker additions (`engine/batch/tracker-additions/*.tsv`) into `applications.md`. Handles 9-column TSV, 8-column TSV, and pipe-delimited markdown formats. Detects duplicates by report number, entry number, and company+role fuzzy match. Higher-scored re-evaluations update existing entries in place.
 
 ```bash
 npm run merge                 # apply merge
@@ -85,7 +85,7 @@ npm run merge -- --dry-run    # preview without writing
 npm run merge -- --verify     # merge then run verify-pipeline
 ```
 
-Processed TSVs are moved to `batch/tracker-additions/merged/`.
+Processed TSVs are moved to `engine/batch/tracker-additions/merged/`.
 
 **Exit codes:** `0` success, `1` verification errors (with `--verify`).
 
@@ -107,7 +107,7 @@ npm run pdf -- input.html output.pdf --format=a4        # A4 (default)
 
 ## sync-check
 
-Validates that the career-ops setup is internally consistent: `cv.md` exists and is not too short, `config/profile.yml` exists with required fields, no hardcoded metrics in `modes/_shared.md` or `batch/batch-prompt.md`, and `article-digest.md` freshness (warns if older than 30 days).
+Validates that the career-ops setup is internally consistent: `cv.md` exists and is not too short, `config/profile.yml` exists with required fields, no hardcoded metrics in `modes/_shared.md` or `engine/batch/batch-prompt.md`, and `article-digest.md` freshness (warns if older than 30 days).
 
 ```bash
 npm run sync-check

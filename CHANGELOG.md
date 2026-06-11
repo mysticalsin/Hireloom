@@ -48,13 +48,13 @@
 
 ### Documentation
 
-* **`DEPLOYMENT.md`** — local install, systemd / launchd / Task Scheduler, LAN setup with auth tokens, Docker compose, env-var reference, observability, backup strategy, troubleshooting matrix, production-readiness checklist.
+* **`docs/DEPLOYMENT.md`** — local install, systemd / launchd / Task Scheduler, LAN setup with auth tokens, Docker compose, env-var reference, observability, backup strategy, troubleshooting matrix, production-readiness checklist.
 * **CHANGELOG entry** restructured to highlight Brand / Features / Tests / CI/CD / Performance / Security / Docs.
 
 ### Internal
 
 * `APP_VERSION` is now a single source of truth referenced by `/api/health` and validated in CI against `package.json` + the test assertion.
-* `error-log.mjs` lives at `dashboard-web/lib/` for reuse and unit testability.
+* `error-log.mjs` lives at `apps/web/lib/` for reuse and unit testability.
 * `boot-server.mjs` test helper accepts pre-seeded files so token / cache state is set BEFORE the server boots — fixes a class of flaky timing tests.
 
 ---
@@ -77,7 +77,7 @@
 * add LaTeX/Overleaf CV export mode with pdflatex compilation (closes [#47](https://github.com/mysticalsin/Hireloom/issues/47)) ([b824953](https://github.com/mysticalsin/Hireloom/commit/b824953d0e3b7f8c6105dfcce7e17257c95ce6cd))
 * add Nix flake devshell with Playwright support ([c579fcd](https://github.com/mysticalsin/Hireloom/commit/c579fcddebf793f00cfad8534fd74085c09017fb))
 * add OpenCode slash commands for career-ops ([#67](https://github.com/mysticalsin/Hireloom/issues/67)) ([93caaed](https://github.com/mysticalsin/Hireloom/commit/93caaed49cbc9f3214f9beb66fb2281c3f2370e6))
-* add scan.mjs — zero-token portal scanner ([8c19b2b](https://github.com/mysticalsin/Hireloom/commit/8c19b2b59f7087689e004f3d48e912f291911373))
+* add engine/scan/scan.mjs — zero-token portal scanner ([8c19b2b](https://github.com/mysticalsin/Hireloom/commit/8c19b2b59f7087689e004f3d48e912f291911373))
 * add writing-samples folder for AI-detection-evading voice calibration ([9ae201d](https://github.com/mysticalsin/Hireloom/commit/9ae201d0682a17e7006ed7902b42db8234212e97))
 * **cv:** add cv.output_format to route between html and latex generation ([b82bb5f](https://github.com/mysticalsin/Hireloom/commit/b82bb5fb7c86ab3074a54eaf0f3186f81d41f417))
 * **dashboard:** add Catppuccin Latte light theme with auto-detection ([ff686c8](https://github.com/mysticalsin/Hireloom/commit/ff686c8af97a7bf93565fe8eeac677f998cc9ece))
@@ -118,11 +118,11 @@
 * **release:** sync VERSION and package.json via release-please-config ([6a3dc22](https://github.com/mysticalsin/Hireloom/commit/6a3dc224337a1942bf2ebf18b9b275d94fc06e7a))
 * remove wellfound, lever and remotefront from portals.example.yml ([#286](https://github.com/mysticalsin/Hireloom/issues/286)) ([ecd013c](https://github.com/mysticalsin/Hireloom/commit/ecd013cc6f59e3a1a8ef77d34e7abc15e8075ed3))
 * replace grep -P with POSIX-compatible grep in batch-runner.sh ([637b39e](https://github.com/mysticalsin/Hireloom/commit/637b39e383d1174c8287f42e9534e9e3cdfabb19))
-* test-all.mjs scans only git-tracked files, avoids false positives ([47c9f98](https://github.com/mysticalsin/Hireloom/commit/47c9f984d8ddc70974f15c99b081667b73f1bb9a))
+* engine/test-all.mjs scans only git-tracked files, avoids false positives ([47c9f98](https://github.com/mysticalsin/Hireloom/commit/47c9f984d8ddc70974f15c99b081667b73f1bb9a))
 * **update-system:** cross-check GitHub Releases API when VERSION file is stale ([b0ee6eb](https://github.com/mysticalsin/Hireloom/commit/b0ee6ebfcec7920ea7590ada61f3c39324d22ebc))
 * **update-system:** expand SYSTEM_PATHS to cover all language modes and current scripts ([34fe3fb](https://github.com/mysticalsin/Hireloom/commit/34fe3fbd5782f7f57faf8ef4a245fbee6275a040))
 * use candidate name from profile.yml in PDF filename ([7bcbc08](https://github.com/mysticalsin/Hireloom/commit/7bcbc08ca6184362398690234e49df0ac157567f))
-* use execFileSync to prevent shell injection in test-all.mjs ([c99d5a6](https://github.com/mysticalsin/Hireloom/commit/c99d5a6526f923b56c3790b79b0349f402fa00e2))
+* use execFileSync to prevent shell injection in engine/test-all.mjs ([c99d5a6](https://github.com/mysticalsin/Hireloom/commit/c99d5a6526f923b56c3790b79b0349f402fa00e2))
 * use fileURLToPath for cross platform compatible paths in tracker scripts ([#32](https://github.com/mysticalsin/Hireloom/issues/32)) ([#58](https://github.com/mysticalsin/Hireloom/issues/58)) ([ab77510](https://github.com/mysticalsin/Hireloom/commit/ab775102f4586ae4663a593b519927531be27122))
 * use github.com/mysticalsin (GitHub) in English README ([5518d3d](https://github.com/mysticalsin/Hireloom/commit/5518d3dd07716137b97bb4d8c7b5264b94e2b9e9))
 
@@ -193,5 +193,5 @@
 * **ci:** use pull_request_target for labeler on fork PRs ([#260](https://github.com/mysticalsin/Hireloom/issues/260)) ([2ecf572](https://github.com/mysticalsin/Hireloom/commit/2ecf57206c2eb6e35e2a843d6b8365f7a04c53d6))
 * correct _shared.md → _profile.md reference in CUSTOMIZATION.md (closes [#137](https://github.com/mysticalsin/Hireloom/issues/137)) ([a91e264](https://github.com/mysticalsin/Hireloom/commit/a91e264b6ea047a76d8c033aa564fe01b8f9c1d9))
 * replace grep -P with POSIX-compatible grep in batch-runner.sh ([637b39e](https://github.com/mysticalsin/Hireloom/commit/637b39e383d1174c8287f42e9534e9e3cdfabb19))
-* test-all.mjs scans only git-tracked files, avoids false positives ([47c9f98](https://github.com/mysticalsin/Hireloom/commit/47c9f984d8ddc70974f15c99b081667b73f1bb9a))
-* use execFileSync to prevent shell injection in test-all.mjs ([c99d5a6](https://github.com/mysticalsin/Hireloom/commit/c99d5a6526f923b56c3790b79b0349f402fa00e2))
+* engine/test-all.mjs scans only git-tracked files, avoids false positives ([47c9f98](https://github.com/mysticalsin/Hireloom/commit/47c9f984d8ddc70974f15c99b081667b73f1bb9a))
+* use execFileSync to prevent shell injection in engine/test-all.mjs ([c99d5a6](https://github.com/mysticalsin/Hireloom/commit/c99d5a6526f923b56c3790b79b0349f402fa00e2))

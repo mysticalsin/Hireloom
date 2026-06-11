@@ -67,14 +67,14 @@ Then paste a job offer URL or description. Career-ops will automatically evaluat
 ## Verify Setup
 
 ```bash
-node cv-sync-check.mjs      # Check configuration
-node verify-pipeline.mjs     # Check pipeline integrity
+node engine/tracker/cv-sync-check.mjs      # Check configuration
+node engine/tracker/verify-pipeline.mjs     # Check pipeline integrity
 ```
 
 ## Build Dashboard (Optional)
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..  # Opens TUI pipeline viewer
 ```

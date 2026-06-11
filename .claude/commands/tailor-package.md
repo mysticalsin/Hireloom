@@ -6,7 +6,7 @@ description: Produce a one-role tailored CV + cover letter — the user's conten
 
 Assumes only `cv.md` + the JD. Read the user's Current Profile in `CLAUDE.local.md` (honesty limits, claiming rules) first, if it exists.
 
-## 1. Write a content JSON in the exact shape `batch/tailor-engine.mjs` consumes
+## 1. Write a content JSON in the exact shape `engine/batch/tailor-engine.mjs` consumes
 ```json
 {
   "title": "<exact role title — headline beside the candidate's name>",
@@ -21,7 +21,7 @@ Assumes only `cv.md` + the JD. Read the user's Current Profile in `CLAUDE.local.
 }
 ```
 - **Density = 5/3/3/2-3 bullets, ~2 lines each** (this is what makes it "Kimi-length"). Reverse-chron auto-enforced via `cv.experience_order` in `config/profile.yml`.
-- **Do NOT include Education or Certifications** — the engine renders them from the `cv:` block in `config/profile.yml` (see `lib/identity.mjs`).
+- **Do NOT include Education or Certifications** — the engine renders them from the `cv:` block in `config/profile.yml` (see `engine/lib/identity.mjs`).
 
 ## 2. HONESTY RULES (non-negotiable)
 - Only facts/employers/dates/metrics/tools in `cv.md`. For a skill/domain the candidate lacks: omit OR connect with explicit transferable framing ("transferable to…"); never lift the JD phrase as owned experience.
@@ -33,7 +33,7 @@ Assumes only `cv.md` + the JD. Read the user's Current Profile in `CLAUDE.local.
 ## 3. Render
 ```bash
 CHROME=$(ls -d "$HOME/Library/Caches/ms-playwright"/chromium*/chrome-mac-arm64/"Google Chrome for Testing.app"/Contents/MacOS/"Google Chrome for Testing" 2>/dev/null | head -1)
-PW_CHROMIUM_PATH="$CHROME" node render-breaktail.mjs "<content.json>" "<outDir>" "<Candidate Name>" breaktail
+PW_CHROMIUM_PATH="$CHROME" node engine/render/render-breaktail.mjs "<content.json>" "<outDir>" "<Candidate Name>" breaktail
 ```
 → `<outDir>/<Candidate Name> - Resume.pdf` + `… - Cover Letter.pdf`. `PW_CHROMIUM_PATH` REQUIRED. `breaktail` forces Edu+Certs+Competencies onto p2 together (omit only if the whole CV already fits one page cleanly).
 

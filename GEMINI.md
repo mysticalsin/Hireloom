@@ -4,5 +4,5 @@
 
 Gemini-specific notes:
 
-- `gemini-eval.mjs` — standalone Gemini API evaluator (no CLI required); reads the same `modes/oferta.md` scoring rubric.
+- `engine/gemini-eval.mjs` — standalone Gemini API evaluator (no CLI required); reads the same `modes/oferta.md` scoring rubric.
 - The career-ops skill ships in the open agent skill standard format (`.agents/skills/career-ops/SKILL.md`) — invoke any mode by asking for it (`scan`, `oferta`, `pdf`, `apply`, …).

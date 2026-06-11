@@ -161,7 +161,7 @@ Career-ops поддерживает ключевые российские джо
 Встроенный терминальный дашборд для визуального просмотра пайплайна:
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -188,14 +188,14 @@ career-ops/
 │   ├── cv-template.html         # ATS-шаблон резюме
 │   ├── portals.example.yml      # Конфигурация сканера
 │   └── states.yml               # Канонические статусы
-├── batch/                       # Пакетная обработка
-├── dashboard/                   # Go TUI
+├── engine/batch/                       # Пакетная обработка
+├── apps/tui/                   # Go TUI
 ├── data/                        # Данные трекинга (gitignored)
 ├── reports/                     # Отчёты оценки (gitignored)
 ├── output/                      # Сгенерированные PDF (gitignored)
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # Документация
-└── examples/                    # Примеры CV, отчётов
+└── docs/examples/                    # Примеры CV, отчётов
 ```
 
 ## Технологии
@@ -215,7 +215,7 @@ career-ops/
 3. **Соблюдайте ToS площадок.** Используйте инструмент в соответствии с правилами порталов (hh.ru, Хабр Карьера, LinkedIn и др.). Не спамьте работодателей.
 4. **Нет гарантий.** Оценки — рекомендации, не истина. ИИ может галлюцинировать. Авторы не несут ответственности за результаты трудоустройства.
 
-Подробнее: [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). ПО распространяется по [лицензии MIT](LICENSE) «как есть», без каких-либо гарантий.
+Подробнее: [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md). ПО распространяется по [лицензии MIT](LICENSE) «как есть», без каких-либо гарантий.
 
 ## Лицензия
 

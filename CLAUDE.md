@@ -16,7 +16,7 @@ The engine was battle-tested in a real career search: 740+ job offers evaluated,
 
 ## Data Contract (CRITICAL)
 
-There are two layers. Read `DATA_CONTRACT.md` for the full list.
+There are two layers. Read `docs/DATA_CONTRACT.md` for the full list.
 
 **User Layer (NEVER auto-updated, personalization goes HERE):**
 - `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
@@ -26,7 +26,7 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 **System Layer (auto-updatable, DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `CLAUDE.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*`
+- `CLAUDE.md`, `*.mjs` scripts, `apps/tui/*`, `templates/*`, `engine/batch/*`
 
 **THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
@@ -35,19 +35,19 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 On the first message of each session, run the update checker silently:
 
 ```bash
-node update-system.mjs check
+node engine/update-system.mjs check
 ```
 
 Parse the JSON output:
 - `{"status": "update-available", "local": "1.0.0", "remote": "1.1.0", "changelog": "..."}` → tell the user:
   > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
-  If yes → run `node update-system.mjs apply`. If no → run `node update-system.mjs dismiss`.
+  If yes → run `node engine/update-system.mjs apply`. If no → run `node engine/update-system.mjs dismiss`.
 - `{"status": "up-to-date"}` → say nothing
 - `{"status": "dismissed"}` → say nothing
 - `{"status": "offline"}` → say nothing
 
 The user can also say "check for updates" or "update career-ops" at any time to force a check.
-To rollback: `node update-system.mjs rollback`
+To rollback: `node engine/update-system.mjs rollback`
 
 ## What is career-ops
 
@@ -62,17 +62,17 @@ AI-powered job search automation built on Claude Code: pipeline tracking, offer 
 | `data/scan-history.tsv` | Scanner dedup history |
 | `portals.yml` | Query and company config |
 | `templates/cv-template.html` | HTML template for CVs |
-| `generate-pdf.mjs` | Playwright: HTML to PDF |
+| `engine/render/generate-pdf.mjs` | Playwright: HTML to PDF |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
-| `analyze-patterns.mjs` | Pattern analysis script (JSON output) |
-| `followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
+| `engine/tracker/analyze-patterns.mjs` | Pattern analysis script (JSON output) |
+| `engine/tracker/followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
 | `data/follow-ups.md` | Follow-up history tracker |
-| `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
-| `check-liveness.mjs` | Job posting liveness checker |
-| `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `doctor.mjs` | Setup validation — JSON output for CI/scripts |
+| `engine/scan/scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
+| `engine/scan/check-liveness.mjs` | Job posting liveness checker |
+| `engine/scan/liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
+| `engine/doctor.mjs` | Setup validation — JSON output for CI/scripts |
 | `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
 
 ### Other CLIs (OpenCode, Codex, Gemini, Qwen)
@@ -173,7 +173,7 @@ This system is designed to be customized by YOU (AI Agent). When the user asks y
 - "Add these companies to my portals" → edit `portals.yml`
 - "Update my profile" → edit `config/profile.yml`
 - "Change the CV template design" → edit `templates/cv-template.html`
-- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `batch/batch-prompt.md` only when changing the shared system defaults for everyone
+- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `engine/batch/batch-prompt.md` only when changing the shared system defaults for everyone
 
 ### Language Modes
 
@@ -253,17 +253,17 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 
 ## CI/CD and Quality
 
-- **GitHub Actions** run on every PR: `test-all.mjs` (63+ checks), auto-labeler (risk-based: 🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), welcome bot for first-time contributors
+- **GitHub Actions** run on every PR: `engine/test-all.mjs` (63+ checks), auto-labeler (risk-based: 🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), welcome bot for first-time contributors
 - **Branch protection** on `main`: status checks must pass before merge. No direct pushes to main (except admin bypass).
 - **Dependabot** monitors npm, Go modules, and GitHub Actions for security updates
 - **Contributing process**: issue first → discussion → PR with linked issue → CI passes → maintainer review → merge
 
 ## Community and Governance
 
-- **Code of Conduct**: Contributor Covenant 2.1 with enforcement actions (see `CODE_OF_CONDUCT.md`)
-- **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `GOVERNANCE.md`)
-- **Security**: private vulnerability reporting via email (see `SECURITY.md`)
-- **Support**: help questions go to Discord/Discussions, not issues (see `SUPPORT.md`)
+- **Code of Conduct**: Contributor Covenant 2.1 with enforcement actions (see `.github/CODE_OF_CONDUCT.md`)
+- **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `.github/GOVERNANCE.md`)
+- **Security**: private vulnerability reporting via email (see `.github/SECURITY.md`)
+- **Support**: help questions go to Discord/Discussions, not issues (see `.github/SUPPORT.md`)
 - **Discord**: https://discord.gg/3jEjwygjNG
 
 ## Stack and Conventions
@@ -272,14 +272,14 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 - Scripts in `.mjs`, configuration in YAML
 - Output in `output/` (gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
-- Batch in `batch/` (gitignored except scripts and prompt)
+- Batch in `engine/batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: After each batch of evaluations, run `node engine/tracker/merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
-Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
+Write one TSV file per evaluation to `engine/batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
 
 ```
 {num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
@@ -300,13 +300,13 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 
 ### Pipeline Integrity
 
-1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `batch/tracker-additions/` and `merge-tracker.mjs` handles the merge.
+1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `engine/batch/tracker-additions/` and `engine/tracker/merge-tracker.mjs` handles the merge.
 2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
 3. All reports MUST include `**URL:**` in the header (between Score and PDF). Include `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs`
-6. Normalize statuses: `node normalize-statuses.mjs`
-7. Dedup: `node dedup-tracker.mjs`
+5. Health check: `node engine/tracker/verify-pipeline.mjs`
+6. Normalize statuses: `node engine/tracker/normalize-statuses.mjs`
+7. Dedup: `node engine/tracker/dedup-tracker.mjs`
 
 ### Canonical States (applications.md)
 
@@ -335,23 +335,23 @@ npm test                                # 222 unit tests across tests/
 node --test tests/onboard.test.mjs      # run a single suite
 ```
 
-Tests cover the pure helpers in `dashboard-web/lib/` and `lib/`:
+Tests cover the pure helpers in `apps/web/lib/` and `lib/`:
 - `onboard.mjs` — `yamlQuote`, `validateOnboardPayload`, `serializeProfileYaml`, `extractProfileFromResume`, `kebabCase`
 - `path-safety.mjs` — `makeSafeResolver` (path-traversal defense for `/reports/*` and `getCompForReport`)
-- `lib/identity.mjs` — candidate identity for the renderers (`tests/identity.test.mjs`)
-- `lib/profile-check.mjs` — doctor's profile.yml content validation (`tests/profile-check.test.mjs`)
+- `engine/lib/identity.mjs` — candidate identity for the renderers (`tests/identity.test.mjs`)
+- `engine/lib/profile-check.mjs` — doctor's profile.yml content validation (`tests/profile-check.test.mjs`)
 - plus http-utils, gmail-status, error-log, backup/restore, and rate-limit/CSRF e2e suites
 
-When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [MISTAKES.md](MISTAKES.md) for the cautionary tale:
+When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [docs/MISTAKES.md](docs/MISTAKES.md) for the cautionary tale:
 
 ```bash
 TEST_CFG=$(mktemp -d)
-PORT=4749 HOST=127.0.0.1 CONFIG_DIR="$TEST_CFG" node dashboard-web/server.mjs
+PORT=4749 HOST=127.0.0.1 CONFIG_DIR="$TEST_CFG" node apps/web/server.mjs
 ```
 
 ## Onboarding wizard
 
-The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `openOnboard()` → `wizGoTo(1..6)`):
+The `⊕ Profile` button opens a 6-step wizard (`apps/web/server.mjs` → `openOnboard()` → `wizGoTo(1..6)`):
 
 1. **Resume** — drop `.txt`/`.md` or paste; PDFs trigger a "Open in tab → ⌘+A → ⌘+C" assist with auto-paste detection.
 2. **Confirm basics** — name/email/phone/location/linkedin/headline pre-filled from extraction; user edits.
@@ -426,7 +426,7 @@ Matching `/goodnight` and `/morning` slash commands exist in `.claude/commands/`
 
 **The behavior:** whenever you (the AI agent) change files that affect **the project itself** (system-layer `*.mjs` / modes / templates / dashboard / configs, or notable user-layer tooling), record it in the user's **build change-log** so their improvements are capturable upstream.
 
-1. **First project change in a fresh install:** copy `BUILD-CHANGELOG.template.md` → **`BUILD-CHANGELOG.md`** (fill the frontmatter: `hireloom_base_version` from the `VERSION` file, optional contributor/platform).
+1. **First project change in a fresh install:** copy `templates/BUILD-CHANGELOG.template.md` → **`BUILD-CHANGELOG.md`** (fill the frontmatter: `hireloom_base_version` from the `VERSION` file, optional contributor/platform).
 2. **Each change** (and at every `goodnight`): append one entry in the template's **entry schema** — `Layer:` (system|user), `Files:`, `Change:`, **`Root cause:`** (the WHY), **`Upstream:`** (yes|no + one-line why/caveat), optional `Reproduce:`. Newest at the bottom.
 3. **One file = the whole contribution.** A user submits **just that one markdown file** to the maintainers; they don't need a PR or to understand the code. The maintainer side ingests it via **`/review-contribution`** (reads the file, maps entries to the repo, assesses each `Upstream: yes` entry for merge).
 4. **Keep personal data out of it** — a user's CV/profile/preferences are user-layer and go in their own logs, never in the upstream-bound change-log. Only project-affecting changes + root-causes belong here.

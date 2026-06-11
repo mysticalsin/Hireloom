@@ -170,7 +170,7 @@ El scanner viene con **45+ empresas** pre-configuradas y **19 queries** en los p
 El dashboard integrado en terminal te permite navegar tu pipeline visualmente:
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -198,16 +198,16 @@ career-ops/
 │   ├── cv-template.html         # Template de CV ATS-optimizado
 │   ├── portals.example.yml      # Config del scanner
 │   └── states.yml               # Estados canonicos
-├── batch/
+├── engine/batch/
 │   ├── batch-prompt.md          # Prompt autocontenido del worker
 │   └── batch-runner.sh          # Script orquestador
-├── dashboard/                   # Visor de pipeline en Go TUI
+├── apps/tui/                   # Visor de pipeline en Go TUI
 ├── data/                        # Tus datos de tracking (gitignored)
 ├── reports/                     # Reports de evaluacion (gitignored)
 ├── output/                      # PDFs generados (gitignored)
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # Setup, personalizacion, arquitectura
-└── examples/                    # CV de ejemplo, report, proof points
+└── docs/examples/                    # CV de ejemplo, report, proof points
 ```
 
 ## Tech Stack
@@ -255,7 +255,7 @@ Mi portfolio y otros proyectos open source → [github.com/mysticalsin](https://
 3. **Tu cumples con los terminos de terceros.** Debes usar esta herramienta de acuerdo con los Terminos de Servicio de los portales de empleo (Greenhouse, Lever, Workday, LinkedIn, etc.). No uses esta herramienta para spamear empresas.
 4. **Sin garantias.** Las evaluaciones son recomendaciones, no verdad absoluta. Los modelos pueden inventar habilidades o experiencia. Los autores no son responsables de resultados laborales, candidaturas rechazadas, restricciones de cuenta ni ninguna otra consecuencia.
 
-Ver [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) para mas detalles. Este software se proporciona bajo la [Licencia MIT](LICENSE) "tal cual", sin garantia de ningun tipo.
+Ver [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md) para mas detalles. Este software se proporciona bajo la [Licencia MIT](LICENSE) "tal cual", sin garantia de ningun tipo.
 
 ## Licencia
 

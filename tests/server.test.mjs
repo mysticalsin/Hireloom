@@ -31,7 +31,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const SERVER_MJS = path.join(ROOT, 'dashboard-web', 'server.mjs');
+const SERVER_MJS = path.join(ROOT, 'apps', 'web', 'server.mjs');
 
 // PORT=0 — the OS assigns a free ephemeral port (test files run in parallel;
 // random ranges had birthday-problem collisions: the loser of a collision

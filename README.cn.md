@@ -176,7 +176,7 @@ career-ops 是一个单一斜杠命令，带有多种模式：
 内置终端仪表盘可以让你更直观地浏览整个求职管道：
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -203,16 +203,16 @@ career-ops/
 │   ├── cv-template.html         # ATS 优化简历模板
 │   ├── portals.example.yml      # 扫描器配置模板
 │   └── states.yml               # 规范状态列表
-├── batch/
+├── engine/batch/
 │   ├── batch-prompt.md          # 自包含 worker 提示词
 │   └── batch-runner.sh          # 编排脚本
-├── dashboard/                   # Go TUI 管道查看器
+├── apps/tui/                   # Go TUI 管道查看器
 ├── data/                        # 你的追踪数据（已 gitignore）
 ├── reports/                     # 评估报告（已 gitignore）
 ├── output/                      # 生成的 PDF（已 gitignore）
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # 配置、定制、架构说明
-└── examples/                    # 示例简历、报告、成果证明
+└── docs/examples/                    # 示例简历、报告、成果证明
 ```
 
 ## 技术栈
@@ -254,4 +254,4 @@ Hireloom 由 [Tony Walteur](https://www.linkedin.com/in/tonywalteur/) 维护。
 3. **你需要遵守第三方服务条款。** 你必须按照所使用招聘平台（Greenhouse、Lever、Workday、LinkedIn 等）的服务条款来使用本工具。不要用它向雇主发送垃圾申请，也不要对 ATS 系统造成过载。
 4. **不提供任何保证。** 评估结果只是建议，不是真相。AI 模型可能会幻觉出并不存在的技能或经历。作者不对任何求职结果、申请被拒、账号受限或其他后果承担责任。
 
-完整内容见 [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md)。本软件依据 [MIT License](LICENSE) 以“按现状”方式提供，不附带任何形式的担保。
+完整内容见 [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md)。本软件依据 [MIT License](LICENSE) 以“按现状”方式提供，不附带任何形式的担保。

@@ -21,5 +21,5 @@ For the **maintainer side**. A user ran Hireloom, their agent auto-kept a `BUILD
 6. **Never auto-apply** — present the plan; the maintainer decides what lands. Keep the contributor's framing/credit.
 
 ## Notes
-- The schema is defined in `BUILD-CHANGELOG.template.md`. If a submitted file doesn't follow it, still do your best to parse, and note the format drift.
+- The schema is defined in `templates/BUILD-CHANGELOG.template.md`. If a submitted file doesn't follow it, still do your best to parse, and note the format drift.
 - Multiple submissions: dedupe overlapping changes across files before planning.

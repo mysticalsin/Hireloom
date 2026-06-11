@@ -40,7 +40,7 @@ The grind it kills is the repetition: reading the two-hundredth JD, retyping the
 
 1. **Install and connect.** The CLI agent, Node, Playwright — plus your Gmail (the post-apply loop reads responses from it) and optionally a Kimi API key (the auto-applier's engine; see Requirements).
 2. **Teach it who you are.** The onboarding wizard reads your resume and asks for the rest: target roles, comp, deal-breakers, work authorization, narrative. Your identity lives in one config file — nothing personal is hardcoded in the engine.
-3. **Let the scanner loose.** `node scan.mjs` sweeps Greenhouse, Ashby, and Lever APIs directly — zero LLM tokens — using queries built from *your* targets, and saves every JD locally.
+3. **Let the scanner loose.** `node engine/scan/scan.mjs` sweeps Greenhouse, Ashby, and Lever APIs directly — zero LLM tokens — using queries built from *your* targets, and saves every JD locally.
 4. **The pipeline ranks itself.** Each role is scored 0–5 against your real profile: fit, gaps and whether they're learnable, comp, posting legitimacy.
 5. **The tailor builds every package.** Per-JD CV + cover letter, truthful by construction — your proof points sharpened into the posting's language, never invented.
 6. **You choose what goes out.** Pick roles on the dashboard or in the CLI — by hand or by score floor (default 4.0+).
@@ -78,7 +78,7 @@ Out of the box, the first evaluations will be merely decent. The system improves
 
 What makes this durable is the **file-based memory layer**. Long AI threads rot — context fills up, summaries get summarized, details quietly fall out. Hireloom sidesteps the problem: say **`goodnight`** and the agent checkpoints who you are (`CLAUDE.local.md`), what's mid-flight (`WORKING.md`), what changed and why (`career-log.md`), and the map of your local tooling (`TOOLKIT.md`). Say **`morning`** in a brand-new session and it reloads the lot, flags anything stale, and tells you the next step.
 
-Everything is plain, Obsidian-friendly markdown. Everything personal is gitignored. **The machinery ships with the repo; your life stays on your machine** — that split is contractual, not aspirational: see [DATA_CONTRACT.md](DATA_CONTRACT.md). System updates can replace the engine; they physically cannot touch your CV, profile, tracker, reports, or memory.
+Everything is plain, Obsidian-friendly markdown. Everything personal is gitignored. **The machinery ships with the repo; your life stays on your machine** — that split is contractual, not aspirational: see [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md). System updates can replace the engine; they physically cannot touch your CV, profile, tracker, reports, or memory.
 
 ## The Second Brain (optional)
 
@@ -158,7 +158,7 @@ cp .env.example .env             # add ANTHROPIC_API_KEY, optional GMAIL_*
 npm install
 npx playwright install chromium  # required for PDF generation
 npm test                         # 222 unit tests
-node doctor.mjs                  # validates the whole setup, profile included
+node engine/doctor.mjs                  # validates the whole setup, profile included
 npm start                        # http://localhost:4747
 ```
 
@@ -168,7 +168,7 @@ npm start                        # http://localhost:4747
 make            # all targets: install / docker / local / logs / backup / doctor
 ```
 
-Auto-start on boot: `packaging/career-ops.service` (systemd) or `packaging/io.mysticalsin.hireloom.plist` (launchd); Docker restarts itself. Full setup guide: [docs/SETUP.md](docs/SETUP.md).
+Auto-start on boot: `scripts/packaging/career-ops.service` (systemd) or `scripts/packaging/io.mysticalsin.hireloom.plist` (launchd); Docker restarts itself. Full setup guide: [docs/SETUP.md](docs/SETUP.md).
 
 ## Driving it
 
@@ -196,7 +196,7 @@ The defaults ship tuned for AI/automation roles because that's where the engine 
 - **One identity file.** `config/profile.yml` carries your name, contact line, education, certifications, even the order your jobs render in. Every PDF renderer reads it; the engine contains no one's personal data.
 - **A personalization layer updates can't touch.** Your archetypes, scoring weights, narrative, and deal-breakers live in `modes/_profile.md` and `config/profile.yml` — user layer, never overwritten.
 - **Native-language evaluation modes.** German (`modes/de/`), French (`modes/fr/`), and Japanese (`modes/ja/`) modes speak the market's actual vocabulary — Kündigungsfrist, convention collective SYNTEC, 賞与 — not translated English.
-- **Safe updates.** `node update-system.mjs check` fetches engine updates with your data outside the blast radius; `node doctor.mjs` confirms nothing's miswired, your profile's render block included.
+- **Safe updates.** `node engine/update-system.mjs check` fetches engine updates with your data outside the blast radius; `node engine/doctor.mjs` confirms nothing's miswired, your profile's render block included.
 
 ## Under the hood
 
@@ -208,9 +208,9 @@ Hireloom/
 ├── lib/                         # identity, profile validation, shared engine libs
 ├── modes/                       # Evaluation/apply/scan modes + de/ fr/ ja/
 ├── second-brain/BUILD-SPEC.md   # The Obsidian command-center build spec
-├── batch/                       # Parallel workers + the tailoring engine
-├── dashboard/                   # Go TUI (Bubble Tea)
-├── dashboard-web/               # Web dashboard + onboarding wizard
+├── engine/batch/                       # Parallel workers + the tailoring engine
+├── apps/tui/                   # Go TUI (Bubble Tea)
+├── apps/web/               # Web dashboard + onboarding wizard
 ├── templates/                   # CV template, portal config, canonical states
 ├── tests/                       # 222 unit tests — npm test
 ├── data/ reports/ output/       # Yours, gitignored (user layer)
@@ -221,7 +221,7 @@ Node (ESM) for the engine · Playwright for rendering and browsing · Go + Bubbl
 
 ## Contributing — code optional
 
-Hireloom installs are self-improving: when your agent fixes or extends something on your machine, it logs the change, the root cause, and an upstream-worthiness flag to your `BUILD-CHANGELOG.md` (schema: [BUILD-CHANGELOG.template.md](BUILD-CHANGELOG.template.md)). **Submitting that single markdown file is a complete contribution** — share it with us on the [Sin City Discord](https://discord.gg/3jEjwygjNG), or open an issue with it attached; maintainers triage it with a dedicated review command and port what generalizes. PRs are welcome too: [CONTRIBUTING.md](CONTRIBUTING.md).
+Hireloom installs are self-improving: when your agent fixes or extends something on your machine, it logs the change, the root cause, and an upstream-worthiness flag to your `BUILD-CHANGELOG.md` (schema: [templates/BUILD-CHANGELOG.template.md](templates/BUILD-CHANGELOG.template.md)). **Submitting that single markdown file is a complete contribution** — share it with us on the [Sin City Discord](https://discord.gg/3jEjwygjNG), or open an issue with it attached; maintainers triage it with a dedicated review command and port what generalizes. PRs are welcome too: [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 <a href="https://github.com/mysticalsin/Hireloom/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=mysticalsin/Hireloom" />
@@ -231,7 +231,7 @@ Landed a role with Hireloom in the loop? [Tell us the story.](https://github.com
 
 ## Maintainers
 
-Hireloom is maintained by [Tony Walteur](https://www.linkedin.com/in/tonywalteur/), with major contributions — the memory system, the Second Brain, the identity layer, and the batch/apply tooling — by [Ramy Sherif](https://github.com/ramysherifwork).
+Hireloom is maintained by [Tony Walteur](https://www.linkedin.com/in/tonywalteur/), with major contributions — the memory system, the Second Brain, the identity layer, and the engine/batch/apply tooling — by [Ramy Sherif](https://github.com/ramysherifwork).
 
 More from the maintainer → [github.com/mysticalsin](https://github.com/mysticalsin)
 
@@ -247,7 +247,7 @@ More from the maintainer → [github.com/mysticalsin](https://github.com/mystica
 
 ## Disclaimer
 
-Hireloom is local, source-available software you run yourself — there is no hosted service behind it and nobody on this project can see your data. Your CV and profile travel only between your machine and the AI provider *you* configure. Automated applying runs only when you launch it, on roles you approved after watching the dry runs — and you are the operator: review what the AI generates before it goes out under your name, stay within the Terms of Service of every portal you touch, and treat evaluations as informed opinions, not promises — language models can be wrong about you and about the job. Full text: [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Provided "as is", without warranty, under the [PolyForm Shield 1.0.0 license](LICENSE).
+Hireloom is local, source-available software you run yourself — there is no hosted service behind it and nobody on this project can see your data. Your CV and profile travel only between your machine and the AI provider *you* configure. Automated applying runs only when you launch it, on roles you approved after watching the dry runs — and you are the operator: review what the AI generates before it goes out under your name, stay within the Terms of Service of every portal you touch, and treat evaluations as informed opinions, not promises — language models can be wrong about you and about the job. Full text: [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md). Provided "as is", without warranty, under the [PolyForm Shield 1.0.0 license](LICENSE).
 
 ## License
 

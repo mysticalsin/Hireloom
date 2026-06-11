@@ -1,5 +1,5 @@
 /**
- * Unit tests for lib/identity.mjs — the single source of candidate identity
+ * Unit tests for engine/lib/identity.mjs — the single source of candidate identity
  * for every CV/cover renderer. Covers: candidate-block defaults, cv: display
  * overrides, linkedin URL cleaning, education/certs HTML escaping,
  * experience_order hints, and the missing-profile error path.
@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { loadIdentity } from '../lib/identity.mjs';
+import { loadIdentity } from '../engine/lib/identity.mjs';
 
 let n = 0;
 function profileWith(yml) {
@@ -29,7 +29,7 @@ candidate:
   linkedin: "https://www.linkedin.com/in/jane-example/"
 `;
 
-describe('lib/identity.mjs — loadIdentity', () => {
+describe('engine/lib/identity.mjs — loadIdentity', () => {
   test('contact line defaults from the candidate block, linkedin cleaned', () => {
     const { p, cleanup } = profileWith(BASE);
     try {

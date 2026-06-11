@@ -1,5 +1,5 @@
 /**
- * Unit tests for lib/profile-check.mjs — the doctor's profile.yml content
+ * Unit tests for engine/lib/profile-check.mjs — the doctor's profile.yml content
  * validation. Covers: the renderer-required candidate.full_name, the cv:
  * block contract (education/certifications/experience_order/contact_*
  * shapes), warn-vs-fail levels, and the second-brain prerequisite list.
@@ -8,7 +8,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from 'js-yaml';
-import { checkProfileDoc, SECOND_BRAIN_PREREQS } from '../lib/profile-check.mjs';
+import { checkProfileDoc, SECOND_BRAIN_PREREQS } from '../engine/lib/profile-check.mjs';
 
 const VALID = load(`
 candidate:
@@ -118,8 +118,8 @@ describe('checkProfileDoc', () => {
 describe('SECOND_BRAIN_PREREQS', () => {
   test('lists the build spec, the command, and the analyzers the spec shells out to', () => {
     assert.ok(SECOND_BRAIN_PREREQS.includes('second-brain/BUILD-SPEC.md'));
-    assert.ok(SECOND_BRAIN_PREREQS.includes('followup-cadence.mjs'));
-    assert.ok(SECOND_BRAIN_PREREQS.includes('analyze-patterns.mjs'));
+    assert.ok(SECOND_BRAIN_PREREQS.includes('engine/tracker/followup-cadence.mjs'));
+    assert.ok(SECOND_BRAIN_PREREQS.includes('engine/tracker/analyze-patterns.mjs'));
     assert.ok(SECOND_BRAIN_PREREQS.includes('templates/states.yml'));
   });
 });

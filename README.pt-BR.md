@@ -173,7 +173,7 @@ O scanner já vem com **45+ empresas** prontas para escanear e **19 consultas de
 O dashboard de terminal integrado permite navegar visualmente pelo seu pipeline:
 
 ```bash
-cd dashboard
+cd apps/tui
 go build -o career-dashboard .
 ./career-dashboard --path ..
 ```
@@ -200,16 +200,16 @@ career-ops/
 │   ├── cv-template.html         # Template de CV otimizado para ATS
 │   ├── portals.example.yml      # Template de configuração do scanner
 │   └── states.yml               # Status canônicos
-├── batch/
+├── engine/batch/
 │   ├── batch-prompt.md          # Prompt autocontido para workers
 │   └── batch-runner.sh          # Script orquestrador
-├── dashboard/                   # Visualizador de pipeline em Go TUI
+├── apps/tui/                   # Visualizador de pipeline em Go TUI
 ├── data/                        # Seus dados de rastreamento (gitignored)
 ├── reports/                     # Relatórios de avaliação (gitignored)
 ├── output/                      # PDFs gerados (gitignored)
 ├── fonts/                       # Space Grotesk + DM Sans
 ├── docs/                        # Setup, customização, arquitetura
-└── examples/                    # CV de exemplo, relatório e proof points
+└── docs/examples/                    # CV de exemplo, relatório e proof points
 ```
 
 ## Stack de tecnologia
@@ -251,7 +251,7 @@ Meu portfólio e outros projetos open source → [github.com/mysticalsin](https:
 3. **Você cumpre os ToS de terceiros.** Você deve usar esta ferramenta em conformidade com os Termos de Serviço dos portais de carreira com os quais interage (Greenhouse, Lever, Workday, LinkedIn etc.). Não use esta ferramenta para spam de empregadores nem para sobrecarregar sistemas ATS.
 4. **Sem garantias.** As avaliações são recomendações, não verdades absolutas. Modelos de IA podem alucinar habilidades ou experiências. Os autores não se responsabilizam por resultados profissionais, candidaturas rejeitadas, restrições de conta ou qualquer outra consequência.
 
-Veja [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) para o aviso completo. Este software é fornecido sob a [Licença MIT](LICENSE) "como está", sem garantia de qualquer tipo.
+Veja [docs/LEGAL_DISCLAIMER.md](docs/LEGAL_DISCLAIMER.md) para o aviso completo. Este software é fornecido sob a [Licença MIT](LICENSE) "como está", sem garantia de qualquer tipo.
 
 ## Licença
 
