@@ -8,7 +8,7 @@
 
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice } = require('obsidian');
 
-const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.1';
+const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.2';
 const VIEW_TYPE = 'hireloom-brain-view';
 const API_DIR = '_brain_api';
 

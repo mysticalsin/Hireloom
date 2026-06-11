@@ -1,27 +1,31 @@
-/* Hireloom Second Brain — dark theme, oxblood accent */
-.hb-root { padding: 8px 12px; --hb-accent: #8a1c2b; --hb-accent-soft: rgba(138,28,43,.25); }
-.hb-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 8px; }
-.hb-tab { padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--text-muted); border: 1px solid transparent; }
-.hb-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-.hb-tab.is-active { color: #fff; background: var(--hb-accent); }
-.hb-count { opacity: .75; font-size: 10.5px; margin-left: 4px; }
-.hb-empty { color: var(--text-muted); font-style: italic; padding: 18px 6px; }
-.hb-meta { color: var(--text-faint); font-size: 11px; margin: 2px 0 10px; }
-.hb-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start; }
-.hb-col { min-width: 210px; max-width: 240px; background: var(--background-secondary); border-radius: 8px; padding: 8px; }
-.hb-col-h { font-weight: 600; font-size: 12px; margin-bottom: 6px; display: flex; justify-content: space-between; color: var(--text-normal); border-bottom: 2px solid var(--hb-accent); padding-bottom: 4px; }
-.hb-card { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-left: 3px solid var(--hb-accent); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
-.hb-card .hb-co { font-weight: 600; }
-.hb-card .hb-role { color: var(--text-muted); font-size: 11.5px; }
-.hb-card .hb-sub { color: var(--text-faint); font-size: 10.5px; margin-top: 2px; display: flex; gap: 8px; }
-.hb-row { display: flex; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--background-modifier-border); font-size: 12.5px; align-items: baseline; }
-.hb-row .hb-co { font-weight: 600; min-width: 130px; }
-.hb-chip { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; background: var(--hb-accent-soft); color: var(--text-normal); margin-right: 4px; }
-.hb-chip.hb-hot { background: var(--hb-accent); color: #fff; }
+/* Hireloom Second Brain — command-center skin · dark · oxblood */
+.hb-root { padding: 10px 14px; --hb-accent: #8a1c2b; --hb-accent-hi: #c0392b; --hb-accent-soft: rgba(138,28,43,.22); --hb-glow: rgba(192,57,43,.35); }
+.hb-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); align-items: center; }
+.hb-tab { padding: 5px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; color: var(--text-muted); border: 1px solid var(--background-modifier-border); transition: all .15s ease; }
+.hb-tab:hover { color: var(--text-normal); border-color: var(--hb-accent); transform: translateY(-1px); }
+.hb-tab.is-active { color: #fff; background: linear-gradient(135deg, var(--hb-accent), #5e1220); border-color: var(--hb-accent-hi); box-shadow: 0 0 14px var(--hb-glow); }
+.hb-count { opacity: .85; font-size: 10.5px; margin-left: 5px; background: rgba(255,255,255,.12); padding: 0 6px; border-radius: 8px; }
+.hb-tab:not(.is-active) .hb-count { background: var(--hb-accent-soft); }
+.hb-empty { color: var(--text-muted); font-style: italic; padding: 22px 8px; }
+.hb-meta { color: var(--text-faint); font-size: 11px; margin: 2px 0 12px; letter-spacing: .02em; }
+.hb-board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
+.hb-col { min-width: 215px; max-width: 250px; background: linear-gradient(180deg, var(--background-secondary), rgba(0,0,0,.18)); border: 1px solid var(--background-modifier-border); border-radius: 12px; padding: 9px; }
+.hb-col-h { font-weight: 700; font-size: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; color: var(--text-normal); border-bottom: 2px solid; border-image: linear-gradient(90deg, var(--hb-accent-hi), transparent) 1; padding-bottom: 5px; text-transform: uppercase; letter-spacing: .06em; }
+.hb-card { background: linear-gradient(135deg, var(--hb-accent-soft), transparent 55%), var(--background-primary); border: 1px solid var(--background-modifier-border); border-left: 3px solid var(--hb-accent-hi); border-radius: 9px; padding: 7px 9px; margin-bottom: 7px; font-size: 12px; transition: transform .12s ease, box-shadow .12s ease; }
+.hb-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.45), 0 0 10px var(--hb-glow); }
+.hb-card .hb-co { font-weight: 650; }
+.hb-card .hb-role { color: var(--text-muted); font-size: 11.5px; margin-top: 1px; }
+.hb-card .hb-sub { color: var(--text-faint); font-size: 10.5px; margin-top: 4px; display: flex; gap: 9px; }
+.hb-row { display: flex; gap: 10px; padding: 7px 6px; border-bottom: 1px solid var(--background-modifier-border); font-size: 12.5px; align-items: baseline; border-radius: 6px; transition: background .12s ease; }
+.hb-row:hover { background: var(--hb-accent-soft); }
+.hb-row .hb-co { font-weight: 650; min-width: 135px; }
+.hb-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; background: var(--hb-accent-soft); border: 1px solid var(--hb-accent); color: var(--text-normal); margin-right: 4px; }
+.hb-chip.hb-hot { background: linear-gradient(135deg, var(--hb-accent-hi), var(--hb-accent)); color: #fff; border-color: transparent; box-shadow: 0 0 8px var(--hb-glow); animation: hb-pulse 2.4s ease-in-out infinite; }
+@keyframes hb-pulse { 0%,100% { box-shadow: 0 0 6px var(--hb-glow); } 50% { box-shadow: 0 0 14px var(--hb-glow); } }
 .hb-num { color: var(--text-faint); font-size: 10.5px; }
-.hb-link { color: var(--hb-accent); }
-.hb-section-h { font-weight: 700; margin: 12px 0 4px; font-size: 13px; }
-.hb-bar { height: 8px; border-radius: 4px; background: var(--hb-accent); }
+.hb-link { color: var(--hb-accent-hi); }
+.hb-section-h { font-weight: 750; margin: 14px 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
+.hb-bar { height: 9px; border-radius: 5px; background: linear-gradient(90deg, var(--hb-accent-hi), var(--hb-accent)); box-shadow: 0 0 8px var(--hb-glow); }
 .hb-actions { margin-left: auto; display: flex; gap: 6px; }
-.hb-btn { font-size: 11px; padding: 2px 8px; border-radius: 5px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; }
-.hb-btn:hover { background: var(--hb-accent); color: #fff; }
+.hb-btn { font-size: 11px; padding: 3px 10px; border-radius: 999px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; transition: all .15s ease; }
+.hb-btn:hover { background: linear-gradient(135deg, var(--hb-accent), #5e1220); color: #fff; border-color: var(--hb-accent-hi); box-shadow: 0 0 10px var(--hb-glow); }
