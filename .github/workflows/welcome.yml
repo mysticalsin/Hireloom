@@ -8,6 +8,10 @@ on:
 
 jobs:
   welcome:
+    # first-interaction@v3 mis-detects "first": on PR events it also counts the
+    # author's prior ISSUES, so anyone who never opened an issue gets welcomed on
+    # every PR. Gate on GitHub's own author_association instead.
+    if: ${{ contains(fromJSON('["FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE"]'), github.event.pull_request.author_association || github.event.issue.author_association) }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
