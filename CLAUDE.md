@@ -351,13 +351,16 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 ## Testing
 
 ```bash
-npm test                                # 56 unit tests over wizard helpers
+npm test                                # 222 unit tests across tests/
 node --test tests/onboard.test.mjs      # run a single suite
 ```
 
-Tests cover the pure helpers in `dashboard-web/lib/`:
+Tests cover the pure helpers in `dashboard-web/lib/` and `lib/`:
 - `onboard.mjs` — `yamlQuote`, `validateOnboardPayload`, `serializeProfileYaml`, `extractProfileFromResume`, `kebabCase`
 - `path-safety.mjs` — `makeSafeResolver` (path-traversal defense for `/reports/*` and `getCompForReport`)
+- `lib/identity.mjs` — candidate identity for the renderers (`tests/identity.test.mjs`)
+- `lib/profile-check.mjs` — doctor's profile.yml content validation (`tests/profile-check.test.mjs`)
+- plus http-utils, gmail-status, error-log, backup/restore, and rate-limit/CSRF e2e suites
 
 When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [MISTAKES.md](MISTAKES.md) for the cautionary tale:
 
