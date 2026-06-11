@@ -142,8 +142,9 @@ try {
 
 if (!QUICK) {
   console.log('\n4. Dashboard build');
-  const goBuild = run('cd dashboard && go build -o /tmp/career-dashboard-test . 2>&1');
-  if (goBuild !== null) {
+  if (run('command -v go') === null) {
+    warn('Go toolchain not installed — dashboard build skipped (CI go-build job covers it)');
+  } else if (run('cd apps/tui && go build -o /tmp/career-dashboard-test . 2>&1') !== null) {
     pass('Dashboard compiles');
   } else {
     fail('Dashboard build failed');
@@ -209,7 +210,7 @@ const allowedFiles = [
   'CODE_OF_CONDUCT.md', 'GOVERNANCE.md', 'SECURITY.md', 'SUPPORT.md',
   '.github/SECURITY.md',
   // Dashboard credit string
-  'dashboard/internal/ui/screens/pipeline.go',
+  'apps/tui/internal/ui/screens/pipeline.go',
 ];
 
 // Build pathspec for git grep — only scan tracked files matching these
@@ -228,7 +229,7 @@ for (const pattern of leakPatterns) {
     for (const line of result.split('\n')) {
       const file = line.split(':')[0];
       if (allowedFiles.some(a => file.includes(a))) continue;
-      if (file.includes('dashboard/go.mod')) continue;
+      if (file.includes('apps/tui/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
       leakFound = true;
     }

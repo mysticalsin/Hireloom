@@ -56,5 +56,5 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "apps/web/server.mjs"]
 
 LABEL org.opencontainers.image.source="https://github.com/mysticalsin/Hireloom" \
-      org.opencontainers.image.description="JobSeeker · Career-Ops AI job-search dashboard" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.description="Hireloom AI job-search dashboard" \
+      org.opencontainers.image.licenses="PolyForm-Shield-1.0.0"

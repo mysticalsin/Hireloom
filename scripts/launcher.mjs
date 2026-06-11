@@ -113,7 +113,7 @@ async function main() {
 
   const url = `http://${host}:${port}`;
   console.log('\n   ╔═══════════════════════════════════════════╗');
-  console.log('   ║   JobSeeker · Career-Ops is starting…     ║');
+  console.log('   ║   Hireloom is starting…                   ║');
   console.log('   ╚═══════════════════════════════════════════╝\n');
   console.log(`   Project root: ${root}`);
   console.log(`   Dashboard:    ${url}`);

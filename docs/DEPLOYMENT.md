@@ -61,10 +61,10 @@ polling Gmail, scanning portals, and waiting for you to paste a JD.
 
 ### Linux / WSL2 — systemd
 
-A unit file ships at `scripts/packaging/career-ops.service`. Copy + edit it:
+A unit file ships at `scripts/packaging/hireloom.service`. Copy + edit it:
 
 ```bash
-sudo cp scripts/packaging/career-ops.service /etc/systemd/system/hireloom.service
+sudo cp scripts/packaging/hireloom.service /etc/systemd/system/hireloom.service
 sudoedit /etc/systemd/system/hireloom.service
 # Update User=, Group=, WorkingDirectory= to match your install
 sudo systemctl daemon-reload
@@ -80,16 +80,16 @@ The unit ships with hardening defaults (`ProtectSystem=strict`,
 
 ```bash
 # Save the plist somewhere visible
-cp scripts/packaging/com.hireloom.atelier.plist ~/Library/LaunchAgents/
+cp scripts/packaging/io.mysticalsin.hireloom.plist ~/Library/LaunchAgents/
 # Edit the WorkingDirectory + ProgramArguments paths to match your install
-$EDITOR ~/Library/LaunchAgents/com.hireloom.atelier.plist
-launchctl load ~/Library/LaunchAgents/com.hireloom.atelier.plist
+$EDITOR ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist
+launchctl load ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist
 # Watch logs
-tail -f ~/Library/Logs/hireloom.log
+tail -f ~/Library/Logs/hireloom.out.log
 ```
 
 > The launchd plist isn't shipped yet — copy + adapt the systemd template.
-> See `scripts/packaging/career-ops.service` as the reference.
+> See `scripts/packaging/hireloom.service` as the reference.
 
 ### Windows — Task Scheduler
 
