@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.0](https://github.com/mysticalsin/Hireloom/releases/tag/v2.0.0) (2026-06-11)
+
+Hireloom becomes a two-author product. This release carries the full May→June build: the license flip, the rebrand finished end-to-end, a repo restructure, the Second Brain, and a security pass that took the repo to zero open CodeQL alerts. First release cut through the repaired release pipeline.
+
+### ⚠ Breaking
+
+* **License: MIT → PolyForm Shield 1.0.0.** The engine is now source-available; you can use, modify, and share it for anything except building a competing product. All MIT-era third-party notices are retained in the LICENSE fine print — code obtained under MIT keeps its MIT grant.
+* **npm package renamed `career-ops` → `hireloom`.** The `hireloom` bin is canonical; `career-ops` remains as a backwards-compat bin alias, and the `/career-ops` slash commands keep their names.
+* **Repo restructured:** engine scripts now live under `engine/{scan,apply,render,tracker,lib,batch}/`, dashboards under `apps/{web,tui}/`, packaging under `scripts/`, loose docs under `docs/`. `npm run` aliases are unchanged.
+* **Docker service + container renamed `career-ops` → `hireloom`** (compose, hardened overlay, Makefile targets). Run `docker compose down` with the old file before pulling, or the old container lingers.
+* **Release artifacts renamed:** `hireloom.exe` / `hireloom-macos` / `hireloom-linux`, source tarball `hireloom-vX.Y.Z.tar.gz`, systemd unit `scripts/packaging/hireloom.service`.
+
+### Features
+
+* **Second Brain** — an agent-built Obsidian command center over your live pipeline: applications kanban, apply queue, follow-up radar, upcoming interviews, spend card, ask-bar, and a morning digest — zero new data entry. Build spec at `second-brain/BUILD-SPEC.md`; trigger with "set up my second brain" or `/second-brain`.
+* **Personal memory system** — shippable machinery for persistent agent memory across sessions (`CLAUDE.local.md` profile, `WORKING.md` live state, `career-log.md` history, `TOOLKIT.md` map) with `goodnight`/`morning` checkpoint protocols. All user content stays local and gitignored.
+* **Contribution change-log convention** — the agent records every project-affecting change (with root cause and an `Upstream:` flag) into a `BUILD-CHANGELOG.md` the user can submit as their entire contribution; maintainers ingest it with `/review-contribution`.
+* **Identity externalization** — `engine/lib/identity.mjs` feeds candidate name/contact/education to every renderer from `config/profile.yml`; no PII is hardcoded in any engine script.
+* **Consent-gated auto-application doctrine** — automation runs only on roles the user selected, after dry runs they watched and approved; assisted flows still hard-stop before Submit.
+* **Hireloom TRADEMARK.md** and fully rebranded community files (Code of Conduct, Governance, Security, Support, Contributing — now changelog-first).
+
+### Fixed
+
+* **Release pipeline repaired end-to-end:** workflow and publish script expected `dist/career-ops(.exe)` while the builder emits `dist/hireloom(.exe)` — a tag push would have failed; the EXE smoke-test grepped for a banner the launcher no longer prints; `start.bat`/`stop.bat` looked for the compose file in the wrong directory.
+* **Production install crasher** — `js-yaml` was dev-classed and missing from clean installs.
+* **Tracker merge silently no-opping** since the repo reorg (`ADDITIONS_DIR` pointed at the old path); Second Brain queue card schema drift.
+* **Welcome bot greeted every PR** as a first contribution — now gated on `author_association`.
+* **Parallel test port collisions** — test servers boot with `PORT=0` (OS-assigned).
+* **Doctor** now validates the `profile.yml` cv block and Second Brain prerequisites (`engine/lib/profile-check.mjs`, unit-tested).
+* `engine/test-all.mjs` dashboard build check pointed at the pre-reorg `dashboard/` path and hard-failed without a Go toolchain.
+
+### Security
+
+* **Zero open CodeQL alerts** — 9 findings fixed: spoofable substring URL routing, unescaped selector injection, path traversal, and strip-server filename taint (filenames now originate from the directory listing, not the URL).
+* OCI image license labels corrected to `PolyForm-Shield-1.0.0`.
+
 ## [1.8.0](https://github.com/mysticalsin/Hireloom/compare/career-ops-v1.7.0...career-ops-v1.8.0) (2026-05-08)
 
 ### Brand

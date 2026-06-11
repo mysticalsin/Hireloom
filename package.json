@@ -1,6 +1,6 @@
 {
   "name": "hireloom",
-  "version": "1.8.0",
+  "version": "2.0.0",
   "description": "Hireloom — Your AI-Powered Career Accelerator. Scores, weaves, and queues senior-level job offers quietly and deliberately, never spammy.",
   "type": "module",
   "engines": {
