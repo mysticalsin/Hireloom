@@ -138,6 +138,11 @@ E/
 
 # Obsidian vault (this project doubles as an Obsidian vault; per-machine settings)
 .obsidian/
+# Obsidian scratch artifacts — daily notes at root, canvases, bases
+/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+*.canvas
+*.base
+Untitled*.md
 
 # --- Migration / git-readiness hardening (2026-06-10) ---
 # Persistent browser profiles — contain live login/session cookies, NEVER commit

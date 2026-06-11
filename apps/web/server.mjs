@@ -81,7 +81,7 @@ function detectAts(rawUrl) {
 // keeps the hot path zero-IO. Each asset has its own ETag so browsers can
 // 304 cleanly.
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '2.0.0';
 
 const ASSETS_DIR = path.join(__dir, 'assets');
 
