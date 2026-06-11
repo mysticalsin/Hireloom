@@ -202,3 +202,9 @@ _agent_state/
 # Backup artifacts must never enter the repo (tracker/profile backups)
 *.bak
 *.bak.*
+
+# Second Brain — per-user build outputs (spec: "What ships vs what stays local")
+.obsidian/
+_brain_api/
+_brain_index/
+_agent_state/
