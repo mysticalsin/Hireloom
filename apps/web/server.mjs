@@ -851,7 +851,10 @@ async function scanGmailInbox() {
       snippet: snippet.substring(0, 200),
       from: from.substring(0, 80),
       date,
-      suggestedStatus: signal.type === 'interview' ? 'Interview' : signal.type === 'rejected' ? 'Rejected' : signal.type === 'verification' ? null : 'Responded',
+      // 'received' = auto-ack ("we got your application") — that is NOT a
+      // response, so no status suggestion; the row stays Applied. Only a
+      // genuine human/interview/rejection signal earns a "Mark as" button.
+      suggestedStatus: signal.type === 'interview' ? 'Interview' : signal.type === 'rejected' ? 'Rejected' : signal.type === 'received' || signal.type === 'verification' ? null : 'Responded',
       dismissed: false,
     };
     signals.push(signalObj);
