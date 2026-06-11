@@ -25,4 +25,4 @@
 - [ ] My changes align with the [project roadmap](https://github.com/mysticalsin/Hireloom/discussions/156)
 
 ---
-Questions? [Join the Discord](https://discord.gg/8pRpHETxa4) for faster feedback.
+Questions? [Join the Discord](https://discord.gg/3jEjwygjNG) for faster feedback.

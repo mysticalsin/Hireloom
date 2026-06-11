@@ -284,7 +284,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 - **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `GOVERNANCE.md`)
 - **Security**: private vulnerability reporting via email (see `SECURITY.md`)
 - **Support**: help questions go to Discord/Discussions, not issues (see `SUPPORT.md`)
-- **Discord**: https://discord.gg/8pRpHETxa4
+- **Discord**: https://discord.gg/3jEjwygjNG
 
 ## Stack and Conventions
 

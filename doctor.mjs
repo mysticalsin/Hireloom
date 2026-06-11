@@ -251,12 +251,12 @@ async function main() {
   } else if (warnings > 0) {
     console.log(`Result: All required checks passed (${warnings} optional warning${warnings === 1 ? '' : 's'} above). Run \`claude\` to start.`);
     console.log('');
-    console.log('Join the community: https://discord.gg/8pRpHETxa4');
+    console.log('Join the community: https://discord.gg/3jEjwygjNG');
     process.exit(0);
   } else {
     console.log('Result: All checks passed. You\'re ready to go! Run `claude` to start.');
     console.log('');
-    console.log('Join the community: https://discord.gg/8pRpHETxa4');
+    console.log('Join the community: https://discord.gg/3jEjwygjNG');
     process.exit(0);
   }
 }
