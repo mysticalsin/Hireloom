@@ -76,6 +76,13 @@ if the machine is always-on; otherwise document the manual command.
 
 ## Phase 2 — Plugin core + dashboard tabs
 
+**First-open ordering (user-test finding):** never auto-launch with an
+`obsidian://open?path=...` deep-link before the folder is a registered
+vault — Obsidian throws "Vault not found." The user does the one-time
+manual step first (Obsidian → "Open folder as vault" → the Hireloom
+folder, then "Trust author and enable plugins"); deep-links work forever
+after that registration.
+
 Standard Obsidian community plugin: `manifest.json` + `main.js` (esbuild from
 `src/` — Node is guaranteed). A dashboard view with tabs, a memoized data
 layer over `_brain_api/` + direct file reads, debounced re-render on vault
