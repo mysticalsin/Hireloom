@@ -1133,6 +1133,32 @@ describe('buildGmailStatus', () => {
     assert.equal(s.hasTokens, false);
   });
 
+  test('reports refreshFailed when tokens carry a refresh failure marker', () => {
+    // refreshAccessToken stamps refresh_failed on a 4xx from the token
+    // endpoint (rotated OAuth client → invalid_grant forever). The UI uses
+    // this to show "Reconnect Gmail" instead of a fake connected state.
+    const s = buildGmailStatus(baseInput({
+      tokens: { refresh_token: 'r', expiry: 1000, refresh_failed: { at: 999, error: 'invalid_grant' } },
+      now: 2000,
+    }));
+    assert.equal(s.hasTokens, true);
+    assert.equal(s.refreshFailed, true);
+    assert.equal(s.refreshError, 'invalid_grant');
+  });
+
+  test('refreshFailed is false for healthy tokens and null without tokens', () => {
+    const healthy = buildGmailStatus(baseInput({
+      tokens: { refresh_token: 'r', expiry: 2000 },
+      now: 1000,
+    }));
+    assert.equal(healthy.refreshFailed, false);
+    assert.equal(healthy.refreshError, null);
+
+    const none = buildGmailStatus(baseInput());
+    assert.equal(none.refreshFailed, null);
+    assert.equal(none.refreshError, null);
+  });
+
   test('counts cached signals split into total + active', () => {
     const cache = {
       signals: [

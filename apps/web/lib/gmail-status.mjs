@@ -41,6 +41,13 @@ export function buildGmailStatus({
   const tokenExpiresIn = hasTokens && tokens.expiry
     ? Math.max(0, Math.floor((tokens.expiry - t) / 1000))
     : null;
+  // Set by refreshAccessToken when the token endpoint 4xx'd (invalid_grant —
+  // typically a rotated OAuth client). Means the saved tokens can never
+  // refresh again and the user must re-authorize via /auth/gmail.
+  const refreshFailed = hasTokens ? Boolean(tokens.refresh_failed) : null;
+  const refreshError = hasTokens && tokens.refresh_failed
+    ? (tokens.refresh_failed.error || 'unknown')
+    : null;
   const signals = (cache && Array.isArray(cache.signals)) ? cache.signals : [];
   const missingEnv = [
     hasClientId ? null : 'GMAIL_CLIENT_ID',
@@ -53,6 +60,8 @@ export function buildGmailStatus({
     hasTokens,
     tokenExpired,
     tokenExpiresIn,
+    refreshFailed,
+    refreshError,
     polling: Boolean(polling),
     fastPolling: Boolean(fastPolling),
     scope: scope || '',

@@ -8,7 +8,7 @@
 
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice } = require('obsidian');
 
-const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.5';
+const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.6';
 const VIEW_TYPE = 'hireloom-brain-view';
 const API_DIR = '_brain_api';
 
@@ -118,16 +118,18 @@ const RENDERERS = {
 
     // 🔥 Needs you now — overdue follow-ups
     const cn = card('orange', '🔥 Needs you now');
+    // urgent first (Gmail next-step flags), then oldest cadence-overdue
     const overdue = ((f && f.entries) || []).filter((e) => /overdue|urgent/i.test(e.urgency || ''))
-      .sort((a, b) => (b.daysSinceApplication || 0) - (a.daysSinceApplication || 0));
+      .sort((a, b) => ((a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1))
+        || ((b.daysSinceApplication || 0) - (a.daysSinceApplication || 0)));
     if (overdue.length === 0) cn.createDiv({ cls: 'hb-empty', text: EMPTY.radar });
     else {
-      cn.createDiv({ cls: 'hb-big', text: String((f.metadata && f.metadata.overdue) || overdue.length) });
-      cn.createDiv({ cls: 'hb-big-sub', text: 'follow-ups overdue' });
+      cn.createDiv({ cls: 'hb-big', text: String(overdue.length) });
+      cn.createDiv({ cls: 'hb-big-sub', text: 'follow-ups need you' });
       overdue.slice(0, 5).forEach((e) => {
         const l = cn.createDiv({ cls: 'hb-line' });
         l.createSpan({ cls: 'hb-co', text: e.company });
-        l.createSpan({ cls: 'hb-num', text: `${e.daysSinceApplication}d` });
+        l.createSpan({ cls: 'hb-num', text: e.nextStepEmail ? '✉ next step?' : `${e.daysSinceApplication}d` });
       });
     }
 
@@ -245,10 +247,12 @@ const RENDERERS = {
       .slice(0, 40)
       .forEach((e) => {
         const row = el.createDiv({ cls: 'hb-row' });
-        row.createSpan({ cls: `hb-chip${/overdue|urgent/i.test(e.urgency) ? ' hb-hot' : ''}`, text: e.urgency });
+        row.createSpan({ cls: `hb-chip${/overdue|urgent/i.test(e.urgency) ? ' hb-hot' : ''}`, text: e.nextStepEmail ? 'next step?' : e.urgency });
         row.createSpan({ cls: 'hb-co', text: e.company });
         row.createSpan({ text: e.role });
-        row.createSpan({ cls: 'hb-num', text: `${e.daysSinceApplication}d since apply · follow-ups: ${e.followupCount}${e.nextFollowupDate ? ` · next ${e.nextFollowupDate}` : ''}` });
+        row.createSpan({ cls: 'hb-num', text: e.nextStepEmail
+          ? `✉ “${(e.nextStepEmail.subject || '').slice(0, 60)}” — check the email`
+          : `${e.daysSinceApplication}d since apply · follow-ups: ${e.followupCount}${e.nextFollowupDate ? ` · next ${e.nextFollowupDate}` : ''}` });
       });
   },
 

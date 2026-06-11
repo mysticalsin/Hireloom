@@ -22,6 +22,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/node</string>
+        <string>--env-file-if-exists=.env</string>
         <string>/Users/REPLACE_USER/Hireloom/apps/web/server.mjs</string>
     </array>
 
