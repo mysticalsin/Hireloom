@@ -4793,6 +4793,15 @@ const HTML = /* html */ `<!DOCTYPE html>
       </div>
       <input class="wiz-input" id="wiz-linkedin" placeholder="LinkedIn URL or handle (linkedin.com/in/…)" aria-label="LinkedIn URL or handle" style="margin-bottom:8px">
       <input class="wiz-input" id="wiz-headline" placeholder="One-line headline (e.g. 'Strategic operator turning AI into shipped systems')" aria-label="Professional headline">
+      <span class="wiz-label" style="margin-top:12px">Education &amp; certifications — printed on every generated CV</span>
+      <div class="wiz-row" style="margin:4px 0 6px">
+        <input class="wiz-input" id="wiz-edu-degree" placeholder="Degree (e.g. BSc, Computer Science)" aria-label="Degree">
+        <input class="wiz-input" id="wiz-edu-org" placeholder="School (e.g. University of Toronto)" aria-label="School or institution">
+      </div>
+      <div class="wiz-row">
+        <input class="wiz-input" id="wiz-edu-date" placeholder="Dates (e.g. 2014 – 2018)" aria-label="Education dates">
+        <input class="wiz-input" id="wiz-certs" placeholder="Certifications, comma-separated (e.g. PMP — PMI, CSM)" aria-label="Certifications, comma-separated">
+      </div>
     </div>
 
     <!-- Step 3: Target roles + comp -->
@@ -5942,6 +5951,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       step: 1,
       extracted: null,
       basics: { full_name: '', email: '', phone: '', location: '', linkedin: '', headline: '' },
+      cv: { edu_degree: '', edu_org: '', edu_date: '', certs: '' },
       roles: { selected: new Set(), custom: [], comp_target: '', comp_min: '', comp_currency: 'USD', location_pref: '' },
       dealbreakers: { selected: new Set(), custom: [] },
       // Work authorization — every US/CA/EU application asks both questions.
@@ -6126,6 +6136,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       step: draft.step || 1,
       extracted: draft.extracted || null,
       basics: { ...defaultWizState().basics, ...(draft.basics || {}) },
+      cv: { ...defaultWizState().cv, ...(draft.cv || {}) },
       roles: { ...defaultWizState().roles, ...(draft.roles || {}), selected: new Set(draft.roles?.selected || []) },
       dealbreakers: { ...defaultWizState().dealbreakers, ...(draft.dealbreakers || {}), selected: new Set(draft.dealbreakers?.selected || []) },
       work_authorization: { ...defaultWizState().work_authorization, ...(draft.work_authorization || {}) },
@@ -6139,6 +6150,10 @@ const HTML = /* html */ `<!DOCTYPE html>
     setVal('wiz-location',  window.wizState.basics.location);
     setVal('wiz-linkedin',  window.wizState.basics.linkedin);
     setVal('wiz-headline',  window.wizState.basics.headline);
+    setVal('wiz-edu-degree', window.wizState.cv.edu_degree);
+    setVal('wiz-edu-org',    window.wizState.cv.edu_org);
+    setVal('wiz-edu-date',   window.wizState.cv.edu_date);
+    setVal('wiz-certs',      window.wizState.cv.certs);
     setVal('wiz-comp-target',   window.wizState.roles.comp_target);
     setVal('wiz-comp-min',      window.wizState.roles.comp_min);
     setVal('wiz-comp-currency', window.wizState.roles.comp_currency);
@@ -6319,6 +6334,13 @@ const HTML = /* html */ `<!DOCTYPE html>
       setIfExtracted('wiz-location',  p.location);
       setIfExtracted('wiz-linkedin',  p.linkedin);
       setIfExtracted('wiz-headline',  p.headline);
+      const edu0 = (p.education && p.education[0]) || {};
+      setIfExtracted('wiz-edu-degree', edu0.degree);
+      setIfExtracted('wiz-edu-org',    edu0.org);
+      setIfExtracted('wiz-edu-date',   edu0.date);
+      if (Array.isArray(p.certifications) && p.certifications.length) {
+        setIfExtracted('wiz-certs', p.certifications.map(c => c.org ? c.title + ' — ' + c.org : c.title).join(', '));
+      }
       // Empty-state messaging: if we couldn't auto-detect anything, tell the
       // user upfront so they don't think the wizard is broken.
       if ((data.extractedCount || 0) === 0) {
@@ -6379,6 +6401,11 @@ const HTML = /* html */ `<!DOCTYPE html>
     b.location  = v('wiz-location');
     b.linkedin  = v('wiz-linkedin');
     b.headline  = v('wiz-headline');
+    const cv = window.wizState.cv;
+    cv.edu_degree = v('wiz-edu-degree');
+    cv.edu_org    = v('wiz-edu-org');
+    cv.edu_date   = v('wiz-edu-date');
+    cv.certs      = v('wiz-certs');
     const nameOk  = wizValidateField('wiz-full-name');
     const emailOk = wizValidateField('wiz-email');
     if (!nameOk || !emailOk) {
@@ -6569,6 +6596,14 @@ const HTML = /* html */ `<!DOCTYPE html>
       deal_breakers: [...window.wizState.dealbreakers.selected],
       work_authorization: window.wizState.work_authorization,
       narrative: window.wizState.narrative,
+      cv: (() => {
+        const c = window.wizState.cv || {};
+        const education = (c.edu_degree || c.edu_org)
+          ? [{ degree: c.edu_degree || '', org: c.edu_org || '', date: c.edu_date || '' }] : [];
+        const certifications = (c.certs || '').split(/[,\\n]/).map(s => s.trim()).filter(Boolean)
+          .map(s => { const m = s.split(/\\s+[—–-]\\s+/); return { title: m[0], org: m.slice(1).join(' — ') }; });
+        return { education, certifications };
+      })(),
     };
     try {
       const res = await fetch('/api/onboard/finalize', {
@@ -7912,7 +7947,8 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
       const extractedCount =
         (profile.full_name ? 1 : 0) + (profile.email ? 1 : 0) +
         (profile.phone ? 1 : 0) + (profile.linkedin ? 1 : 0) +
-        (profile.location ? 1 : 0) + (profile.headline ? 1 : 0);
+        (profile.location ? 1 : 0) + (profile.headline ? 1 : 0) +
+        (profile.education?.length ? 1 : 0) + (profile.certifications?.length ? 1 : 0);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, profile, extractedCount }));

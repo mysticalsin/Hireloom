@@ -130,6 +130,38 @@ export function serializeProfileYaml(p) {
     if (x) out.push(`    - ${yamlQuote(x)}`);
   }
   out.push('');
+
+  // CV rendering identity (read by lib/identity.mjs → all CV/cover renderers).
+  // Education + certifications are rendered on every generated CV; without
+  // them a new user's first render ships an empty Education section.
+  const cv = (p && p.cv) || {};
+  const edu = (Array.isArray(cv.education) ? cv.education : []).filter(e => e && (e.degree || e.org));
+  const certs = (Array.isArray(cv.certifications) ? cv.certifications : []).filter(c => c && c.title);
+  out.push('# CV rendering identity (lib/identity.mjs): the education and certification');
+  out.push('# blocks printed on every generated resume. Optional display overrides:');
+  out.push('# contact_location / contact_linkedin / experience_order — see');
+  out.push('# config/profile.example.yml for the full reference.');
+  out.push('cv:');
+  if (edu.length) {
+    out.push('  education:');
+    for (const e of edu) {
+      out.push(`    - degree: ${yamlQuote(e.degree || '')}`);
+      out.push(`      org: ${yamlQuote(e.org || '')}`);
+      out.push(`      date: ${yamlQuote(e.date || '')}`);
+    }
+  } else {
+    out.push('  education: []');
+  }
+  if (certs.length) {
+    out.push('  certifications:');
+    for (const c of certs) {
+      out.push(`    - title: ${yamlQuote(c.title || '')}`);
+      out.push(`      org: ${yamlQuote(c.org || '')}`);
+    }
+  } else {
+    out.push('  certifications: []');
+  }
+  out.push('');
   return out.join('\n');
 }
 
@@ -197,6 +229,27 @@ export function validateOnboardPayload(p) {
       errors.push('resume_facts.preserved_school invalid');
     }
   }
+  if (p.cv != null && typeof p.cv === 'object') {
+    const cv = p.cv;
+    if (cv.education != null && !Array.isArray(cv.education)) errors.push('cv.education must be array');
+    else if (Array.isArray(cv.education)) {
+      if (cv.education.length > 10) errors.push('cv.education too many entries');
+      for (const e of cv.education) {
+        for (const k of ['degree', 'org', 'date']) {
+          if (e && e[k] != null && (typeof e[k] !== 'string' || e[k].length > 300)) { errors.push(`cv.education.${k} invalid`); break; }
+        }
+      }
+    }
+    if (cv.certifications != null && !Array.isArray(cv.certifications)) errors.push('cv.certifications must be array');
+    else if (Array.isArray(cv.certifications)) {
+      if (cv.certifications.length > 20) errors.push('cv.certifications too many entries');
+      for (const c of cv.certifications) {
+        for (const k of ['title', 'org']) {
+          if (c && c[k] != null && (typeof c[k] !== 'string' || c[k].length > 300)) { errors.push(`cv.certifications.${k} invalid`); break; }
+        }
+      }
+    }
+  }
   return errors;
 }
 
@@ -204,7 +257,7 @@ export function validateOnboardPayload(p) {
 // Pulled out of /api/onboard so we can unit-test the heuristics without HTTP.
 
 export function extractProfileFromResume(text) {
-  const out = { full_name: '', email: '', phone: '', linkedin: '', location: '', headline: '' };
+  const out = { full_name: '', email: '', phone: '', linkedin: '', location: '', headline: '', education: [], certifications: [] };
   if (!text || typeof text !== 'string') return out;
 
   const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
@@ -248,6 +301,58 @@ export function extractProfileFromResume(text) {
       if (m) { out.location = seg; break; }
     }
     if (out.location) break;
+  }
+
+  // Education + certifications: walk the named sections. A "section header" is
+  // a short line that is (or starts with) the section word — markdown #'s,
+  // ALL-CAPS, or plain. The section ends at the next header-looking line.
+  const sectionLines = (name) => {
+    const re = new RegExp(`^#*\\s*${name}\\b[\\s:]*$`, 'i');
+    // ALL-CAPS header detection must be case-SENSITIVE — under /i it would
+    // swallow any short mixed-case line ("Master of Business Administration").
+    const capsHeader = /^[A-Z][A-Z &/]{3,40}$/;
+    const namedHeader = /^#{1,3}\s+\S|^(education|experience|work experience|employment|skills|projects|certifications?|licenses|summary|profile|awards|publications|languages|interests)\b[\s:]*$/i;
+    const start = lines.findIndex(l => re.test(l.replace(/\*+/g, '').trim()));
+    if (start === -1) return [];
+    const got = [];
+    for (const raw of lines.slice(start + 1)) {
+      const l = raw.replace(/\*+/g, '').trim();
+      if (capsHeader.test(l) || namedHeader.test(l)) break;
+      if (l) got.push(l.replace(/^[-•▪]\s*/, ''));
+      if (got.length >= 12) break;
+    }
+    return got;
+  };
+
+  // Education: pair a degree-looking line with the org/date around it.
+  const degreeRe = /\b(B\.?\s?(Sc|S|A|Eng|Com)|M\.?\s?(Sc|S|A|BA|Eng)|MBA|Ph\.?D|Bachelor|Master|Doctor|Diploma|Associate)\b/i;
+  const dateRe = /((19|20)\d{2})\s*[–—-]\s*((19|20)\d{2}|present)|\b(19|20)\d{2}\b/i;
+  const eduLines = sectionLines('education');
+  for (let i = 0; i < eduLines.length && out.education.length < 3; i++) {
+    if (!degreeRe.test(eduLines[i])) continue;
+    // formats: "Degree — Org (dates)" on one line, or degree line followed by org line
+    const line = eduLines[i];
+    const entry = { degree: '', org: '', date: '' };
+    const dm = line.match(dateRe);
+    if (dm) entry.date = dm[0];
+    const parts = line.replace(dateRe, '').split(/\s+[–—|·]\s+|,\s+(?=[A-Z])/).map(s => s.trim().replace(/[()]/g, '')).filter(Boolean);
+    entry.degree = parts[0] || line;
+    if (parts.length > 1) entry.org = parts.slice(1).join(', ');
+    else if (eduLines[i + 1] && !degreeRe.test(eduLines[i + 1])) {
+      const next = eduLines[i + 1];
+      const ndm = next.match(dateRe);
+      if (ndm && !entry.date) entry.date = ndm[0];
+      entry.org = next.replace(dateRe, '').replace(/\s+[–—|·]\s*$/, '').trim();
+      i++;
+    }
+    out.education.push(entry);
+  }
+
+  // Certifications: each non-empty section line is one cert; split "Title — Org".
+  for (const l of sectionLines('certifications?|licenses( & certifications)?')) {
+    if (out.certifications.length >= 8) break;
+    const parts = l.split(/\s+[–—|·]\s+|,\s+(?=[A-Z][a-z])/).map(s => s.trim()).filter(Boolean);
+    out.certifications.push({ title: parts[0] || l, org: parts.slice(1).join(', ') });
   }
 
   return out;
