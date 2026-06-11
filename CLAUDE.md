@@ -10,9 +10,7 @@ don't break, but everything human-facing reads as Hireloom.
 
 ## Origin
 
-The engine was built and used by [santifer](https://santifer.io) to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. The archetypes, scoring logic, negotiation scripts, and proof point structure all reflect his specific career search in AI/automation roles.
-
-The portfolio that goes with this system is also open source: [cv-santiago](https://github.com/santifer/cv-santiago).
+The engine was battle-tested in a real career search: 740+ job offers evaluated, 100+ tailored CVs generated, and a Head of Applied AI role landed. The archetypes, scoring logic, negotiation scripts, and proof point structure all reflect that original search in AI/automation roles.
 
 **It will work out of the box, but it's designed to be made yours.** If the archetypes don't match your career, the modes are in the wrong language, or the scoring doesn't fit your priorities -- just ask. You (AI Agent) can edit the user's files. The user says "change the archetypes to data engineering roles" and you do it. That's the whole point.
 
@@ -176,7 +174,7 @@ Once all files exist, confirm:
 >
 > Everything is customizable — just ask me to change anything.
 >
-> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, the author's portfolio is also open source: github.com/santifer/cv-santiago — feel free to fork it and make it yours."
+> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, consider building a simple portfolio site and linking it in your profile."
 
 Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
@@ -378,6 +376,26 @@ The `⊕ Profile` button opens a 6-step wizard (`dashboard-web/server.mjs` → `
 6. **Review** — structured summary, one CTA writes `config/profile.yml` (snapshot to `.bak.{timestamp}` first; rotation keeps newest 10) and kicks off CV PDF generation in the background.
 
 Detect-existing-profile: `/api/onboard/profile-summary` is fetched on open; if a substantive profile exists, a banner warns the user that re-running will overwrite (with backup). Empty-state banner appears when extraction yields < 3 fields. A11y: `role=dialog`, `aria-modal`, `aria-labelledby`, focus trap, Escape closes, Enter advances, chips carry `aria-pressed` and activate on Enter/Space.
+
+---
+
+# Second Brain (optional built-in feature)
+
+Hireloom includes an agent-built **Second Brain**: live Obsidian dashboards
+over the user's real pipeline — applications kanban, apply queue, follow-up
+radar, upcoming interviews — with zero new data entry. The complete build
+instruction set is `second-brain/BUILD-SPEC.md`.
+
+**Trigger:** the user says "set up my second brain", "build the dashboard",
+mentions Obsidian dashboards, or invokes `/second-brain` → follow
+`.claude/commands/second-brain.md`, which reads `second-brain/BUILD-SPEC.md`
+(self-contained: design laws, phases, the tab-binding contract, self-test).
+Phase 0 derives the user's profile from `config/profile.yml` and
+`templates/states.yml` — only four taste/hardware questions get asked.
+
+The spec is system layer; everything the build GENERATES for the user
+(`BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, the built
+plugin, `.obsidian/`) is user layer and gitignored.
 
 ---
 

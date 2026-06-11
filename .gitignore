@@ -190,3 +190,11 @@ batch/indeed-covers.mjs
 batch/build-pool-packages.mjs
 batch/build-indeed-packages.mjs
 batch/tailor-pool.mjs
+
+# Second-brain user-layer artifacts (the build spec in second-brain/ ships;
+# everything the build generates per-user stays local)
+BUILD-PROFILE.md
+BUILD-LOG.md
+_brain_index/
+_brain_api/
+_agent_state/

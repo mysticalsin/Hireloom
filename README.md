@@ -5,7 +5,7 @@
 [English](README.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [Русский](README.ru.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Hireloom — Career Atelier · Multi-Agent Job Search System" width="800"></a>
+  <a href="https://github.com/mysticalsin"><img src="docs/hero-banner.jpg" alt="Hireloom — Career Atelier · Multi-Agent Job Search System" width="800"></a>
 </p>
 
 <p align="center">
@@ -59,7 +59,7 @@ Hireloom is agentic: Claude Code navigates career pages with Playwright, evaluat
 
 > **Heads up: the first evaluations won't be great.** The system doesn't know you yet. Feed it context -- your CV, your career story, your proof points, your preferences, what you're good at, what you want to avoid. The more you nurture it, the better it gets. Think of it as onboarding a new recruiter: the first week they need to learn about you, then they become invaluable.
 
-Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. [Read the full case study](https://santifer.io/career-ops-system).
+Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role.
 
 ## Features
 
@@ -75,6 +75,7 @@ Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored
 | **Dashboard TUI** | Terminal UI to browse, filter, and sort your pipeline |
 | **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
 | **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
+| **Second Brain (optional)** | Say "set up my second brain" and your agent builds live dashboards over your pipeline inside [Obsidian](https://obsidian.md) (free) — what's hot, who's going cold, what's next. No new data entry; it visualizes what Hireloom already tracks. See `second-brain/`. |
 
 ## Requirements — what you need before installing
 
@@ -110,7 +111,7 @@ Pick the path that matches your machine — both end on the **same 6-step onboar
 ### macOS / Linux / WSL
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops
 bash install.sh                  # interactive: docker | local | doctor
 ```
@@ -127,7 +128,7 @@ bash install.sh --doctor         # diagnose without installing
 ### Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops
 .\install.ps1                    # interactive
 # or: .\install.ps1 -Mode docker
@@ -149,7 +150,7 @@ make doctor     # environment diagnostic
 ### One-line bootstrap
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/santifer/career-ops/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mysticalsin/Hireloom/main/install.sh | bash
 ```
 
 > **What happens on first launch:** Open the URL the installer prints, click **⊕ Profile** (or press `⌘ ,`), drop your resume in. The wizard reads it, asks the few things it can't infer (target roles, comp, deal-breakers, narrative), then renders your tailored CV PDF and arms the pipeline. ~2 min, end-to-end.
@@ -157,7 +158,7 @@ curl -fsSL https://raw.githubusercontent.com/santifer/career-ops/main/install.sh
 ### Auto-start on boot (optional)
 
 - **Linux** — `sudo cp packaging/career-ops.service /etc/systemd/system/ && sudo systemctl enable --now career-ops`
-- **macOS** — `cp packaging/io.santifer.career-ops.plist ~/Library/LaunchAgents/ && launchctl load -w ~/Library/LaunchAgents/io.santifer.career-ops.plist` (edit the user/path placeholders first)
+- **macOS** — `cp packaging/io.mysticalsin.hireloom.plist ~/Library/LaunchAgents/ && launchctl load -w ~/Library/LaunchAgents/io.mysticalsin.hireloom.plist` (edit the user/path placeholders first)
 - **Docker** — already restarts unless stopped (`restart: unless-stopped`)
 
 See [docs/SETUP.md](docs/SETUP.md) for the full setup guide and customization options.
@@ -165,7 +166,7 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide and customization op
 ## Manual install (if you want to skip the script)
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/mysticalsin/Hireloom.git
 cd career-ops
 cp .env.example .env             # add ANTHROPIC_API_KEY, optional GMAIL_*
 npm install
@@ -292,25 +293,20 @@ career-ops/
 - **Dashboard**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha theme)
 - **Data**: Markdown tables + YAML config + TSV batch files
 
-## Also Open Source
-
-- **[cv-santiago](https://github.com/santifer/cv-santiago)** -- The portfolio website (santifer.io) with AI chatbot, LLMOps dashboard, and case studies. If you need a portfolio to showcase alongside your job search, fork it and make it yours.
-
 ## About the Author
 
-I'm Santiago -- Head of Applied AI, former founder (built and sold a business that still runs with my name on it). I built career-ops to manage my own job search. It worked: I used it to land my current role.
+Hireloom is maintained by [mysticalsin](https://github.com/mysticalsin).
 
-My portfolio and other open source projects → [santifer.io](https://santifer.io)
+My portfolio and other open source projects → [github.com/mysticalsin](https://github.com/mysticalsin)
 
-☕ [Buy me a coffee](https://buymeacoffee.com/santifer) if career-ops helped your job search.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
+<a href="https://www.star-history.com/?repos=mysticalsin%2FHireloom&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mysticalsin/Hireloom&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -327,11 +323,11 @@ See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software i
 
 ## Contributors
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/mysticalsin/Hireloom/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=mysticalsin/Hireloom" />
 </a>
 
-Got hired using career-ops? [Share your story!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Got hired using career-ops? [Share your story!](https://github.com/mysticalsin/Hireloom/issues/new?template=i-got-hired.yml)
 
 ## License
 
@@ -339,9 +335,8 @@ MIT
 
 ## Let's Connect
 
-[![Website](https://img.shields.io/badge/santifer.io-000?style=for-the-badge&logo=safari&logoColor=white)](https://santifer.io)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/santifer)
-[![X](https://img.shields.io/badge/X-000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/santifer)
+[![Website](https://img.shields.io/badge/github.com/mysticalsin-000?style=for-the-badge&logo=safari&logoColor=white)](https://github.com/mysticalsin)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://github.com/mysticalsin)
+[![X](https://img.shields.io/badge/X-000?style=for-the-badge&logo=x&logoColor=white)](https://github.com/mysticalsin)
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/8pRpHETxa4)
-[![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:hi@santifer.io)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/santifer)
+[![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:github.com/mysticalsin (GitHub))
