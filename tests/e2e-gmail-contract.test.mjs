@@ -130,6 +130,7 @@ test('Gmail OAuth contract', async (t) => {
     }, {
       seedData: {
         'gmail-cache.json': {
+          v: 2, // current cache schema — v1 caches are wiped on load (see below)
           scanned_at: Date.now() - 60_000,
           signals: [
             { id: '1', type: 'response', dismissed: false },
@@ -146,6 +147,29 @@ test('Gmail OAuth contract', async (t) => {
     assert.equal(json.cachedSignalCount, 3);
     assert.equal(json.activeSignalCount, 2);
     assert.ok(json.lastScannedAt > 0);
+  });
+
+  await t.test('legacy (v1) cache is wiped on load — the next scan reclassifies', async () => {
+    // Pre-role-index signals lack extractedRole/pool matching and would be
+    // carried verbatim forever; the v2 migration drops them once, safely
+    // (autoApplied statuses already live in the tracker, so re-scans file
+    // the same mail quietly instead of re-writing).
+    const srv = await bootServer({
+      GMAIL_CLIENT_ID: 'fake-client-id.apps.googleusercontent.com',
+      GMAIL_CLIENT_SECRET: 'GOCSPX-fakeSecretForTest',
+    }, {
+      seedData: {
+        'gmail-cache.json': {
+          scanned_at: Date.now() - 60_000,
+          signals: [{ id: '1', type: 'response', dismissed: false }],
+        },
+      },
+    });
+    t.after(srv.cleanup);
+
+    const r = await fetchPort(srv.port, '/api/gmail/status');
+    const json = JSON.parse(r.body.toString());
+    assert.equal(json.cachedSignalCount, 0);
   });
 
   await t.test('GET /api/gmail/disconnect → 404 (POST-only route)', async () => {

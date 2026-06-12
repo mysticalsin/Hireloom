@@ -187,3 +187,98 @@ test('no title named: prefers a row still in play over a closed one', () => {
 test('no company match returns null', () => {
   assert.equal(matchApplication(APPS, { from: 'x@y.com', subject: 'hello', text: '' }), null);
 });
+
+// ── extractRoleFromEmail ────────────────────────────────────────────────────
+// Fixtures are REAL subjects from data/gmail-cache.json (import is hoisted —
+// appended here so the pre-existing lines above stay untouched).
+import { extractRoleFromEmail } from '../apps/web/lib/gmail-signals.mjs';
+
+test('R5: "Your COMPANY Application - ROLE | bilingual dup" (Hootsuite)', () => {
+  const r = extractRoleFromEmail(
+    'Your Hootsuite Application - Customer Success Manager | Responsable du Succès Client', '');
+  assert.equal(r.company, 'Hootsuite');
+  assert.equal(r.role, 'Customer Success Manager');
+  assert.equal(r.partial, false);
+});
+
+test('R1: 3-segment pipe "Event | ROLE | Company" (the Compass invite)', () => {
+  const r = extractRoleFromEmail(
+    'Initial Discussion | Project Manager, Program Management | Compass Group Canada', '');
+  assert.equal(r.role, 'Project Manager, Program Management');
+  assert.equal(r.company, 'Compass Group Canada');
+  // The Re: reply on the same thread extracts identically.
+  const re = extractRoleFromEmail(
+    'Re: Initial Discussion | Project Manager, Program Management | Compass Group Canada', '');
+  assert.equal(re.role, 'Project Manager, Program Management');
+});
+
+test('R2: "Interview Invitation - ROLE - City, PROV" keeps internal commas, drops the location', () => {
+  const r = extractRoleFromEmail(
+    'Interview Invitation - Business Systems, Continuous Improvement Project Manager - Acheson, AB', '');
+  assert.equal(r.role, 'Business Systems, Continuous Improvement Project Manager');
+});
+
+test('R3: req-id paren dropped, real paren in the title kept, zero-width chars tolerated (OCS)', () => {
+  // Exact cache subject: zero-width spaces wrap the id, trailing space and all.
+  const r = extractRoleFromEmail(
+    'Your application for Manager Service Delivery - OCS (Supply Chain) (​25350​) ', '');
+  assert.equal(r.role, 'Manager Service Delivery - OCS (Supply Chain)');
+});
+
+test('R4: "[our] ROLE role at COMPANY" (Stripe) and bare "ROLE at COMPANY" (Quandri)', () => {
+  const stripe = extractRoleFromEmail(
+    'Your application for our Technical Program Manager, Extensibility Programs role at Stripe', '');
+  assert.equal(stripe.role, 'Technical Program Manager, Extensibility Programs');
+  assert.equal(stripe.company, 'Stripe');
+  const quandri = extractRoleFromEmail(
+    'Your Application for Customer Success Manager at Quandri', '');
+  assert.equal(quandri.role, 'Customer Success Manager');
+  assert.equal(quandri.company, 'Quandri');
+});
+
+test('R6: "thank you for applying" needs the position/role tail; bare Tenstorrent stays null', () => {
+  const pos = extractRoleFromEmail(
+    'Thank you for applying for the Senior Project Manager position', '');
+  assert.equal(pos.role, 'Senior Project Manager');
+  // Company-only ack: no role tail in the subject, no "position of" in the snippet.
+  const neg = extractRoleFromEmail('Thank you for applying to Tenstorrent',
+    'Hi Ramy, Thank you for your interest in Tenstorrent. Our team will review your application.');
+  assert.equal(neg.role, null);
+});
+
+test('R6 snippet companion: "the position of ROLE (req-id)" in the body', () => {
+  // Real OCS ack snippet; the subject names nothing useful.
+  const r = extractRoleFromEmail('Thank you for your interest, RAMY!',
+    'Dear Sherif, Ramy, We want to thank you for your interest in the position of Manager Service Delivery - OCS (Supply Chain) (25350), and for taking the time to a');
+  assert.equal(r.role, 'Manager Service Delivery - OCS (Supply Chain)');
+});
+
+test('R7: calendar "Interview with COMPANY - ROLE" with truncation + time tail (the Kong invite)', () => {
+  const r = extractRoleFromEmail(
+    'Invitation from an unknown sender: Interview with Kong - Senior Program Manager, Engineering... @ Tue 9 Jun 2026 12:30pm', '');
+  assert.equal(r.company, 'Kong');
+  assert.equal(r.role, 'Senior Program Manager, Engineering');
+  assert.equal(r.partial, true);
+});
+
+test('Canceled: prefix is stripped AND surfaced as a flag (the Acheson cancellation)', () => {
+  const r = extractRoleFromEmail(
+    'Canceled: Interview Invitation - Business Systems, Continuous Improvement Project Manager - Acheson, AB', '');
+  assert.equal(r.canceled, true);
+  assert.equal(r.role, 'Business Systems, Continuous Improvement Project Manager');
+});
+
+test('no template matched: null role, no canceled flag', () => {
+  const r = extractRoleFromEmail('Reminder: Your Upcoming Interview with Kong', '');
+  assert.equal(r.role, null);
+  assert.equal(r.canceled, undefined);
+});
+
+test('rejection: "direction that better fits our needs" beats the Stripe ack subject (the 2026-06-04 miss)', () => {
+  const signal = detectSignal(
+    'Your application for our Technical Program Manager, Extensibility Programs role at Stripe',
+    'Thank you for taking the time to apply.',
+    'After careful consideration, we have decided to go in a direction that better fits our needs at this time.',
+    'Stripe <no-reply@stripe.com>');
+  assert.equal(signal.type, 'rejected');
+});
