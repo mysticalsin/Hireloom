@@ -882,6 +882,38 @@ async function createTrackerRowFor({ poolKey, company, role, date, note } = {}) 
   return num;
 }
 
+// Pull the ranking rationale out of an evaluation report. SKIP-grade reports
+// carry a dedicated "## E) Verdict" block; apply-worthy ones argue their case
+// in "## C) Level & Strategy" and close it in "## D) Comp & Demand".
+function parseReportRationale(text) {
+  const out = { score: null, legitimacy: null, verdict: null, rationale: null };
+  const score = text.match(/\*\*Score:\*\*\s*([\d.]+\s*\/\s*5)/);
+  if (score) out.score = score[1].replace(/\s+/g, '');
+  const legit = text.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
+  if (legit) out.legitimacy = legit[1].trim();
+  const section = (letter) => {
+    const m = text.match(new RegExp('##\\s*' + letter + '\\)[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)'));
+    return m ? m[1].trim() : null;
+  };
+  const verdictBlock = text.match(/##\s*[A-Z]\)\s*Verdict[^\n]*\n([\s\S]*?)(?=\n##\s|$)/);
+  if (verdictBlock) {
+    out.verdict = verdictBlock[1].trim().split(/\n\n/)[0].replace(/\*\*/g, '').slice(0, 600);
+    out.rationale = out.verdict;
+    return out;
+  }
+  const c = section('C');
+  const d = section('D');
+  const bits = [];
+  if (c) bits.push(c.replace(/\*\*/g, '').replace(/\|[^\n]*\n?/g, '').trim().split(/\n+/).slice(0, 3).join(' ').slice(0, 450));
+  if (d) {
+    const sentences = d.replace(/\*\*/g, '').trim().split(/(?<=[.!])\s+/);
+    const last = sentences[sentences.length - 1];
+    if (last && last.length < 200) bits.push(last);
+  }
+  out.rationale = bits.filter(Boolean).join(' — ').trim() || null;
+  return out;
+}
+
 // Cached exec of the two analyzers (the Second Brain shells out to the same
 // scripts — one logic, two surfaces).
 const analyzerCache = new Map();
@@ -5637,12 +5669,15 @@ const HTML = /* html */ `<!DOCTYPE html>
     else if (currentFilter === 'pipeline') filtered = filtered; // shown in sidebar
     else if (currentFilter !== 'all')      filtered = filtered.filter(a => a.status === currentFilter);
     if (searchQuery) {
-      filtered = filtered.filter(a =>
-        (a.company||'').toLowerCase().includes(searchQuery) ||
-        (a.role||'').toLowerCase().includes(searchQuery) ||
-        (a.notes||'').toLowerCase().includes(searchQuery) ||
-        (a.num||'').includes(searchQuery)
-      );
+      // Multi-term AND across every visible field — "kong rejected" or
+      // "manager 4.2" find what a single-field substring search can't.
+      const terms = searchQuery.split(/\s+/).filter(Boolean);
+      filtered = filtered.filter(a => {
+        const hay = ((a.company||'') + ' ' + (a.role||'') + ' ' + (a.notes||'') + ' ' +
+          (a.status||'') + ' ' + (a.num||'') + ' ' + (a.date||'') + ' ' +
+          (a.score||'') + ' ' + (a.comp||'')).toLowerCase();
+        return terms.every(t => hay.includes(t));
+      });
     }
     // Sort
     filtered = [...filtered].sort((a, b) => {
@@ -7995,11 +8030,103 @@ const HTML = /* html */ `<!DOCTYPE html>
       live.map(x => hbGroupCard(x, 'inbox')).join('');
   }
 
-  // Role page placeholder — P2 fills this in.
-  function hbRenderRole(key) {
+  /* ── All-in-one role page (#role/<key>) ─────────────────────────────── */
+  async function hbRenderRole(key) {
     const host = document.getElementById('role-content');
-    if (host) host.innerHTML = '<div class="hb-empty">Loading role ' + esc(key) + '…</div>';
+    if (!host) return;
+    host.innerHTML = '<span class="spinner"></span>';
+    let r;
+    try {
+      const res = await fetch('/api/role?key=' + encodeURIComponent(key));
+      if (!res.ok) { host.innerHTML = '<div class="hb-empty">Role not found (' + esc(key) + ') — it may have been merged or renumbered.</div>'; return; }
+      r = await res.json();
+    } catch (e) { host.innerHTML = '<div class="hb-empty">Failed to load role: ' + esc(e.message) + '</div>'; return; }
+
+    const chip = (txt, cls) => '<span class="hb-chip' + (cls || '') + '">' + txt + '</span>';
+    const head =
+      '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px">' +
+        '<button class="hb-btn hb-btn-ghost" onclick="history.back()">← back</button>' +
+        '<span class="hb-greet" style="font-size:20px">' + esc(r.company) + '</span>' +
+        (r.num ? '<span class="hb-num">#' + esc(r.num) + '</span>' : chip('not in tracker — pool only', ' hb-warm')) +
+      '</div>' +
+      '<div style="font-size:14px;color:var(--text-sec);margin-bottom:8px">' + esc(r.role || '') + '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+        (r.num
+          ? '<span class="status-badge ' + statusClass(r.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(r.num) + '\\',this)" data-num="' + esc(r.num) + '">' + esc(r.status || '—') + '</span>'
+          : chip(esc(r.status || 'pending'))) +
+        (r.statusDate ? chip('since ' + esc(r.statusDate)) : '') +
+        (r.date ? chip('applied ' + esc(r.date)) : '') +
+        (r.interviewAt ? chip('📅 interview ' + esc(hbDT(r.interviewAt)), ' hb-warm') : '') +
+        (r.score && r.score !== 'N/A' ? chip('score ' + esc(r.score)) : '') +
+        (r.rank != null ? chip('pool rank #' + r.rank) : '') +
+        (r.archetype ? chip(esc(r.archetype)) : '') +
+        (r.loc ? chip(esc(r.loc)) : '') +
+        (r.ats ? chip(esc(r.ats)) : '') +
+      '</div>';
+
+    const revealBtn = (slot, label) =>
+      '<button class="hb-btn" onclick="hbReveal(\\'' + esc(r.key) + '\\',\\'' + esc(slot) + '\\')" title="Show in Finder">📂 ' + esc(label) + '</button>';
+    const actions = '<div class="hb-mail-actions" style="margin-bottom:14px">' +
+      (r.postingUrl ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" href="' + esc(r.postingUrl) + '">↗ Open posting</a>' : '') +
+      (r.report && r.report.link ? '<a class="hb-btn" target="_blank" href="/reports/' + esc(r.report.link.replace(/^reports\\//, '')) + '">📄 Report</a>' : '') +
+      (r.files || []).map(f => revealBtn(f.slot, f.label)).join('') +
+      '<button class="hb-btn hb-btn-ghost" onclick="goAttach(\\'' + esc(r.key) + '\\')" title="Merge this role with another tracker row (duplicates, split records)">🔗 Attach to existing role</button>' +
+      '</div>';
+
+    const sect = (title, inner) => inner ? '<div class="hb-section-h">' + title + '</div>' + inner : '';
+    const why = r.report && (r.report.rationale || r.report.verdict)
+      ? '<div class="hb-review-card"><div class="hb-review-snip" style="font-size:12.5px;color:var(--text)">' + esc(r.report.rationale || r.report.verdict) + '</div>' +
+        (r.report.legitimacy ? '<div class="hb-num" style="margin-top:4px">legitimacy: ' + esc(r.report.legitimacy) + '</div>' : '') + '</div>'
+      : (r.num ? '<div class="hb-num">No evaluation report — applied via the ' + (r.rank != null ? 'pool' : 'direct') + ' lane without scoring.</div>' : '');
+    const compLine = r.comp && r.comp.display
+      ? '<div class="hb-review-card"><b>' + esc(r.comp.display) + '</b> <span class="hb-num">(' + esc(r.comp.kind || 'listed') + ', informational)</span></div>'
+      : '<div class="hb-num">Not listed' + (r.pkg && r.pkg.salary ? ' — our ask on file: “' + esc(r.pkg.salary.slice(0, 140)) + '”' : '') + '</div>';
+    const pkg = r.pkg && (r.pkg.why || r.pkg.salary)
+      ? '<div class="hb-review-card">' +
+        (r.pkg.why ? '<div class="hb-review-snip"><b>Why-us answer:</b> ' + esc(r.pkg.why) + '</div>' : '') +
+        (r.pkg.salary ? '<div class="hb-review-snip" style="margin-top:5px"><b>Salary answer:</b> ' + esc(r.pkg.salary) + '</div>' : '') + '</div>'
+      : '';
+    const emails = (r.emails || []).length
+      ? r.emails.map(e =>
+          '<div class="hb-group-email"><div class="hb-row" style="border:none;padding:2px 0">' +
+          '<span class="hb-chip' + (e.kind === 'rejected' ? ' hb-hot' : e.kind === 'interview' ? '' : ' hb-warm') + '">' + esc(e.kind) + '</span>' +
+          '<span class="hb-num">' + esc(hbDate(e.date)) + '</span>' +
+          (e.userResponded ? '<span class="hb-num">✓ replied</span>' : '') +
+          (e.autoApplied ? '<span class="hb-num">→ auto-filed ' + esc(e.autoApplied) + '</span>' : '') +
+          (e.classified ? '<span class="hb-num">→ you filed: ' + esc(e.classified) + '</span>' : '') +
+          '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(e.id) + '">open ↗</a></div>' +
+          '<div class="hb-review-subj">“' + esc(e.subject || '') + '”</div></div>').join('')
+      : '<div class="hb-num">No emails on file from this company.</div>';
+    const timeline = (r.timeline || []).length
+      ? r.timeline.map(t =>
+          '<div class="hb-row"><span class="hb-num" style="min-width:110px">' + esc(hbDT(t.at)) + '</span>' +
+          '<span class="hb-chip' + (t.kind === 'email' ? ' hb-warm' : '') + '">' + esc(t.kind) + '</span>' +
+          '<span style="font-size:12px">' + esc(t.text) + '</span></div>').join('')
+      : '<div class="hb-num">No recorded events yet.</div>';
+    const absorbed = (r.absorbed || []).length
+      ? r.absorbed.map(a => '<div class="hb-row"><span class="hb-chip">merged</span><span class="hb-co">' + esc(a.company) + '</span><span>' + esc(a.role) + '</span><span class="hb-num">' + esc(a.key) + '</span></div>').join('')
+      : '';
+
+    host.innerHTML = head + actions +
+      sect('Why we ranked it', why) +
+      sect('Compensation', compLine) +
+      (pkg ? sect('Application answers on file', pkg) : '') +
+      sect('Emails (' + (r.emails || []).length + ')', emails) +
+      sect('Timeline', timeline) +
+      (absorbed ? sect('Attached roles', absorbed) : '') +
+      sect('Notes', r.notes ? '<div class="hb-review-snip" style="font-size:12.5px">' + esc(r.notes) + '</div>' : '<div class="hb-num">—</div>');
   }
+
+  async function hbReveal(key, slot) {
+    try {
+      const res = await fetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, slot }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'reveal failed');
+      showToast('Revealed in Finder', 'success');
+    } catch (e) { showToast('Could not reveal: ' + e.message, 'error'); }
+  }
+
+  function goAttach(key) { location.hash = '#attach/' + encodeURIComponent(key); }
 
   // Boot
   refresh().then(scheduleRefresh);
@@ -8475,6 +8602,147 @@ async function handleRequest(req, res) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ count: rows.length, rows }));
     } catch (err) { sendJsonError(res, 500, 'interviews failed', err); }
+    return;
+  }
+
+  // ── API: All-in-one role page payload ──
+  if (pathname === '/api/role') {
+    try {
+      const key = urlObj.searchParams.get('key') || '';
+      if (!/^[tp]\d{1,5}$/.test(key)) return sendJsonError(res, 400, 'invalid key');
+      const index = await getRoleIndex();
+      const role = index.byKey ? index.byKey[key] : null;
+      if (!role) return sendJsonError(res, 404, 'role not found');
+      const num = role.num != null ? String(role.num) : null;
+      const hist = loadHistory(HISTORY_FILE);
+
+      // Report intelligence (rank rationale, legitimacy, posting URL) + comp.
+      let report = null, comp = null, postingUrl = role.url || null;
+      if (role.reportLink) {
+        try {
+          const safe = resolveSafeReportPath(role.reportLink);
+          if (safe) {
+            const text = await fs.readFile(safe, 'utf8');
+            report = parseReportRationale(text);
+            report.link = role.reportLink;
+            const u = text.match(/\*\*URL[^:*]*:\*\*\s*(https?:\/\/[^\s|]+)/);
+            if (u && !postingUrl) postingUrl = u[1].trim();
+          }
+        } catch { /* report optional */ }
+        try { comp = await getCompForReport(role.reportLink, role.company); } catch {}
+      }
+
+      // Auto-apply package (the ready-to-paste salary + why answers).
+      let pkg = null;
+      if (num) {
+        try {
+          const raw = await fs.readFile(path.join(ROOT, 'output', 'autoapply', num + '.json'), 'utf8');
+          const j = JSON.parse(raw);
+          pkg = { salary: j.salary || null, why: j.why || null, cvPath: j.cvPath || null, coverPath: j.coverPath || null };
+        } catch { /* most roles have no autoapply package */ }
+      }
+
+      // Files on disk — existence-checked so "Show in Finder" never 404s.
+      const fileSlots = [];
+      const addSlot = async (slot, label, rel) => {
+        if (!rel) return;
+        const abs = path.isAbsolute(rel) ? rel : path.join(ROOT, rel);
+        try { await fs.access(abs); fileSlots.push({ slot, label, rel }); } catch {}
+      };
+      await addSlot('cv', 'CV used', role.cvPath || (pkg && pkg.cvPath));
+      await addSlot('cover', 'Cover letter', role.coverPath || (pkg && pkg.coverPath));
+      await addSlot('folder', 'Application folder', role.folder);
+      let prepFiles = [];
+      try {
+        const all = (await fs.readdir(path.join(ROOT, 'interview-prep'))).filter(f => !f.startsWith('.') && !f.startsWith('_'));
+        const slug = String(role.company).toLowerCase().replace(/[^a-z0-9]+/g, '-').split('-')[0];
+        prepFiles = all.filter(f => slug && f.toLowerCase().includes(slug)).slice(0, 8);
+        for (const f of prepFiles) await addSlot('prep:' + f, 'Prep — ' + f, path.join('interview-prep', f));
+      } catch {}
+
+      // Emails + touches for this role.
+      const emails = (gmailCache.signals || []).filter(s =>
+        (num && String(s.num) === num) || (s.poolKey && s.poolKey === role.key) ||
+        (role.pool && s.poolKey === role.pool.key)
+      ).map(s => ({
+        id: s.id, kind: s.signal, subject: s.subject, snippet: s.snippet, from: s.from,
+        date: s.date, dismissed: s.dismissed, classified: s.classified || null,
+        autoApplied: s.autoApplied || null, userResponded: !!s.userResponded,
+      })).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      let touches = [];
+      try {
+        const fuContent = await fs.readFile(path.join(DATA_DIR, 'follow-ups.md'), 'utf8');
+        touches = parseMarkdownTable(fuContent)
+          .filter(r => num && stripMd(r['app_'] || r['app_num'] || '') === num)
+          .map(r => ({ date: stripMd(r['date'] || ''), channel: stripMd(r['channel'] || ''), contact: stripMd(r['contact'] || ''), notes: stripMd(r['notes'] || '') }));
+      } catch {}
+
+      // Timeline: status changes + interview dates + touches + emails, newest first.
+      const timeline = [];
+      if (num) for (const h of hist.filter(e => String(e.num) === num)) {
+        timeline.push({ at: h.ts, kind: h.field === 'interview_at' ? 'interview-set' : 'status', text: h.field === 'interview_at' ? 'Interview scheduled for ' + h.neu : (h.old ? h.old + ' → ' : '') + h.neu, source: h.source });
+      }
+      for (const t of touches) timeline.push({ at: t.date, kind: 'touch', text: (t.channel || 'touch') + (t.contact ? ' — ' + t.contact : '') + (t.notes ? ': ' + t.notes.slice(0, 120) : '') });
+      for (const e of emails) timeline.push({ at: (new Date(e.date || 0)).toISOString().slice(0, 16), kind: 'email', text: '[' + e.kind + '] ' + e.subject, id: e.id });
+      timeline.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        key: role.key, num, company: role.company, role: role.role,
+        status: role.status, date: role.date || (role.pool && role.pool.appliedOn) || role.appliedOn || null,
+        statusDate: num ? (() => { const ts = latestStatusDate(hist, num, role.status); return ts ? String(ts).slice(0, 10) : null; })() : null,
+        interviewAt: num ? (interviewDateFor(hist, num) || extractInterviewDateFromText(role.notes || '', { referenceDate: new Date().toISOString().slice(0, 10) })) : null,
+        score: role.score || (report && report.score) || null,
+        notes: role.notes || role.note || (role.pool && role.pool.note) || null,
+        postingUrl, ats: role.ats || null, loc: role.loc || (role.pool && role.pool.loc) || null,
+        rank: role.rank ?? (role.pool && role.pool.rank) ?? null,
+        archetype: role.archetype || (role.pool && role.pool.archetype) || null,
+        tier: role.tier ?? (role.pool && role.pool.tier) ?? null,
+        report, comp: comp ? { display: comp.display, kind: comp.kind } : null,
+        pkg, files: fileSlots, emails, touches, timeline,
+        absorbed: (role.absorbed || []).map(a => ({ key: a.key, company: a.company, role: a.role })),
+      }));
+    } catch (err) { sendJsonError(res, 500, 'role payload failed', err); }
+    return;
+  }
+
+  // ── API: Reveal a role file in Finder ──
+  // The client sends a role key + a SLOT name; the server resolves the actual
+  // path from its own role index — no client-supplied paths, ever.
+  if (pathname === '/api/reveal' && req.method === 'POST') {
+    try {
+      const { key, slot } = await readJsonBody(req);
+      if (!/^[tp]\d{1,5}$/.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
+      if (typeof slot !== 'string' || slot.length > 120) return sendJsonError(res, 400, 'invalid slot');
+      const index = await getRoleIndex();
+      const role = index.byKey ? index.byKey[key] : null;
+      if (!role) return sendJsonError(res, 404, 'role not found');
+      let rel = null;
+      if (slot === 'cv') rel = role.cvPath;
+      else if (slot === 'cover') rel = role.coverPath;
+      else if (slot === 'folder') rel = role.folder;
+      else if (slot === 'report') rel = role.reportLink ? path.join('reports', path.basename(role.reportLink)) : null;
+      else if (slot.startsWith('prep:')) {
+        // Filename only, validated against the actual directory listing.
+        const name = path.basename(slot.slice(5));
+        const all = (await fs.readdir(path.join(ROOT, 'interview-prep')).catch(() => []));
+        if (all.includes(name)) rel = path.join('interview-prep', name);
+      }
+      if (!rel) return sendJsonError(res, 404, 'no file in that slot');
+      const abs = path.resolve(ROOT, rel);
+      if (abs !== path.resolve(ROOT) && !abs.startsWith(path.resolve(ROOT) + path.sep)) {
+        return sendJsonError(res, 400, 'path escapes project root');
+      }
+      try { await fs.access(abs); } catch { return sendJsonError(res, 404, 'file missing on disk'); }
+      if (process.env.REVEAL_DRY_RUN) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, dryRun: true }));
+        return;
+      }
+      spawn('open', ['-R', abs], { stdio: 'ignore', detached: true }).unref();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) { sendJsonError(res, 400, 'reveal failed', err); }
     return;
   }
 
