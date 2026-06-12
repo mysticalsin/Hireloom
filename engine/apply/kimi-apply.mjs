@@ -18,7 +18,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { chromium } from 'playwright';
-import { createResolver, extractFieldsInPage, isDecline } from './autoapply-core.mjs';
+import { createResolver, extractFieldsInPage, isDecline, preferTechnical } from './autoapply-core.mjs';
 
 const PROJECT_DIR = process.cwd();
 
@@ -56,6 +56,8 @@ if (numArg) {
   JDFILE = JDFILE || join('output/autoapply/jds', `${numArg}.txt`);
   companyRole = `${pkg.company} — ${pkg.role}`;
 }
+CV = preferTechnical(CV);
+COVER = preferTechnical(COVER);
 if (!URL) { console.error('Need --url or --num'); process.exit(1); }
 if (!KEY) { console.error('KIMI_API_KEY not set in .env'); process.exit(1); }
 
@@ -129,8 +131,11 @@ Return ONLY a JSON object mapping each field id to its value. No prose, no code 
 
 // "Apply"/"Apply Now"/"Start" OPEN the application (advance). Only true final
 // verbs STOP. This avoids mistaking a posting page's "Apply" for the submit.
-const NEXT_RE   = /^(next|continue|save (and|&) continue|proceed|review|apply now|apply|start application|get started|begin)\b/i;
-const SUBMIT_RE = /^(submit|submit application|send application|finish|complete application)\b/i;
+// "apply now"/"apply" REMOVED from NEXT_RE (2026-06-11): on some ATSes (Samsara)
+// the filled form's "Apply Now" button IS the submit. Treat those labels as
+// submit-grade — never auto-click.
+const NEXT_RE   = /^(next|continue|save (and|&) continue|proceed|review)\b/i;
+const SUBMIT_RE = /^(submit|submit application|send application|finish|complete application|apply now|apply)\b/i;
 
 // React-select / ARIA comboboxes (Greenhouse, Ashby, Lever dropdown questions)
 // don't register a value when you merely TYPE into them — the form stays "empty"
@@ -180,11 +185,14 @@ async function selectComboboxes(frame, fields, answers) {
     for (let i = 0; i < oc; i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
     let idx = texts.findIndex(t => t.toLowerCase() === wl);
     if (idx < 0) idx = texts.findIndex(t => t && (t.toLowerCase().includes(wl) || wl.includes(t.toLowerCase())));
+    // No matching option → close the dropdown and LEAVE IT BLANK for the user.
+    // ("Accept highlighted" was NOT safe: with no match the highlight sits on
+    // the first option alphabetically — it selected "Agender" for gender=Male.)
     if (idx >= 0) { await opts.nth(idx).click({ timeout: 2500 }).catch(() => {}); clicked = true; }
-    else { await loc.press('Enter').catch(() => {}); } // accept highlighted (menu is open → safe)
+    else { await loc.press('Escape').catch(() => {}); }
 
     await frame.waitForTimeout(200);
-    log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ${clicked ? `clicked "${want.slice(0, 30)}"` : 'Enter (highlighted)'}`);
+    log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ${clicked ? `clicked "${want.slice(0, 30)}"` : `⚠ no option matched "${want.slice(0, 30)}" — LEFT BLANK, fill by hand`}`);
   }
 }
 
