@@ -25,7 +25,13 @@ export const STRONG_REJECTION_SIGNALS = ['not moving forward','not be moving for
   'decided to move in a different direction','pursue other candidates','moving forward with other candidates',
   'move forward with other candidates','proceed with other candidates','move forward with another candidate',
   'no longer considering','no longer under consideration','unable to move forward','not be advancing your application',
-  'will not be advancing','regret to inform','not to move forward with your application'];
+  'will not be advancing','regret to inform','not to move forward with your application',
+  // "going in a direction that better fits our needs" — a real Stripe rejection
+  // (classified as received on 2026-06-04): its subject is an ack ("Your
+  // application for … role at Stripe") and none of the phrases above matched,
+  // so the ack short-circuit won. These live in the STRONG list precisely so
+  // they beat ack subjects.
+  'direction that better fits','better fits our needs','better aligns with our needs'];
 // ATS templates vary the middle of "the position ... has been filled" ("has
 // now been filled", "has since been filled") — exact substrings miss them. A
 // real Lever rejection ("position you have applied to has now been filled")
@@ -162,4 +168,85 @@ export function matchApplication(apps, { from = '', subject = '', text = '' } = 
   const pool = byTitle.length ? byTitle : candidates;
   const open = pool.filter(a => !['rejected', 'discarded', 'skip', 'offer'].includes(a.status));
   return open[0] || pool[0];
+}
+
+// ── Role extraction from email subjects ─────────────────────────────────────
+// ATS subject templates carry the job title (and sometimes the company) in a
+// handful of rigid shapes; pulling them out lets an unmatched signal name its
+// own tracker row instead of relying on company-only matching. Patterns run
+// most-specific-first; the fixtures in tests/gmail-signals.test.mjs are real
+// subjects from data/gmail-cache.json.
+
+// Invisible junk some ATSes wrap around requisition ids ("(​25350​)").
+const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
+// Reply/forward/calendar-update prefixes stack ("Re: Canceled: …") — strip the
+// whole run. "Canceled:" is itself a state worth surfacing (a canceled
+// interview), so it's detected inside the run BEFORE stripping and returned
+// as a flag rather than silently eaten.
+const SUBJECT_PREFIX_RE = /^(?:(?:re|fwd?|updated|cancell?ed)\s*:\s*)+/i;
+
+export function extractRoleFromEmail(subject, snippet) {
+  let subj = (subject || '').replace(ZERO_WIDTH_RE, '').trim();
+  const prefix = subj.match(SUBJECT_PREFIX_RE);
+  const canceled = !!prefix && /cancell?ed\s*:/i.test(prefix[0]);
+  if (prefix) subj = subj.slice(prefix[0].length).trim();
+  const done = (role, company = null, partial = false) => {
+    const r = { role: (role || '').trim() || null, company: (company || '').trim() || null, partial };
+    if (canceled) r.canceled = true;
+    return r;
+  };
+
+  // R5 "Your COMPANY Application - ROLE [| bilingual dup]" — must run BEFORE
+  // the pipe splitter: the Hootsuite template repeats the role in French after
+  // a pipe, which would otherwise read as a pipe-segmented calendar subject.
+  let m = subj.match(/^your\s+(.+?)\s+application\s*[-–—:]\s*([^|]+?)(?:\s*\|.*)?\s*$/i);
+  if (m) return done(m[2], m[1]);
+
+  // R1 calendar 3-segment "Event | ROLE | Company" (the Compass invite).
+  const segs = subj.split('|').map(s => s.trim()).filter(Boolean);
+  if (segs.length === 3) return done(segs[1], segs[2]);
+
+  // R2 "Interview Invitation - ROLE [- City, PROV]" — the role keeps its
+  // internal commas; only a trailing "- City, XX" location tail is stripped.
+  m = subj.match(/^interview\s+invitation\s*[-–—:]\s*(.+)$/i);
+  if (m) return done(m[1].replace(/\s*[-–—]\s*[A-Za-z .'-]+,\s*[A-Z]{2}\s*$/, ''));
+
+  // R3 "Your application for ROLE (req-id)" — lazy role + $ anchor make the
+  // LAST paren group the id, and the id must contain a digit, so a real paren
+  // in the title ("(Supply Chain)") is kept and only "(25350)" is dropped.
+  m = subj.match(/^your\s+application\s+for\s+(.+?)\s*\(([^()]*\d[^()]*)\)\s*$/i);
+  if (m) return done(m[1]);
+
+  // R4 "Your application for [our|the] ROLE [role|position] at COMPANY"
+  // (the Stripe and Quandri templates).
+  m = subj.match(/^your\s+application\s+for\s+(?:our\s+|the\s+)?(.+?)(?:\s+(?:role|position))?\s+at\s+(.+?)\s*$/i);
+  if (m) return done(m[1], m[2]);
+
+  // R6 "thank you for applying to/for [the] ROLE position|role" — the
+  // position/role tail is REQUIRED: "Thank you for applying to Tenstorrent"
+  // names only the company and must not mint a role.
+  m = subj.match(/thank\s+you\s+for\s+applying\s+(?:to|for)\s+(?:the\s+)?(.+?)\s+(?:position|role)\b/i);
+  if (m) return done(m[1]);
+
+  // R7 calendar invite "Interview with COMPANY - ROLE [@ time]" — NOT
+  // ^-anchored (Gmail prepends "Invitation from an unknown sender:"). Long
+  // titles get ellipsis-truncated BEFORE the "@ Tue 9 Jun 2026 12:30pm" time
+  // tail; strip the tail, and a trailing ellipsis marks the role partial so
+  // the caller falls back to the snippet.
+  m = subj.match(/\binterview\s+with\s+(.+?)\s*[-–—]\s*(.+)$/i);
+  if (m) {
+    let role = m[2].replace(/\s*@.*$/, '').trim();
+    const partial = /(?:\.\.\.|…)$/.test(role) || /(?:\.\.\.|…)$/.test(subj);
+    role = role.replace(/\s*(?:\.\.\.|…)$/, '');
+    return done(role, m[1], partial);
+  }
+
+  // Snippet companion (last resort — a subject hit always wins): acks that
+  // hide the title in the body as "the position of ROLE (req-id)". Same
+  // digit rule as R3 — the id paren is dropped, real parens are kept.
+  m = (snippet || '').replace(ZERO_WIDTH_RE, '')
+    .match(/position of\s+(.+?)(?:\s*\([^()]*\d[^()]*\))?(?:\s*[,.;]|$)/i);
+  if (m) return done(m[1]);
+
+  return done(null);
 }

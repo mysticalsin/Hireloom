@@ -18,6 +18,16 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["interview-prep/_strip-serve.mjs"],
       "port": 4760
+    },
+    {
+      "name": "dashboard-live-data",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["apps/web/server.mjs"],
+      "port": 5151,
+      "env": {
+        "PORT": "5151",
+        "HOST": "127.0.0.1"
+      }
     }
   ]
 }

@@ -28,7 +28,10 @@ import {
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
-import { detectSignal, matchApplication } from './lib/gmail-signals.mjs';
+import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
+import { buildRoleIndex, matchEmailToRole } from './lib/role-index.mjs';
+import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview } from './lib/email-groups.mjs';
+import { appendHistory, loadHistory, latestStatusDate, interviewDateFor, setInterviewDate, extractInterviewDateFromText } from './lib/status-history.mjs';
 import { makeErrorLogger } from './lib/error-log.mjs';
 import { createResolver, extractFieldsInPage } from '../../engine/apply/autoapply-core.mjs';
 
@@ -43,6 +46,9 @@ const REPORTS_DIR = process.env.REPORTS_DIR || path.join(ROOT, 'reports');
 const CONFIG_DIR = process.env.CONFIG_DIR || path.join(ROOT, 'config');
 const TOKENS_FILE = path.join(DATA_DIR, 'gmail-tokens.json');
 const CACHE_FILE = path.join(DATA_DIR, 'gmail-cache.json');
+const HISTORY_FILE = path.join(DATA_DIR, 'status-history.tsv');
+const LINKS_FILE = path.join(DATA_DIR, 'role-links.json');
+const POOL_FILE = path.join(ROOT, 'output', 'pool-apply-order.json');
 
 // Gmail OAuth config — set in .env
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID || '';
@@ -508,6 +514,25 @@ async function loadData() {
 
   const pipeline = parsePipelineUrls(pipelineContent);
 
+  // Status-change dates from the history log — "Rejected (since 06-03)" needs
+  // more than the apply date. Best-effort: rows predating the log show null.
+  try {
+    const hist = loadHistory(HISTORY_FILE);
+    for (const a of applications) {
+      const ts = latestStatusDate(hist, a.num, a.status);
+      a.statusDate = ts ? String(ts).slice(0, 10) : null;
+      if (a.status === 'interview') a.interviewAt = interviewDateFor(hist, a.num);
+    }
+  } catch { /* history optional */ }
+
+  // First name for the hero greeting (profile is user-layer; absent = no name).
+  let firstName = null;
+  try {
+    const prof = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8');
+    const m = prof.match(/^\s*full_name:\s*["']?([^"'\n]+)/m);
+    if (m) firstName = m[1].trim().split(/\s+/)[0];
+  } catch { /* greeting falls back to no name */ }
+
   // Today's activity (uses local date, not UTC)
   const today = new Date();
   const todayStr = today.getFullYear() + '-' +
@@ -537,18 +562,19 @@ async function loadData() {
     },
   };
 
-  return { applications, pipeline, stats, updatedAt: new Date().toISOString() };
+  return { applications, pipeline, stats, user: { firstName }, updatedAt: new Date().toISOString() };
 }
 
 // ── Status update: write back to applications.md ──────────────────────────────
 
-async function updateApplicationStatus(num, newStatus) {
+async function updateApplicationStatus(num, newStatus, source = 'api') {
   const filePath = path.join(DATA_DIR, 'applications.md');
   let content;
   try { content = await fs.readFile(filePath, 'utf8'); } catch { throw new Error('applications.md not found'); }
 
   const lines = content.split('\n');
   let updated = false;
+  let histEntry = null;
 
   const newLines = lines.map(line => {
     if (!line.trim().startsWith('|')) return line;
@@ -560,6 +586,13 @@ async function updateApplicationStatus(num, newStatus) {
     const statusIdx = cells.findIndex((c,i) => i > 0 && statusWords.includes(c.toLowerCase()));
     if (statusIdx < 0) return line;
 
+    // Status-CHANGE history: the tracker only stores the apply date, so
+    // "when did this become Rejected" was unanswerable until this log.
+    histEntry = {
+      ts: new Date().toISOString().slice(0, 16),
+      num, company: cells[2] || '', role: cells[3] || '',
+      field: 'status', old: cells[statusIdx], neu: newStatus, source,
+    };
     cells[statusIdx] = newStatus;
     updated = true;
     return '| ' + cells.join(' | ') + ' |';
@@ -567,6 +600,10 @@ async function updateApplicationStatus(num, newStatus) {
 
   if (!updated) throw new Error(`Row #${num} not found`);
   await fs.writeFile(filePath, newLines.join('\n'), 'utf8');
+  if (histEntry && histEntry.old !== histEntry.neu) {
+    try { appendHistory(HISTORY_FILE, histEntry); } catch { /* history is best-effort */ }
+  }
+  invalidateRoleIndex();
   return true;
 }
 
@@ -753,7 +790,15 @@ async function loadGmailCache() {
   try {
     const raw = await fs.readFile(CACHE_FILE, 'utf8');
     gmailCache = JSON.parse(raw);
-  } catch { gmailCache = { signals: [], scanned_at: null }; }
+    // v2 migration (2026-06-12): pre-role-index signals lack extractedRole /
+    // pool matching / sent-index linkage and are carried verbatim forever by
+    // design. One-time wipe; the next scan reclassifies the whole 14d window
+    // idempotently. autoApplied re-writes can't double-fire: the rows already
+    // hold the written status, so re-scans file them quietly.
+    if (!gmailCache.v || gmailCache.v < 2) {
+      gmailCache = { v: 2, signals: [], sentIndex: [], scanned_at: null };
+    }
+  } catch { gmailCache = { v: 2, signals: [], sentIndex: [], scanned_at: null }; }
 }
 
 async function saveGmailCache() {
@@ -766,6 +811,97 @@ async function saveGmailCache() {
 async function gmailApiGet(endpoint, token) {
   const base = 'https://gmail.googleapis.com/gmail/v1/users/me/';
   return httpsGet(base + endpoint, { Authorization: 'Bearer ' + token });
+}
+
+// ── Role index: tracker ∪ apply pool, the one source for "is this ours" ─────
+// DATA_DIR-aware (unlike lib loadRoleIndex's rootDir convenience) so smoke
+// tests against a tmp config dir never read the real tracker.
+let roleIndexCache = { at: 0, index: null };
+async function getRoleIndex(force = false) {
+  if (!force && roleIndexCache.index && Date.now() - roleIndexCache.at < 30_000) return roleIndexCache.index;
+  let trackerContent = '', pool = null, links = null;
+  try { trackerContent = await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'); } catch {}
+  try { pool = JSON.parse(await fs.readFile(POOL_FILE, 'utf8')); } catch {}
+  try { links = JSON.parse(await fs.readFile(LINKS_FILE, 'utf8')); } catch {}
+  const index = buildRoleIndex({ trackerContent, pool, links });
+  roleIndexCache = { at: Date.now(), index };
+  return index;
+}
+function invalidateRoleIndex() { roleIndexCache = { at: 0, index: null }; }
+
+// Last logged touch per app (data/follow-ups.md) — shared by loadData, the
+// groups endpoint, and the cadence mirror.
+async function readTouchesByNum() {
+  const map = new Map();
+  let content = '';
+  try { content = await fs.readFile(path.join(DATA_DIR, 'follow-ups.md'), 'utf8'); } catch { return map; }
+  for (const row of parseMarkdownTable(content)) {
+    const appNum = stripMd(row['app_'] || row['app_num'] || '');
+    const date = stripMd(row['date'] || '');
+    if (!appNum || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!map.has(appNum) || date > map.get(appNum)) map.set(appNum, date);
+  }
+  return map;
+}
+
+// Create a tracker row for a pool-only or email-only role at classification
+// time. Direct single-row append with the same guarantees the TSV+merge batch
+// path provides — max+1 numbering, company+role dedup, canonical status —
+// but DATA_DIR-aware so smoke tests never touch the real tracker.
+async function createTrackerRowFor({ poolKey, company, role, date, note } = {}) {
+  const filePath = path.join(DATA_DIR, 'applications.md');
+  let content;
+  try { content = await fs.readFile(filePath, 'utf8'); } catch { throw new Error('applications.md not found'); }
+  const index = await getRoleIndex(true);
+  const pool = poolKey && index.byKey ? index.byKey[poolKey] : null;
+  const co = ((pool && pool.company) || company || '').trim();
+  const ro = ((pool && pool.role) || role || '').trim();
+  if (!co || !ro) throw new Error('company and role required');
+  // Pipeline-integrity rule: company+role must never duplicate — reuse.
+  const existing = (index.roles || []).find(r => r.num != null &&
+    String(r.company).toLowerCase() === co.toLowerCase() && String(r.role).toLowerCase() === ro.toLowerCase());
+  if (existing) return String(existing.num);
+  let maxNum = 0;
+  for (const line of content.split('\n')) {
+    const m = line.match(/^\|\s*(\d+)\s*\|/);
+    if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+  }
+  const num = String(maxNum + 1);
+  const d = (pool && pool.appliedOn) || date || new Date().toISOString().slice(0, 10);
+  const clean = (s) => String(s).replace(/[|\n]/g, '/');
+  const noteText = clean(note || (pool ? 'Pool-applied (rank ' + pool.rank + '); tracker row created from email classification' : 'Tracker row created from email classification'));
+  const row = '| ' + num + ' | ' + d + ' | ' + clean(co) + ' | ' + clean(ro) + ' | N/A | Applied | ' + (pool && pool.cvPath ? '✅' : '❌') + ' | ' + (pool ? 'Pool' : 'Email') + ' | ' + noteText + ' |';
+  const lines = content.split('\n');
+  const sepIdx = lines.findIndex(l => /^\|[\s|:-]+\|$/.test(l.trim()) && l.includes('-'));
+  if (sepIdx >= 0) lines.splice(sepIdx + 1, 0, row); else lines.push(row);
+  await fs.writeFile(filePath, lines.join('\n'), 'utf8');
+  try {
+    appendHistory(HISTORY_FILE, { ts: new Date().toISOString().slice(0, 16), num, company: co, role: ro, field: 'status', old: '', neu: 'Applied', source: 'classify-create' });
+  } catch { /* best-effort */ }
+  invalidateRoleIndex();
+  return num;
+}
+
+// Cached exec of the two analyzers (the Second Brain shells out to the same
+// scripts — one logic, two surfaces).
+const analyzerCache = new Map();
+function runAnalyzer(rel, ttlMs) {
+  const hit = analyzerCache.get(rel);
+  if (hit && Date.now() - hit.at < ttlMs) return Promise.resolve(hit.value);
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn(process.execPath, [path.join(ROOT, rel)], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
+    child.stdout.on('data', (c) => { out += c; });
+    const done = () => {
+      let value = null;
+      try { value = JSON.parse(out); } catch { value = hit?.value ?? null; }
+      analyzerCache.set(rel, { at: Date.now(), value });
+      resolve(value);
+    };
+    child.on('close', done);
+    child.on('error', done);
+    setTimeout(() => { try { child.kill(); } catch {} }, 30_000);
+  });
 }
 
 // "Devyn Kelly <devyn.kelly@compass-canada.com>" → "Compass Canada".
@@ -823,6 +959,7 @@ async function scanGmailInbox() {
     .map(r => ({ num: stripMd(r['num']||r['#']||''), company: stripMd(r['company']||''), role: stripMd(r['role']||''), status: stripMd(r['status']||'').toLowerCase() }));
 
   if (!apps.length) return;
+  const roleIndex = await getRoleIndex(true);
 
   // Fetch recent messages (last 14 days, job-related senders)
   const q = encodeURIComponent('newer_than:14d');
@@ -864,24 +1001,56 @@ async function scanGmailInbox() {
     const snippet = parsed.snippet || '';
     const bodyText = extractTextFromPayload(parsed.payload);
 
-    // Match against companies; with several applications at the same company,
-    // the row whose role title the email names wins (see matchApplication).
-    const matched = matchApplication(apps, { from, subject, text: snippet + ' ' + bodyText });
+    // Match against the ROLE INDEX (tracker ∪ apply pool) — pool-applied
+    // roles never enter applications.md by convention, which is exactly how
+    // SMS Equipment's interview arc rendered as "not in tracker" (it was
+    // pool rank 47, applied 2026-05-29). Role extracted from the subject
+    // narrows multi-role companies before the open-over-closed tiebreak.
+    const extracted = extractRoleFromEmail(subject, snippet);
+    const matchedRole = matchEmailToRole(roleIndex, { from, subject, text: snippet + ' ' + bodyText, roleHint: extracted.role || '' });
+    const matched = matchedRole && matchedRole.num != null
+      ? { num: String(matchedRole.num), company: matchedRole.company, role: matchedRole.role, status: (matchedRole.status || '').toLowerCase() }
+      : null;
     const signal = detectSignal(subject, snippet, bodyText, from);
 
     if (!matched) {
-      // No tracker row — historically dropped on the floor, which is how a
-      // real recruiter invite for an untracked application went unseen
-      // (Compass Group, 2026-06-12). Strong signals now surface as
-      // "unmatched" needs-review cards; weak/ambiguous ones stay dropped to
-      // keep personal mail out of the dashboard.
+      if (signal.type === 'other') continue;
+      // Pool-only match: it IS one of ours (applied via the pool lane), there
+      // is just no tracker row yet. Never auto-write; classification by the
+      // user creates the row (TSV + merge — the sanctioned add path).
+      if (matchedRole) {
+        const closedPool = ['rejected', 'discarded', 'skip', 'expired'].includes(matchedRole.status);
+        if (signal.type === 'received' || signal.type === 'verification') continue;
+        signals.push({
+          id: msg.id, threadId: parsed.threadId || null,
+          num: null, poolKey: matchedRole.key, unmatched: false,
+          company: matchedRole.company,
+          role: matchedRole.role || extracted.role || '',
+          extractedRole: extracted.role || '',
+          currentStatus: matchedRole.status || null,
+          signal: signal.type, codes: [],
+          subject: subject.substring(0, 120),
+          snippet: snippet.substring(0, 200),
+          from: from.substring(0, 80),
+          date,
+          suggestedStatus: null,
+          dismissed: closedPool && ['unknown', 'interview'].includes(signal.type),
+        });
+        continue;
+      }
+      // No index match at all — historically dropped on the floor, which is
+      // how a real recruiter invite for an untracked application went unseen
+      // (Compass Group, 2026-06-12). Strong signals surface as "unmatched"
+      // needs-review cards; weak/ambiguous ones stay dropped to keep
+      // personal mail out of the dashboard.
       const strong = signal.type === 'rejected' || (signal.type === 'interview' && signal.confident);
       if (!strong) continue;
       signals.push({
         id: msg.id, threadId: parsed.threadId || null,
         num: null, unmatched: true,
-        company: guessCompanyFromSender(from),
-        role: '', currentStatus: null,
+        company: extracted.company || guessCompanyFromSender(from),
+        role: extracted.role || '', extractedRole: extracted.role || '',
+        currentStatus: null,
         signal: signal.type, codes: [],
         subject: subject.substring(0, 120),
         snippet: snippet.substring(0, 200),
@@ -905,6 +1074,7 @@ async function scanGmailInbox() {
       num: matched.num,
       company: matched.company,
       role: matched.role,
+      extractedRole: extracted.role || '',
       currentStatus: matched.status,
       signal: signal.type,
       codes: signal.codes || [],
@@ -989,34 +1159,56 @@ async function scanGmailInbox() {
   }
   const merged = signals.map(s => ({ ...s, dismissed: s.dismissed || existingById[s.id]?.dismissed || false }));
 
-  // ── Sent-mail awareness: did the user already reply to a signal's thread? ──
-  // A reply found in `in:sent` marks the signal userResponded (so review tabs
-  // and the radar stop asking) and auto-logs the touch to data/follow-ups.md.
+  // ── Sent-mail awareness ────────────────────────────────────────────────────
+  // The cache keeps a SENT INDEX (id/threadId/recipient/date for the last 14
+  // days of outgoing mail). Two consumers:
+  //  1. thread-level: a reply in a signal's own thread marks it userResponded
+  //     + auto-logs the touch to data/follow-ups.md (idempotent);
+  //  2. group-level (the Kong fix): replies in OTHER threads or fresh composes
+  //     to the recruiter are matched by recipient/domain at grouping time —
+  //     one reply counts for the whole application, not just its thread.
+  let sentIndex = (gmailCache.sentIndex || []);
   try {
-    const needReply = merged.filter(s => s.threadId && !s.userResponded &&
-      ['interview', 'unknown', 'rejected'].includes(s.signal));
-    if (needReply.length) {
-      const byThread = new Map(needReply.map(s => [s.threadId, s]));
-      const sq = encodeURIComponent('in:sent newer_than:14d');
-      const sentList = await gmailApiGet(`messages?q=${sq}&maxResults=100`, token);
-      if (sentList.status === 200) {
-        const sentMsgs = JSON.parse(sentList.body).messages || [];
-        for (const sm of sentMsgs.filter(m => byThread.has(m.threadId))) {
-          const sig = byThread.get(sm.threadId);
-          const metaRes = await gmailApiGet(`messages/${sm.id}?format=metadata&metadataHeaders=Date&metadataHeaders=To`, token);
-          if (metaRes.status !== 200) continue;
-          let meta; try { meta = JSON.parse(metaRes.body); } catch { continue; }
-          const mh = meta.payload?.headers || [];
-          const sentDate = parseEmailDate(mh.find(h => h.name === 'Date')?.value);
-          const inboundDate = parseEmailDate(sig.date);
-          // Only a reply sent AFTER the signal email counts as answering it.
-          if (!sentDate || (inboundDate && sentDate < inboundDate)) continue;
-          sig.userResponded = true;
-          sig.respondedAt = sentDate.toISOString();
-          sig.userReplyId = sm.id;
-          sig.userReplyTo = (mh.find(h => h.name === 'To')?.value || '').substring(0, 80);
-        }
+    const sq = encodeURIComponent('in:sent newer_than:14d');
+    const sentList = await gmailApiGet(`messages?q=${sq}&maxResults=100`, token);
+    if (sentList.status === 200) {
+      const sentMsgs = JSON.parse(sentList.body).messages || [];
+      const have = new Set(sentIndex.map(e => e.id));
+      const liveIds = new Set(sentMsgs.map(m => m.id));
+      for (const sm of sentMsgs.filter(m => !have.has(m.id)).slice(0, 60)) {
+        const metaRes = await gmailApiGet(`messages/${sm.id}?format=metadata&metadataHeaders=Date&metadataHeaders=To`, token);
+        if (metaRes.status !== 200) continue;
+        let meta; try { meta = JSON.parse(metaRes.body); } catch { continue; }
+        const mh = meta.payload?.headers || [];
+        const sentDate = parseEmailDate(mh.find(h => h.name === 'Date')?.value);
+        if (!sentDate) continue;
+        sentIndex.push({
+          id: sm.id, threadId: sm.threadId || meta.threadId || null,
+          to: (mh.find(h => h.name === 'To')?.value || '').substring(0, 120),
+          date: sentDate.toISOString(),
+        });
       }
+      // prune sent entries that left the 14d window
+      sentIndex = sentIndex.filter(e => liveIds.has(e.id));
+    }
+
+    // Thread-level userResponded + touch logging (unchanged semantics).
+    const byThread = new Map();
+    for (const e of sentIndex) if (e.threadId) {
+      const prev = byThread.get(e.threadId);
+      if (!prev || e.date > prev.date) byThread.set(e.threadId, e);
+    }
+    for (const sig of merged) {
+      if (sig.userResponded || !sig.threadId) continue;
+      if (!['interview', 'unknown', 'rejected'].includes(sig.signal)) continue;
+      const sent = byThread.get(sig.threadId);
+      if (!sent) continue;
+      const inboundDate = parseEmailDate(sig.date);
+      if (inboundDate && new Date(sent.date) < inboundDate) continue;
+      sig.userResponded = true;
+      sig.respondedAt = sent.date;
+      sig.userReplyId = sent.id;
+      sig.userReplyTo = (sent.to || '').substring(0, 80);
     }
     // Log newly detected replies as real touches (idempotent per sent msg id).
     for (const sig of merged) {
@@ -1026,7 +1218,7 @@ async function scanGmailInbox() {
     }
   } catch { /* sent-scan is best-effort — inbox signals already saved below */ }
 
-  gmailCache = { signals: merged, scanned_at: new Date().toISOString() };
+  gmailCache = { v: 2, signals: merged, sentIndex, scanned_at: new Date().toISOString() };
   await saveGmailCache();
 }
 
@@ -3349,12 +3541,15 @@ const HTML = /* html */ `<!DOCTYPE html>
     /* ── Layout — Linear-style: 1fr content + 280px sidebar.
        The 84px top reserve covers the floating header capsule (60px) +
        its 12px top margin + 12px breathing gap below it. */
+    /* Single column since the tabbed HB layout (2026-06-12): the old right
+       sidebar's sections live inside tabs now (Inbox, Apply Queue) or float
+       (verification codes). */
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 280px;
+      grid-template-columns: minmax(0, 1fr);
       gap: 0;
       min-height: calc(100vh - 84px);
-      max-width: 1440px;
+      max-width: 1280px;
       margin: 0 auto;
     }
     .main { padding: 0 32px 32px; min-width: 0; }
@@ -4611,6 +4806,138 @@ const HTML = /* html */ `<!DOCTYPE html>
       /* WCAG 2.2 — bump tap targets on phones. */
       .btn { padding: 9px 14px; font-size: 13px; }
     }
+
+    /* ════════════════════════════════════════════════════════════════════
+       HB — the Hireloom Brain skin, ported from the Obsidian plugin
+       (second-brain/plugin/styles.css) so both surfaces share one visual
+       language. Component classes are verbatim-shaped; the COLOR TOKENS
+       map onto the dashboard's existing theme variables so light mode and
+       the theme e2e tests keep working — the Obsidian look is the layout,
+       pills, KPI cards and glow language, not a hardcoded palette.
+       ════════════════════════════════════════════════════════════════════ */
+    :root {
+      --hb-card: var(--surface);
+      --hb-card2: var(--surface2);
+      --hb-border: var(--hairline-2);
+      --hb-accent: var(--accent);
+      --hb-accent-hi: var(--accent-2);
+      --hb-glow: var(--accent-ring);
+      --hb-gold: var(--yellow);
+      --hb-green: var(--green);
+      --hb-orange: var(--orange);
+      --hb-teal: var(--cyan);
+      --hb-red: var(--red);
+      --hb-text: var(--text);
+      --hb-muted: var(--text-sec);
+      --hb-faint: var(--text-ter);
+    }
+    .hb-empty { color: var(--hb-muted); font-style: italic; padding: 22px 8px; }
+    .hb-meta { color: var(--hb-faint); font-size: 11px; margin: 2px 0 12px; letter-spacing: .02em; }
+    /* Hero */
+    .hb-hero { margin: 6px 0 14px; }
+    .hb-hero-top { display: flex; align-items: baseline; gap: 12px; }
+    .hb-greet { font-size: 22px; font-weight: 800; letter-spacing: .01em; font-family: var(--font-display); }
+    .hb-hero-right { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--hb-muted); }
+    .hb-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .hb-dot.is-fresh { background: var(--hb-green); box-shadow: 0 0 8px var(--green-bg); }
+    .hb-dot.is-stale { background: var(--hb-orange); box-shadow: 0 0 8px var(--orange-bg); }
+    .hb-subline { color: var(--hb-muted); font-size: 12px; margin: 4px 0 12px; }
+    /* KPI cards */
+    .hb-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .hb-kpi { min-width: 112px; flex: 1; max-width: 175px; padding: 11px 13px; border-radius: 12px; background: linear-gradient(160deg, var(--hb-card), var(--hb-card2)); border: 1px solid var(--hb-border); transition: transform .12s ease, box-shadow .12s ease; }
+    .hb-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-3), 0 0 10px var(--hb-glow); border-color: var(--hb-accent); }
+    .hb-kpi-v { font-size: 24px; font-weight: 800; color: var(--hb-kpi-accent, var(--hb-gold)); line-height: 1.1; }
+    .hb-kpi-l { font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--hb-muted); margin-top: 4px; }
+    .hb-acc-ox { --hb-kpi-accent: var(--hb-red); }
+    .hb-acc-ember { --hb-kpi-accent: var(--hb-orange); }
+    .hb-acc-gold { --hb-kpi-accent: var(--hb-gold); }
+    .hb-acc-sage { --hb-kpi-accent: var(--hb-green); }
+    .hb-acc-slate { --hb-kpi-accent: var(--hb-teal); }
+    .hb-acc-violet { --hb-kpi-accent: var(--hb-accent-hi); }
+    /* Stacked pipeline bar */
+    .hb-stack { display: flex; height: 10px; border-radius: 6px; overflow: hidden; gap: 2px; margin-bottom: 4px; }
+    .hb-seg { min-width: 4px; }
+    .hb-seg-0 { background: #5b21b6; } .hb-seg-1 { background: var(--hb-accent); } .hb-seg-2 { background: var(--hb-orange); } .hb-seg-3 { background: var(--hb-gold); } .hb-seg-4 { background: var(--hb-teal); }
+    /* Tabs */
+    .hb-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--hb-border); align-items: center; }
+    .hb-tab { padding: 5px 13px; border-radius: 999px; cursor: pointer; font-size: 12.5px; color: var(--hb-muted); border: 1px solid transparent; transition: all .15s ease; background: transparent; font-family: inherit; }
+    .hb-tab:hover { color: var(--hb-text); border-color: var(--hb-accent); }
+    .hb-tab.is-active { color: #fff; background: var(--hb-accent); box-shadow: 0 0 14px var(--hb-glow); font-weight: 600; }
+    .hb-count { opacity: .85; font-size: 10.5px; margin-left: 5px; background: rgba(255,255,255,.14); padding: 0 6px; border-radius: 8px; }
+    .hb-tab:not(.is-active) .hb-count { background: var(--accent-bg); }
+    .hb-actions { margin-left: auto; display: flex; gap: 6px; }
+    /* Buttons */
+    .hb-btn { font-size: 11px; padding: 3px 11px; border-radius: 999px; background: var(--hb-card); border: 1px solid var(--hb-border); color: var(--hb-text); cursor: pointer; transition: all .15s ease; font-family: inherit; }
+    .hb-btn:hover { background: var(--hb-accent); color: #fff; box-shadow: 0 0 10px var(--hb-glow); }
+    a.hb-btn { text-decoration: none; display: inline-block; }
+    .hb-btn-ghost { opacity: .85; }
+    .hb-btn-respond { background: var(--accent-bg); border-color: var(--hb-accent); font-weight: 650; }
+    .hb-btn-respond:hover { background: var(--hb-accent); }
+    /* Overview colored cards */
+    .hb-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+    .hb-ccard { background: linear-gradient(170deg, var(--hb-card), var(--hb-card2)); border: 1px solid var(--hb-border); border-top: 2px solid var(--hb-cc, var(--hb-accent)); border-radius: 14px; padding: 12px 14px; transition: transform .12s ease, box-shadow .12s ease; }
+    .hb-ccard:hover { transform: translateY(-2px); box-shadow: var(--shadow-4); }
+    .hb-ccard-h { display: flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: var(--hb-cc, var(--hb-accent-hi)); margin-bottom: 9px; }
+    .hb-ccard-h .hb-cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--hb-cc, var(--hb-accent)); box-shadow: 0 0 6px var(--hb-cc, var(--hb-accent)); }
+    .hb-cc-violet { --hb-cc: var(--hb-accent-hi); } .hb-cc-orange { --hb-cc: var(--hb-orange); } .hb-cc-gold { --hb-cc: var(--hb-gold); } .hb-cc-green { --hb-cc: var(--hb-green); } .hb-cc-teal { --hb-cc: var(--hb-teal); }
+    .hb-big { font-size: 27px; font-weight: 850; color: var(--hb-cc, var(--hb-gold)); line-height: 1.05; }
+    .hb-big-sub { font-size: 10.5px; color: var(--hb-muted); margin: 2px 0 8px; }
+    .hb-statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 11.5px; }
+    .hb-statgrid .k { color: var(--hb-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+    .hb-statgrid .v { font-weight: 700; }
+    .hb-line { display: flex; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--hairline); align-items: baseline; }
+    .hb-line:last-child { border-bottom: none; }
+    .hb-line .hb-co { font-weight: 650; }
+    /* Kanban board */
+    .hb-board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
+    .hb-col { min-width: 215px; max-width: 250px; background: linear-gradient(180deg, var(--hb-card), var(--hb-card2)); border: 1px solid var(--hb-border); border-radius: 12px; padding: 9px; }
+    .hb-col-h { font-weight: 700; font-size: 11px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid; border-image: linear-gradient(90deg, var(--hb-accent), transparent) 1; padding-bottom: 5px; text-transform: uppercase; letter-spacing: .08em; color: var(--hb-text); }
+    .hb-kcard { background: linear-gradient(135deg, var(--accent-bg), transparent 55%), var(--hb-card); border: 1px solid var(--hb-border); border-left: 3px solid var(--hb-accent); border-radius: 9px; padding: 7px 9px; margin-bottom: 7px; font-size: 12px; transition: transform .12s ease, box-shadow .12s ease; cursor: pointer; }
+    .hb-kcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-3), 0 0 10px var(--hb-glow); }
+    .hb-kcard .hb-co { font-weight: 650; }
+    .hb-kcard .hb-role { color: var(--hb-muted); font-size: 11.5px; margin-top: 1px; }
+    .hb-kcard .hb-sub { color: var(--hb-faint); font-size: 10.5px; margin-top: 4px; display: flex; gap: 9px; }
+    /* List rows */
+    .hb-row { display: flex; gap: 10px; padding: 7px 6px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; align-items: baseline; border-radius: 6px; transition: background .12s ease; }
+    .hb-row:hover { background: var(--surface-hover); }
+    .hb-row .hb-co { font-weight: 650; min-width: 135px; }
+    /* Chips, numerals, links, section heads, bars */
+    .hb-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; background: var(--accent-bg); border: 1px solid var(--hb-accent); color: var(--hb-text); margin-right: 4px; }
+    .hb-chip.hb-hot { background: linear-gradient(135deg, var(--hb-orange), var(--hb-red)); color: #fff; border-color: transparent; animation: hb-pulse 2.4s ease-in-out infinite; }
+    .hb-chip.hb-warm { background: var(--orange-bg); border-color: var(--hb-orange); }
+    .hb-num { color: var(--hb-faint); font-size: 10.5px; }
+    .hb-link { color: var(--hb-accent-hi); }
+    .hb-section-h { font-weight: 750; margin: 14px 0 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--hb-muted); }
+    .hb-bar { height: 9px; border-radius: 5px; background: linear-gradient(90deg, var(--hb-accent-hi), var(--hb-accent)); box-shadow: 0 0 8px var(--hb-glow); }
+    /* Review cards, mail actions, clickable nav */
+    .hb-clickable { cursor: pointer; }
+    .hb-kpi.hb-clickable:hover, .hb-ccard.hb-clickable:hover { border-color: var(--hb-accent); box-shadow: 0 0 12px var(--hb-glow); transform: translateY(-1px); transition: all .15s ease; }
+    .hb-jump { margin-left: auto; color: var(--hb-muted); font-size: 12px; }
+    .hb-ccard.hb-clickable:hover .hb-jump { color: var(--hb-accent-hi); }
+    .hb-review-card { background: var(--hb-card); border: 1px solid var(--hb-border); border-radius: 10px; padding: 9px 12px; margin: 7px 0; }
+    .hb-review-subj { font-weight: 650; margin: 5px 0 2px; font-size: 12.5px; }
+    .hb-review-snip { color: var(--hb-muted); font-size: 11.5px; line-height: 1.45; }
+    .hb-mail-actions { display: flex; gap: 7px; margin-top: 7px; align-items: center; flex-wrap: wrap; }
+    .hb-row .hb-mail-actions { margin-top: 0; margin-left: auto; }
+    @keyframes hb-pulse { 0%,100% { box-shadow: 0 0 5px var(--orange-bg); } 50% { box-shadow: 0 0 13px var(--orange-bg); } }
+    /* Group cards (Inbox / Review / Radar): collapsed header + expandable email list */
+    .hb-group { background: var(--hb-card); border: 1px solid var(--hb-border); border-radius: 10px; margin: 7px 0; overflow: hidden; }
+    .hb-group-h { display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; cursor: pointer; transition: background .12s ease; flex-wrap: wrap; }
+    .hb-group-h:hover { background: var(--surface-hover); }
+    .hb-group-arrow { color: var(--hb-faint); font-size: 10px; transition: transform .15s ease; width: 12px; display: inline-block; }
+    .hb-group.is-open .hb-group-arrow { transform: rotate(90deg); }
+    .hb-group-body { display: none; border-top: 1px solid var(--hairline); padding: 4px 12px 9px; }
+    .hb-group.is-open .hb-group-body { display: block; }
+    .hb-group-email { padding: 7px 0; border-bottom: 1px solid var(--hairline); }
+    .hb-group-email:last-child { border-bottom: none; }
+    .hb-classify { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+    .hb-classify .hb-btn { font-weight: 600; }
+    /* Floating verification codes (visible from any tab — codes are time-critical) */
+    .hb-float-codes { position: fixed; right: 18px; bottom: 18px; z-index: 60; width: 260px; background: var(--mat-thick); backdrop-filter: blur(14px); border: 1px solid var(--hb-accent); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow-4), 0 0 14px var(--hb-glow); }
+    /* Views */
+    .hb-view { display: none; }
+    .hb-view.is-active { display: block; }
+    @media (max-width: 640px) { .hb-kpi { min-width: 96px; } .hb-row .hb-co { min-width: 100px; } }
   </style>
 </head>
 <body>
@@ -4702,13 +5029,6 @@ const HTML = /* html */ `<!DOCTYPE html>
     </div>
 
     <!-- Page header — Linear-style, NOT a hero. -->
-    <header class="page-header">
-      <h1 class="page-title">Pipeline</h1>
-      <div class="page-subtitle" id="page-subtitle">
-        <span id="today-date">—</span>
-      </div>
-    </header>
-
     <!-- Apply banner — only shows when 4.0+ roles are ready to apply -->
     <div class="apply-banner" id="apply-banner">
       <div class="apply-banner-text">
@@ -4718,28 +5038,27 @@ const HTML = /* html */ `<!DOCTYPE html>
       <button class="btn btn-apply-batch" onclick="openApplyModal()">Apply now</button>
     </div>
 
-    <!-- Stats strip — 4 visible cells. Five hidden spans below preserve
-         backwards-compat for the JS that updates s-total / s-followup /
-         s-rejected / s-responded / s-evaluated; they no longer take
-         visual space (Skill ban: KPI grids as default dashboard). -->
-    <div class="stats" id="stats-grid">
-      <div class="stat-card reveal" style="--status-color:#a855f7" onclick="setFilter('pipeline',this)" data-filter="pipeline">
-        <div class="stat-label"><span class="stat-icon" aria-hidden="true">◔</span>In pipeline</div>
-        <div class="stat-value" id="s-pending">–</div>
+    <!-- HB hero — greeting, where-things-stand subline, clickable KPI cards,
+         stacked pipeline bar. Mirrors the Obsidian Brain hero 1:1. -->
+    <section class="hb-hero" aria-label="Overview statistics">
+      <div class="hb-hero-top">
+        <h1 class="hb-greet" id="hb-greet">Hireloom</h1>
+        <div class="hb-hero-right"><span id="today-date">—</span></div>
       </div>
-      <div class="stat-card reveal" style="--status-color:#38bdf8" onclick="setFilter('applied',this)" data-filter="applied">
-        <div class="stat-label"><span class="stat-icon" aria-hidden="true">↗</span>Applied</div>
-        <div class="stat-value" id="s-applied">–</div>
-      </div>
-      <div class="stat-card reveal" style="--status-color:#10b981" onclick="setFilter('interview',this)" data-filter="interview">
-        <div class="stat-label"><span class="stat-icon" aria-hidden="true">▦</span>Interview</div>
-        <div class="stat-value" id="s-interview">–</div>
-      </div>
-      <div class="stat-card reveal" style="--status-color:#f59e0b" onclick="setFilter('offer',this)" data-filter="offer">
-        <div class="stat-label"><span class="stat-icon" aria-hidden="true">★</span>Offer</div>
-        <div class="stat-value" id="s-offer">–</div>
-      </div>
-    </div>
+      <div class="hb-subline" id="hb-subline">Loading…</div>
+      <div class="hb-kpis" id="hb-kpis"></div>
+      <div class="hb-stack" id="hb-stack" style="display:none"></div>
+    </section>
+
+    <!-- HB tab bar — every surface is a tab; counts mirror the views -->
+    <nav class="hb-tabs" id="hb-tabs" aria-label="Dashboard sections"></nav>
+
+    <!-- Legacy stat values + today spans: hidden, still updated — the
+         Second-Brain tab-binding contract and older automations read them. -->
+    <span hidden id="s-pending">–</span>
+    <span hidden id="s-applied">–</span>
+    <span hidden id="s-interview">–</span>
+    <span hidden id="s-offer">–</span>
     <span hidden id="s-total">–</span>
     <span hidden id="s-followup">–</span>
     <span hidden id="s-rejected">–</span>
@@ -4754,55 +5073,64 @@ const HTML = /* html */ `<!DOCTYPE html>
     <span hidden id="today-interviews-sub"></span>
     <span hidden id="today-high-paying-sub"></span>
 
-    <!-- Controls -->
-    <div class="controls" id="controls">
-      <div class="search-wrap">
-        <span class="search-icon">⌕</span>
-        <input class="search-input" id="search-input" type="search" placeholder="Search company, role, notes…" aria-label="Search applications by company, role, or notes" oninput="applyFilter()">
-      </div>
-      <div class="filter-pills">
-        <button class="filter-pill active" onclick="setFilter('all',this)" data-filter="all">All</button>
-        <button class="filter-pill money" onclick="setFilter('high-paying',this)" data-filter="high-paying" title="$200K+ base, $300K+ TC/OTE, or premium-tier company (Anthropic, OpenAI, NVIDIA, etc.)">💰 High-Paying</button>
-        <button class="filter-pill" onclick="setFilter('followup',this)" data-filter="followup">⚡ Follow-up</button>
-        <button class="filter-pill" onclick="setFilter('applied',this)" data-filter="applied">Applied</button>
-        <button class="filter-pill" onclick="setFilter('interview',this)" data-filter="interview">Interview</button>
-        <button class="filter-pill" onclick="setFilter('offer',this)" data-filter="offer">Offer</button>
-        <button class="filter-pill" onclick="setFilter('evaluated',this)" data-filter="evaluated">Evaluated</button>
-        <button class="filter-pill" onclick="setFilter('rejected',this)" data-filter="rejected">Rejected</button>
-      </div>
-    </div>
+    <!-- ── Views: one per tab; switchTab()/route() toggle .is-active ── -->
 
-    <!-- Applications table -->
-    <div class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th onclick="sortBy('num')">#<span class="sort-arrow" id="sort-num"></span></th>
-            <th onclick="sortBy('company')">Company<span class="sort-arrow" id="sort-company"></span></th>
-            <th>Role</th>
-            <th onclick="sortBy('status')">Status<span class="sort-arrow" id="sort-status"></span></th>
-            <th onclick="sortBy('score')">Score<span class="sort-arrow" id="sort-score"></span></th>
-            <th onclick="sortBy('comp')" title="Sort by compensation (highest first)">Comp<span class="sort-arrow" id="sort-comp"></span></th>
-            <th onclick="sortBy('date')">Date<span class="sort-arrow" id="sort-date">↓</span></th>
-            <th>Age</th>
-            <th>Notes</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="apps-tbody">
-          <tr class="loading-row"><td colspan="10"><span class="spinner"></span></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </main>
+    <!-- Overview — the command-center landing (ccards grid) -->
+    <section class="hb-view" id="view-overview" aria-label="Overview">
+      <div class="hb-cards" id="overview-cards"><span class="spinner"></span></div>
+    </section>
 
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <!-- Gmail section -->
-    <div class="sidebar-section" id="gmail-section">
-      <div class="sidebar-title">
-        Gmail Inbox Signals
-        <button class="sidebar-refresh" onclick="refreshGmail()">Scan now</button>
+    <!-- Pipeline — kanban by canonical state -->
+    <section class="hb-view" id="view-pipeline" aria-label="Pipeline kanban">
+      <div class="hb-meta">Kanban by state · source: data/applications.md</div>
+      <div class="hb-board" id="pipeline-board"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Apply Queue — ranked pool head + the manual-apply queue -->
+    <section class="hb-view" id="view-queue" aria-label="Apply queue">
+      <div id="queue-content"><span class="spinner"></span></div>
+      <div id="manual-queue-section">
+        <div class="hb-section-h">⚠️ Manual Apply Queue <span id="mq-count" style="color:var(--orange)"></span></div>
+        <div id="manual-queue-list"></div>
+      </div>
+    </section>
+
+    <!-- Follow-up Radar — grouped conversations needing action, Respond lives HERE -->
+    <section class="hb-view" id="view-radar" aria-label="Follow-up radar">
+      <div id="radar-content"><span class="spinner"></span></div>
+      <div id="followup-list" hidden></div>
+    </section>
+
+    <!-- Needs Review — the classification desk: open the email, pick what it was -->
+    <section class="hb-view" id="view-review" aria-label="Needs review">
+      <div id="review-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Interviews — every interview-stage role with its date -->
+    <section class="hb-view" id="view-interviews" aria-label="Interviews">
+      <div id="interviews-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Rejected — closed roles with when + why -->
+    <section class="hb-view" id="view-rejected" aria-label="Rejected">
+      <div id="rejected-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Scan Feed — newest scanner discoveries -->
+    <section class="hb-view" id="view-scan" aria-label="Scan feed">
+      <div id="scan-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Patterns — outcome analytics -->
+    <section class="hb-view" id="view-patterns" aria-label="Patterns">
+      <div id="patterns-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Inbox — grouped email signals (with Dismiss) + pending URLs -->
+    <section class="hb-view" id="view-inbox" aria-label="Inbox">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span class="hb-section-h" style="margin:0">Email signals</span>
+        <button class="hb-btn" onclick="refreshGmail()">↻ Scan now</button>
       </div>
       <div id="gmail-content">
         <div class="gmail-connect-card">
@@ -4814,41 +5142,61 @@ const HTML = /* html */ `<!DOCTYPE html>
           </div>` : ''}
         </div>
       </div>
-    </div>
-
-    <!-- Verification Codes section -->
-    <div class="sidebar-section" id="verification-section" style="display:none">
-      <div class="sidebar-title">
-        Verification Codes
-        <span id="vcode-count" style="font-size:11px;color:var(--purple);font-weight:600"></span>
-      </div>
-      <div id="verification-list"></div>
-    </div>
-
-    <!-- Manual Apply Queue section -->
-    <div class="sidebar-section" id="manual-queue-section">
-      <div class="sidebar-title">
-        <span>⚠️ Manual Apply Queue</span>
-        <span id="mq-count" style="font-size:11px;color:var(--orange);font-weight:600"></span>
-      </div>
-      <div id="manual-queue-list"></div>
-    </div>
-
-    <!-- Follow-up section -->
-    <div class="sidebar-section">
-      <div class="sidebar-title">Needs Follow-up</div>
-      <div id="followup-list"><span class="spinner"></span></div>
-    </div>
-
-    <!-- Pipeline section -->
-    <div class="sidebar-section">
-      <div class="sidebar-title">
-        Pipeline Inbox
-        <span id="sidebar-pipeline-count" style="font-size:11px;color:var(--text-ter);font-weight:400"></span>
-      </div>
+      <div class="hb-section-h">Pending URLs <span id="sidebar-pipeline-count" style="font-weight:400"></span></div>
       <div id="pipeline-list"><span class="spinner"></span></div>
-    </div>
-  </aside>
+    </section>
+
+    <!-- All Roles — the sortable, searchable master table (rows click → role page) -->
+    <section class="hb-view" id="view-roles" aria-label="All roles">
+      <div class="controls" id="controls">
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input class="search-input" id="search-input" type="search" placeholder="Search company, role, notes, status…" aria-label="Search applications by company, role, or notes" oninput="applyFilter()">
+        </div>
+        <div class="filter-pills">
+          <button class="filter-pill active" onclick="setFilter('all',this)" data-filter="all">All</button>
+          <button class="filter-pill money" onclick="setFilter('high-paying',this)" data-filter="high-paying" title="$200K+ base, $300K+ TC/OTE, or premium-tier company (Anthropic, OpenAI, NVIDIA, etc.)">💰 High-Paying</button>
+          <button class="filter-pill" onclick="setFilter('followup',this)" data-filter="followup">⚡ Follow-up</button>
+          <button class="filter-pill" onclick="setFilter('applied',this)" data-filter="applied">Applied</button>
+          <button class="filter-pill" onclick="setFilter('interview',this)" data-filter="interview">Interview</button>
+          <button class="filter-pill" onclick="setFilter('offer',this)" data-filter="offer">Offer</button>
+          <button class="filter-pill" onclick="setFilter('evaluated',this)" data-filter="evaluated">Evaluated</button>
+          <button class="filter-pill" onclick="setFilter('rejected',this)" data-filter="rejected">Rejected</button>
+        </div>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="sortBy('num')">#<span class="sort-arrow" id="sort-num"></span></th>
+              <th onclick="sortBy('company')">Company<span class="sort-arrow" id="sort-company"></span></th>
+              <th>Role</th>
+              <th onclick="sortBy('status')">Status<span class="sort-arrow" id="sort-status"></span></th>
+              <th onclick="sortBy('score')">Score<span class="sort-arrow" id="sort-score"></span></th>
+              <th onclick="sortBy('comp')" title="Sort by compensation (highest first)">Comp<span class="sort-arrow" id="sort-comp"></span></th>
+              <th onclick="sortBy('date')">Date<span class="sort-arrow" id="sort-date">↓</span></th>
+              <th>Age</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="apps-tbody">
+            <tr class="loading-row"><td colspan="9"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- All-in-one Role page (#role/<key>) -->
+    <section class="hb-view" id="view-role" aria-label="Role detail">
+      <div id="role-content"><span class="spinner"></span></div>
+    </section>
+  </main>
+</div>
+
+<!-- Verification codes float — time-critical, visible from every tab -->
+<div class="hb-float-codes" id="verification-section" style="display:none">
+  <div class="hb-section-h" style="margin-top:0">Verification Codes <span id="vcode-count" style="color:var(--purple)"></span></div>
+  <div id="verification-list"></div>
 </div>
 
 <!-- Gmail setup modal -->
@@ -5197,32 +5545,34 @@ const HTML = /* html */ `<!DOCTYPE html>
         icon = '🚀'; title = 'Profile is set — ready to hunt';
         sub = 'Add a job URL to <code>data/pipeline.md</code> or run <code>/career-ops scan</code> to find offers.';
       }
-      tbody.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">' + icon + '</div>' +
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">' + icon + '</div>' +
         '<div class="empty-title">' + title + '</div>' +
         '<div class="empty-sub">' + sub + '</div></div></td></tr>';
       return;
     }
+    // Rows are doorways: the whole row clicks through to the role page (the
+    // old ↗ Open button died with PR — it errored on report-less pool/Indeed
+    // rows; the posting URL lives on the role page now). Apply stays per-row
+    // for Evaluated roles; the report icon stays a direct shortcut.
     tbody.innerHTML = apps.map(a => {
       const fuTag = a.needsFollowUp ? '<span class="followup-tag">⚡ ' + a.age + 'd</span>' : '';
       const cls = a.needsFollowUp ? ' class="followup-row"' : '';
       const reportBtn = a.reportLink
         ? '<a class="report-btn" href="/reports/' + esc(a.reportLink) + '" target="_blank" onclick="event.stopPropagation()" aria-label="Open report for ' + esc(a.company || a.num) + '" title="Open evaluation report">📄</a> '
         : '';
-      const openBtn = '<button class="btn-row-open" onclick="event.stopPropagation();openJobUrl(\\'' + esc(a.num) + '\\',this)" aria-label="Open job posting for ' + esc(a.company || a.num) + ' in new tab" title="Open job posting in new tab">↗ Open</button>';
       const applyBtn = a.status === 'evaluated'
         ? '<button class="btn-row-apply" onclick="event.stopPropagation();applyOne(\\'' + esc(a.num) + '\\')" aria-label="Apply to ' + esc(a.company || a.num) + ' and mark applied" title="Open job URL and mark Applied">Apply →</button>'
         : '';
-      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.num) + '\\')">' +
+      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.num) + '\\')" title="Open role page">' +
         '<td class="td-num">' + esc(a.num) + '</td>' +
         '<td><div class="td-company"><div class="company-avatar">' + avatarLetter(a.company) + '</div>' + reportBtn + esc(a.company) + '</div></td>' +
         '<td class="td-role">' + esc(a.role) + '</td>' +
-        '<td><span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>' + fuTag + '</td>' +
+        '<td><span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>' + fuTag + applyBtn + '</td>' +
         '<td>' + scorePill(a.score) + '</td>' +
         compCell(a) +
         '<td class="td-date">' + esc(a.date||'—') + '</td>' +
         '<td>' + ageLabel(a.age, a.needsFollowUp) + '</td>' +
         '<td class="td-notes">' + esc(a.notes) + '</td>' +
-        '<td class="td-actions">' + openBtn + applyBtn + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -5433,7 +5783,8 @@ const HTML = /* html */ `<!DOCTYPE html>
   });
 
   function rowClick(event, num) {
-    // Row click: scroll to or highlight (future expansion)
+    // The whole row is a doorway to the all-in-one role page.
+    goRole('t' + num);
   }
 
   /* ── Gmail ── */
@@ -5454,8 +5805,11 @@ const HTML = /* html */ `<!DOCTYPE html>
       }
       const inboxRes = await fetch('/api/gmail/inbox');
       if (inboxRes.status === 401) { renderGmailConnect(); return; }
-      const data = await inboxRes.json();
-      renderGmailSignals(data.signals || [], data.scanned_at, data.connected);
+      // Connected: the grouped Inbox view (hbRenderInbox via refreshBrain) owns
+      // #gmail-content from here — one conversation group per company+role.
+      const btn = document.getElementById('gmail-header-status');
+      if (btn) btn.innerHTML = '<span class="gmail-dot"></span><span style="font-size:12px;color:var(--text-sec);margin-left:6px">Gmail</span>';
+      refreshBrain();
     } catch {}
   }
 
@@ -7053,11 +7407,16 @@ const HTML = /* html */ `<!DOCTYPE html>
       const res = await fetch('/api/data');
       const data = await res.json();
       allApps = data.applications;
+      lastStats = data.stats;
+      lastUser = data.user || null;
       renderStats(data.stats);
       updateApplyBanner(data.applications);
       applyFilter();
       renderFollowUps(data.applications);
       renderPipeline(data.pipeline);
+      hbRenderHero();
+      hbRenderTabs();
+      hbRenderActiveView();
       const d = new Date(data.updatedAt);
       document.getElementById('last-updated').textContent =
         d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -7152,15 +7511,509 @@ const HTML = /* html */ `<!DOCTYPE html>
     );
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     HB tab system + renderers — one visual language with the Obsidian
+     Brain. Hash routing: #tab/<id> and #role/<key> (role pages).
+     ════════════════════════════════════════════════════════════════════ */
+  var HB_TABS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'pipeline', label: 'Pipeline' },
+    { id: 'queue', label: 'Apply Queue' },
+    { id: 'radar', label: 'Follow-up Radar' },
+    { id: 'review', label: 'Needs Review' },
+    { id: 'interviews', label: 'Interviews' },
+    { id: 'rejected', label: 'Rejected' },
+    { id: 'scan', label: 'Scan Feed' },
+    { id: 'patterns', label: 'Patterns' },
+    { id: 'inbox', label: 'Inbox' },
+    { id: 'roles', label: 'All Roles' },
+  ];
+  var hbActiveTab = 'overview';
+  var hbData = { groups: null, queue: null, scanfeed: null, patterns: null, interviews: null };
+  var hbOpenGroups = {};   // group key → expanded?
+  var lastStats = null, lastUser = null;
+
+  function hbSwitchTab(id) { location.hash = '#tab/' + id; }
+  function goRole(key) { location.hash = '#role/' + encodeURIComponent(key); }
+
+  function hbRoute() {
+    const h = location.hash || '';
+    const mRole = h.match(/^#role\\/(.+)$/);
+    document.querySelectorAll('.hb-view').forEach(v => v.classList.remove('is-active'));
+    if (mRole) {
+      hbActiveTab = 'role';
+      const view = document.getElementById('view-role');
+      if (view) { view.classList.add('is-active'); hbRenderRole(decodeURIComponent(mRole[1])); }
+      hbRenderTabs();
+      return;
+    }
+    const mTab = h.match(/^#tab\\/([a-z-]+)$/);
+    hbActiveTab = (mTab && HB_TABS.some(t => t.id === mTab[1])) ? mTab[1] : 'overview';
+    const view = document.getElementById('view-' + hbActiveTab);
+    if (view) view.classList.add('is-active');
+    hbRenderTabs();
+    hbRenderActiveView();
+  }
+
+  function hbCounts() {
+    const g = hbData.groups;
+    return {
+      overview: null,
+      pipeline: lastStats ? lastStats.total : null,
+      queue: hbData.queue ? hbData.queue.pendingCount : null,
+      radar: g && g.radar && g.radar.metadata ? (g.radar.metadata.pending ?? null) : null,
+      review: g && g.review ? g.review.length : null,
+      interviews: hbData.interviews ? hbData.interviews.count : (lastStats ? lastStats.interview : null),
+      rejected: lastStats ? lastStats.rejected : null,
+      scan: hbData.scanfeed ? hbData.scanfeed.total : null,
+      patterns: null,
+      inbox: g && g.inbox ? (g.inbox.live || []).length : null,
+      roles: lastStats ? lastStats.total : null,
+    };
+  }
+
+  function hbRenderTabs() {
+    const host = document.getElementById('hb-tabs');
+    if (!host) return;
+    const counts = hbCounts();
+    host.innerHTML = HB_TABS.map(t =>
+      '<button class="hb-tab' + (t.id === hbActiveTab ? ' is-active' : '') + '" onclick="hbSwitchTab(\\'' + t.id + '\\')">' + t.label +
+      (counts[t.id] != null ? '<span class="hb-count">' + counts[t.id] + '</span>' : '') + '</button>'
+    ).join('');
+  }
+
+  function hbRenderActiveView() {
+    if (hbActiveTab === 'overview') hbRenderOverview();
+    else if (hbActiveTab === 'pipeline') hbRenderPipelineBoard();
+    else if (hbActiveTab === 'queue') hbRenderQueue();
+    else if (hbActiveTab === 'radar') hbRenderRadar();
+    else if (hbActiveTab === 'review') hbRenderReview();
+    else if (hbActiveTab === 'interviews') hbRenderInterviews();
+    else if (hbActiveTab === 'rejected') hbRenderRejected();
+    else if (hbActiveTab === 'scan') hbRenderScan();
+    else if (hbActiveTab === 'patterns') hbRenderPatterns();
+    else if (hbActiveTab === 'inbox') hbRenderInbox();
+    // roles + role views render via refresh()/hbRenderRole directly
+  }
+
+  async function refreshBrain() {
+    try {
+      const [groups, queue, scanfeed, patterns, interviews] = await Promise.all([
+        fetch('/api/groups').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/queue').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/scanfeed').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/patterns').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/interviews').then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      hbData = { groups, queue, scanfeed, patterns, interviews };
+      hbRenderHero(); hbRenderTabs(); hbRenderActiveView();
+    } catch (e) { /* views keep their last state */ }
+  }
+
+  function hbDate(s) { return s ? String(s).slice(0, 10) : ''; }
+  function hbDT(s) { return s ? String(s).slice(0, 16).replace('T', ' ') : ''; }
+
+  function hbRenderHero() {
+    const greet = document.getElementById('hb-greet');
+    const sub = document.getElementById('hb-subline');
+    const kpis = document.getElementById('hb-kpis');
+    const stack = document.getElementById('hb-stack');
+    if (!greet || !kpis) return;
+    const h = new Date().getHours();
+    const part = h < 5 ? '🦉 Up late' : h < 12 ? '🌅 Good morning' : h < 18 ? '🌤 Good afternoon' : '🌙 Good evening';
+    greet.textContent = part + (lastUser && lastUser.firstName ? ', ' + lastUser.firstName : '');
+    const s = lastStats || {};
+    const fm = (hbData.groups && hbData.groups.radar && hbData.groups.radar.metadata) || {};
+    const bits = [];
+    if (s.interview) bits.push(s.interview + ' interview' + (s.interview === 1 ? '' : 's') + ' live');
+    if (fm.pending) bits.push(fm.pending + ' follow-up' + (fm.pending === 1 ? '' : 's') + ' pending' + (fm.overdue ? ' (' + fm.overdue + ' overdue)' : ''));
+    if (hbData.groups && hbData.groups.review && hbData.groups.review.length) bits.push(hbData.groups.review.length + ' to review');
+    if (hbData.queue && hbData.queue.nextRank != null) bits.push('queue head #' + hbData.queue.nextRank);
+    sub.innerHTML = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) +
+      ' · Where things stand: ' + (bits.length ? bits.map(esc).join(' · ') : 'all quiet');
+    const kpi = (label, value, accent, tab) =>
+      '<div class="hb-kpi hb-acc-' + accent + (tab ? ' hb-clickable" title="Open ' + tab + '" onclick="hbSwitchTab(\\'' + tab + '\\')"' : '"') + '>' +
+      '<div class="hb-kpi-v">' + (value ?? '–') + '</div><div class="hb-kpi-l">' + label + '</div></div>';
+    kpis.innerHTML =
+      kpi('tracked', s.total, 'ox', 'pipeline') +
+      kpi('applied', s.applied, 'ember', 'pipeline') +
+      kpi('interviews', s.interview, 'gold', 'interviews') +
+      kpi('responded', s.responded, 'sage', 'pipeline') +
+      kpi('follow-ups pending', fm.pending ?? '–', 'gold', 'radar') +
+      kpi('follow-ups overdue', fm.overdue ?? '–', 'ox', 'radar') +
+      kpi('needs review', hbData.groups && hbData.groups.review ? hbData.groups.review.length : '–', 'ember', 'review') +
+      kpi('queue pending', hbData.queue ? hbData.queue.pendingCount : '–', 'ember', 'queue') +
+      kpi('scanned all-time', hbData.scanfeed ? hbData.scanfeed.total : '–', 'slate', 'scan');
+    // stacked pipeline bar, canonical order
+    const order = [['evaluated', s.evaluated], ['applied', s.applied], ['responded', s.responded],
+      ['interview', s.interview], ['offer', s.offer], ['rejected', s.rejected], ['discarded', s.discarded], ['skip', s.skip]];
+    const total = order.reduce((a, b) => a + (b[1] || 0), 0);
+    if (stack) {
+      if (!total) stack.style.display = 'none';
+      else {
+        stack.style.display = '';
+        stack.innerHTML = order.filter(o => o[1]).map((o, i) =>
+          '<div class="hb-seg hb-seg-' + (i % 5) + '" style="flex:' + o[1] + '" title="' + o[0] + ': ' + o[1] + '"></div>').join('');
+      }
+    }
+  }
+
+  /* ── Group cards (Inbox / Review / Radar) ───────────────────────────── */
+  function hbStatusContext(g) {
+    // The stale-email reasoning aid: current status + when it got it vs the
+    // email's date — "this predates my rejection call → dismiss".
+    if (!g.status) return '';
+    let txt = 'status: ' + esc(g.status);
+    if (g.statusDate) txt += ' (since ' + esc(g.statusDate) + ')';
+    txt += ' · email: ' + esc(hbDate(g.latestDate));
+    if (g.statusDate && g.latestDate && hbDate(g.latestDate) > g.statusDate) {
+      txt += ' — <b style="color:var(--orange)">arrived AFTER the status was set</b>';
+    }
+    return '<div class="hb-num" style="margin-top:2px">' + txt + '</div>';
+  }
+
+  function hbGroupHeader(g, mode) {
+    const late = g.respondBy && !g.handled && g.respondBy < new Date().toISOString().slice(0, 10);
+    const kindChip = g.handled
+      ? '<span class="hb-chip">✓ ' + (g.handledBy === 'touch' ? 'handled (touch logged)' : 'you replied') + '</span>'
+      : g.num == null && !g.roleKey
+        ? '<span class="hb-chip hb-warm">not in tracker</span>'
+        : '<span class="hb-chip' + (late ? ' hb-hot' : ' hb-warm') + '">' + esc((g.kinds || []).join(' · ') || 'response') + '</span>';
+    const title = esc(g.company) + (g.num ? ' <span class="hb-num">#' + esc(g.num) + '</span>' : '');
+    const roles = (g.roles && g.roles.length) ? '<span style="color:var(--text-sec)">' + g.roles.map(esc).join(' · ') + '</span>' : '';
+    const right = g.handled
+      ? '<span class="hb-num">replied ' + esc(hbDate(g.repliedAt)) + '</span>'
+      : '<span class="hb-num">received ' + esc(hbDate(g.latestDate)) + (g.respondBy ? ' · respond by ' + esc(g.respondBy) + (late ? ' — OVERDUE' : '') : '') + '</span>';
+    const arrow = '<span class="hb-group-arrow">▶</span>';
+    const count = g.emails.length > 1 ? '<span class="hb-count">' + g.emails.length + '</span>' : '';
+    const roleLink = g.roleKey || (g.num ? 't' + g.num : null);
+    const co = roleLink
+      ? '<a class="hb-link" style="font-weight:650" href="#role/' + encodeURIComponent(roleLink) + '" onclick="event.stopPropagation()">' + title + '</a>'
+      : '<span class="hb-co" style="min-width:0">' + title + '</span>';
+    return arrow + kindChip + co + roles + count + '<span style="margin-left:auto"></span>' + right;
+  }
+
+  function hbGroupCard(g, mode) {
+    const gid = 'g_' + g.key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const open = hbOpenGroups[g.key] ? ' is-open' : '';
+    const latest = g.emails[0] || {};
+    const composeSig = { from: latest.from, subject: latest.subject, role: (g.roles && g.roles[0]) || '', company: g.company };
+    const mail =
+      (latest.id ? '<a class="hb-btn hb-btn-ghost" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(latest.id) + '">✉ Open email</a>' : '') +
+      (mode === 'radar' || mode === 'inbox'
+        ? (gmailReplyAddr(latest.from) ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" title="Pre-filled Gmail draft — nothing sends until you hit Send" href="' + esc(gmailComposeUrl(composeSig)) + '">↩ Respond</a>' : '')
+        : '');
+    const classify = mode === 'review'
+      ? '<div class="hb-classify">' +
+        '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'interview-scheduled\\')">📅 Interview scheduled</button>' +
+        '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'follow-up\\')">⚡ Requires follow-up</button>' +
+        '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'rejection\\')">✗ Rejection</button>' +
+        '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'confirmation\\')">✓ Confirmation</button>' +
+        '</div>'
+      : '';
+    const dismiss = mode === 'inbox'
+      ? '<button class="hb-btn hb-btn-ghost" onclick="hbDismissGroup(\\'' + esc(g.key) + '\\')" title="Hide from the inbox (the tracker is untouched)">Dismiss</button>'
+      : '';
+    const body = g.emails.map(e =>
+      '<div class="hb-group-email">' +
+        '<div class="hb-row" style="border:none;padding:2px 0">' +
+          '<span class="hb-chip' + (e.kind === 'rejected' ? ' hb-hot' : e.kind === 'interview' ? '' : ' hb-warm') + '">' + esc(e.kind || '') + '</span>' +
+          '<span class="hb-num">' + esc(hbDate(e.date)) + '</span>' +
+          (e.id ? '<a class="hb-link hb-num" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(e.id) + '">open ↗</a>' : '') +
+        '</div>' +
+        '<div class="hb-review-subj">“' + esc(e.subject || '') + '”</div>' +
+        (e.snippet ? '<div class="hb-review-snip">' + esc(e.snippet) + '</div>' : '') +
+      '</div>'
+    ).join('');
+    return '<div class="hb-group' + open + '" id="' + gid + '">' +
+      '<div class="hb-group-h" onclick="hbToggleGroup(\\'' + esc(g.key) + '\\')">' + hbGroupHeader(g, mode) + '</div>' +
+      '<div style="padding:0 12px 9px">' + hbStatusContext(g) +
+      '<div class="hb-mail-actions">' + mail + dismiss + '</div>' + classify + '</div>' +
+      '<div class="hb-group-body">' + body + '</div>' +
+    '</div>';
+  }
+
+  function hbToggleGroup(key) {
+    hbOpenGroups[key] = !hbOpenGroups[key];
+    hbRenderActiveView();
+  }
+
+  function hbFindGroup(key) {
+    const g = hbData.groups;
+    if (!g) return null;
+    return (g.review || []).find(x => x.key === key) ||
+      ((g.inbox && g.inbox.live) || []).find(x => x.key === key) || null;
+  }
+
+  async function hbClassify(key, action) {
+    const g = hbFindGroup(key);
+    if (!g) { showToast('Group not found — refresh and retry', 'error'); return; }
+    let interviewAt = null;
+    if (action === 'interview-scheduled') {
+      interviewAt = prompt('Interview date + time (YYYY-MM-DD HH:MM):', '');
+      if (interviewAt === null) return; // user cancelled
+      interviewAt = interviewAt.trim().replace(' ', 'T');
+      if (interviewAt && !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(interviewAt)) {
+        showToast('Could not parse that date — filing without a time; set it on the role page later', 'info');
+        interviewAt = null;
+      }
+    }
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action, ids: g.emails.map(e => e.id).filter(Boolean),
+          num: g.num || null, poolKey: g.roleKey && g.roleKey.charAt(0) === 'p' ? g.roleKey : null,
+          company: g.company, role: (g.roles && g.roles[0]) || '', interviewAt,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'classify failed');
+      showToast('Filed as ' + action.replace('-', ' ') + (data.num ? ' → #' + data.num : ''), 'success');
+      await refresh(); await refreshBrain();
+    } catch (err) { showToast('Classify failed: ' + err.message, 'error'); }
+  }
+
+  async function hbDismissGroup(key) {
+    const g = hbFindGroup(key);
+    if (!g) return;
+    try {
+      await fetch('/api/inbox/dismiss', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: g.emails.map(e => e.id).filter(Boolean) }),
+      });
+      await refreshBrain();
+    } catch (err) { showToast('Dismiss failed: ' + err.message, 'error'); }
+  }
+
+  /* ── Tab views ──────────────────────────────────────────────────────── */
+  function hbRenderOverview() {
+    const host = document.getElementById('overview-cards');
+    if (!host) return;
+    const g = hbData.groups;
+    const card = (color, title, tab, inner) =>
+      '<div class="hb-ccard hb-cc-' + color + ' hb-clickable" title="Open ' + tab + '" onclick="hbSwitchTab(\\'' + tab + '\\')">' +
+      '<div class="hb-ccard-h"><span class="hb-cdot"></span><span>' + title + '</span><span class="hb-jump">→</span></div>' + inner + '</div>';
+    const line = (co, right) => '<div class="hb-line"><span class="hb-co">' + esc(co) + '</span><span class="hb-num" style="margin-left:auto">' + right + '</span></div>';
+    let html = '';
+    // 🔥 Needs you now
+    const radar = (g && g.radar && g.radar.entries) || [];
+    html += card('orange', '🔥 Needs you now', 'radar', radar.length
+      ? '<div class="hb-big">' + ((g.radar.metadata && g.radar.metadata.pending) || radar.length) + '</div><div class="hb-big-sub">follow-ups pending</div>' +
+        radar.slice(0, 5).map(e => line(e.company, e.nextStepEmail ? '✉ next step?' : e.urgency === 'respond-pending' ? 'respond by ' + esc(e.respondBy || '') : esc(e.urgency))).join('')
+      : '<div class="hb-empty">No applied roles awaiting response</div>');
+    // 🧐 Needs review
+    const review = (g && g.review) || [];
+    html += card('orange', '🧐 Needs review', 'review', review.length
+      ? '<div class="hb-big">' + review.length + '</div><div class="hb-big-sub">emails to classify — open + decide</div>' +
+        review.slice(0, 5).map(r => line(r.company, r.num == null && !r.roleKey ? 'not in tracker' : esc((r.kinds || []).join(' · ')))).join('')
+      : '<div class="hb-empty">Nothing needs review</div>');
+    // 🎤 Interviews
+    const iv = (hbData.interviews && hbData.interviews.rows) || [];
+    html += card('gold', '🎤 Interviews', 'interviews', iv.length
+      ? '<div class="hb-big">' + iv.length + '</div><div class="hb-big-sub">in interview stage</div>' +
+        iv.slice(0, 5).map(r => line(r.company, r.interviewAt ? esc(hbDT(r.interviewAt)) : 'no date yet')).join('')
+      : '<div class="hb-empty">Nothing in interview stage yet</div>');
+    // 🗂 Apply queue
+    const q = hbData.queue;
+    html += card('teal', '🗂 Apply queue', 'queue', q && q.head && q.head.length
+      ? '<div class="hb-big">' + q.pendingCount + '</div><div class="hb-big-sub">pending of ' + q.total + ' ranked</div>' +
+        q.head.slice(0, 4).map(r => line(r.company, '#' + r.rank)).join('')
+      : '<div class="hb-empty">No ranked pool</div>');
+    // 📊 Pipeline
+    const s = lastStats || {};
+    html += card('green', '📊 Pipeline', 'pipeline', s.total
+      ? '<div class="hb-big">' + s.total + '</div><div class="hb-big-sub">applications tracked</div>' +
+        [['Evaluated', s.evaluated], ['Applied', s.applied], ['Responded', s.responded], ['Interview', s.interview], ['Offer', s.offer], ['Rejected', s.rejected]]
+          .filter(x => x[1]).map(x => '<div class="hb-statgrid" style="grid-template-columns:1fr auto"><div class="k">' + x[0] + '</div><div class="v">' + x[1] + '</div></div>').join('')
+      : '<div class="hb-empty">No applications tracked</div>');
+    // 📡 Scanner
+    const sc = hbData.scanfeed;
+    html += card('violet', '📡 Scanner', 'scan', sc && sc.total
+      ? '<div class="hb-big">' + sc.total + '</div><div class="hb-big-sub">discoveries all-time · newest ' + esc(sc.lastSeen || '') + '</div>' +
+        (sc.recent || []).slice(0, 3).map(r => line(r.company, esc(r.first_seen || ''))).join('')
+      : '<div class="hb-empty">Scanner hasn’t run</div>');
+    host.innerHTML = html;
+  }
+
+  function hbRenderPipelineBoard() {
+    const host = document.getElementById('pipeline-board');
+    if (!host) return;
+    const order = ['evaluated', 'applied', 'submitted', 'responded', 'interview', 'offer', 'rejected', 'discarded', 'skip'];
+    const label = { evaluated: 'Evaluated', applied: 'Applied', submitted: 'Submitted?', responded: 'Responded', interview: 'Interview', offer: 'Offer', rejected: 'Rejected', discarded: 'Discarded', skip: 'SKIP' };
+    if (!allApps.length) { host.innerHTML = '<div class="hb-empty">No applications tracked — paste a job URL or run /career-ops scan</div>'; return; }
+    host.innerHTML = order.map((st, i) => {
+      const inState = allApps.filter(a => a.status === st);
+      if (!inState.length) return '';
+      return '<div class="hb-col"><div class="hb-col-h"><span>' + label[st] + '</span><span class="hb-count">' + inState.length + '</span></div>' +
+        inState.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 30).map(a =>
+          '<div class="hb-kcard" title="' + esc(a.notes || '') + '" onclick="goRole(\\'t' + esc(a.num) + '\\')">' +
+          '<div class="hb-co">' + esc(a.company) + '</div><div class="hb-role">' + esc(a.role) + '</div>' +
+          '<div class="hb-sub"><span>' + esc(a.score || '') + '</span><span>' + esc(a.date || '') + '</span><span class="hb-num">#' + esc(a.num) + '</span></div></div>'
+        ).join('') + '</div>';
+    }).join('');
+  }
+
+  function hbRenderQueue() {
+    const host = document.getElementById('queue-content');
+    if (!host) return;
+    const q = hbData.queue;
+    if (!q || !q.head || !q.head.length) { host.innerHTML = '<div class="hb-empty">No ranked pool — run the batch pipeline or paste URLs into data/pipeline.md</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + q.pendingCount + ' pending of ' + q.total + ' ranked · next rank ' + esc(String(q.nextRank)) + ' · source: output/pool-apply-order.json</div>' +
+      q.head.map(r =>
+        '<div class="hb-row"><span class="hb-num">#' + r.rank + '</span>' +
+        '<a class="hb-link hb-co" href="#role/' + encodeURIComponent(r.key) + '">' + esc(r.company) + '</a>' +
+        '<span>' + esc(r.title) + '</span><span class="hb-chip">' + esc(r.ats || '') + '</span>' +
+        (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>'
+      ).join('');
+  }
+
+  function hbRenderRadar() {
+    const host = document.getElementById('radar-content');
+    if (!host) return;
+    const g = hbData.groups;
+    if (!g) { host.innerHTML = '<span class="spinner"></span>'; return; }
+    const entries = (g.radar && g.radar.entries) || [];
+    const m = (g.radar && g.radar.metadata) || {};
+    // Merge in the email groups by num so Respond has a real recipient.
+    const groupByNum = {};
+    ((g.inbox && g.inbox.live) || []).concat(g.review || []).forEach(x => { if (x.num) groupByNum[x.num] = x; });
+    if (!entries.length) { host.innerHTML = '<div class="hb-empty">No applied roles awaiting response</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + (m.pending ?? entries.length) + ' pending (' + (m.overdue ?? 0) + ' overdue · ' + (m.urgent ?? 0) + ' check-email · ' + (m.respondPending ?? 0) + ' respond) · source: engine/tracker/followup-cadence.mjs</div>' +
+      entries.map(e => {
+        const grp = groupByNum[String(e.num)];
+        const composeSig = grp && grp.emails && grp.emails[0]
+          ? { from: grp.emails[0].from, subject: grp.emails[0].subject, role: e.role, company: e.company }
+          : { from: e.inboundFrom || (e.contacts && e.contacts[0] && e.contacts[0].email) || '', subject: e.role + ' — ' + e.company, role: e.role, company: e.company };
+        const chipTxt = e.nextStepEmail ? 'next step?' : e.urgency === 'respond-pending' ? 'respond' : e.urgency;
+        const detail = e.nextStepEmail
+          ? '✉ “' + esc((e.nextStepEmail.subject || '').slice(0, 60)) + '” — check the email'
+          : e.awaitingReply
+            ? 'they wrote ' + esc(e.inboundDate || '') + ' · respond by ' + esc(e.respondBy || '')
+            : esc(String(e.daysSinceApplication)) + 'd since apply · follow-ups: ' + e.followupCount + (e.nextFollowupDate ? ' · next ' + esc(e.nextFollowupDate) : '');
+        const mail = '<span class="hb-mail-actions">' +
+          ((grp && grp.emails && grp.emails[0] && grp.emails[0].id) ? '<a class="hb-btn hb-btn-ghost" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(grp.emails[0].id) + '">✉ open</a>' : '') +
+          (gmailReplyAddr(composeSig.from) ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" title="Pre-filled Gmail draft — nothing sends until you hit Send" href="' + esc(gmailComposeUrl(composeSig)) + '">↩ Respond</a>' : '') +
+          '</span>';
+        return '<div class="hb-row"><span class="hb-chip' + (/overdue|urgent/.test(e.urgency) ? ' hb-hot' : e.urgency === 'respond-pending' ? ' hb-warm' : '') + '">' + esc(chipTxt) + '</span>' +
+          '<a class="hb-link hb-co" href="#role/t' + esc(String(e.num)) + '">' + esc(e.company) + '</a>' +
+          '<span>' + esc(e.role) + '</span><span class="hb-num">' + detail + '</span>' + mail + '</div>';
+      }).join('');
+  }
+
+  function hbRenderReview() {
+    const host = document.getElementById('review-content');
+    if (!host) return;
+    const g = hbData.groups;
+    if (!g) { host.innerHTML = '<span class="spinner"></span>'; return; }
+    const review = g.review || [];
+    if (!review.length) { host.innerHTML = '<div class="hb-empty">Nothing needs review — unclear responses land here for you to classify</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + review.length + ' conversation(s) to classify · open the email, then pick what it was · classification writes the tracker</div>' +
+      review.slice().sort((a, b) => String(a.respondBy || '9999').localeCompare(String(b.respondBy || '9999'))).map(x => hbGroupCard(x, 'review')).join('');
+  }
+
+  function hbRenderInterviews() {
+    const host = document.getElementById('interviews-content');
+    if (!host) return;
+    const iv = hbData.interviews;
+    if (!iv) { host.innerHTML = '<span class="spinner"></span>'; return; }
+    const rows = iv.rows || [];
+    if (!rows.length) { host.innerHTML = '<div class="hb-empty">Nothing in interview stage yet</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + rows.length + ' in interview stage · dates from classification + notes</div>' +
+      rows.map(r =>
+        '<div class="hb-row" title="' + esc(r.notes || '') + '">' +
+        '<span class="hb-chip' + (r.interviewAt ? '' : ' hb-warm') + '">' + (r.interviewAt ? '📅 ' + esc(hbDT(r.interviewAt)) : 'no date yet') + '</span>' +
+        '<a class="hb-link hb-co" href="#role/' + encodeURIComponent(r.key) + '">' + esc(r.company) + '</a>' +
+        '<span>' + esc(r.role) + '</span>' +
+        '<span class="hb-num" style="margin-left:auto">' + (r.prepFiles && r.prepFiles.length ? r.prepFiles.length + ' prep file(s)' : 'no prep files yet') + '</span></div>'
+      ).join('');
+  }
+
+  function hbRenderRejected() {
+    const host = document.getElementById('rejected-content');
+    if (!host) return;
+    const rows = allApps.filter(a => a.status === 'rejected' || a.status === 'discarded')
+      .sort((a, b) => String(b.statusDate || b.date || '').localeCompare(String(a.statusDate || a.date || '')));
+    if (!rows.length) { host.innerHTML = '<div class="hb-empty">Nothing rejected yet — the floor holds</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + rows.length + ' closed (rejected + discarded) · dates from the status-history log</div>' +
+      rows.map(a =>
+        '<div class="hb-row"><span class="hb-chip' + (a.status === 'rejected' ? ' hb-hot' : '') + '">' + esc(a.status) + (a.statusDate ? ' ' + esc(a.statusDate) : '') + '</span>' +
+        '<a class="hb-link hb-co" href="#role/t' + esc(a.num) + '">' + esc(a.company) + '</a>' +
+        '<span>' + esc(a.role) + '</span>' +
+        '<span class="hb-num" style="margin-left:auto">applied ' + esc(a.date || '—') + '</span></div>'
+      ).join('');
+  }
+
+  function hbRenderScan() {
+    const host = document.getElementById('scan-content');
+    if (!host) return;
+    const sc = hbData.scanfeed;
+    if (!sc) { host.innerHTML = '<span class="spinner"></span>'; return; }
+    if (!sc.total) { host.innerHTML = '<div class="hb-empty">Scanner hasn’t run — node engine/scan/scan.mjs</div>'; return; }
+    host.innerHTML = '<div class="hb-meta">' + sc.total + ' discoveries all-time · newest ' + esc(sc.lastSeen || '') + ' · source: data/scan-history.tsv</div>' +
+      (sc.recent || []).map(r =>
+        '<div class="hb-row"><span class="hb-num">' + esc(r.first_seen || '') + '</span><span class="hb-co">' + esc(r.company || '') + '</span>' +
+        '<span>' + esc(r.title || '') + '</span><span class="hb-chip">' + esc(r.portal || '') + '</span>' +
+        (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>'
+      ).join('');
+  }
+
+  function hbRenderPatterns() {
+    const host = document.getElementById('patterns-content');
+    if (!host) return;
+    const p = hbData.patterns;
+    if (!p) { host.innerHTML = '<span class="spinner"></span>'; return; }
+    if (p.error || !p.metadata || !p.metadata.total) { host.innerHTML = '<div class="hb-empty">Too few outcomes to analyze yet</div>'; return; }
+    const out = p.metadata.byOutcome || {};
+    const total = Object.values(out).reduce((a, b) => a + b, 0) || 1;
+    host.innerHTML = '<div class="hb-meta">' + p.metadata.total + ' analyzed · source: engine/tracker/analyze-patterns.mjs</div>' +
+      '<div class="hb-section-h">Outcomes</div>' +
+      Object.entries(out).map(([k, v]) =>
+        '<div class="hb-row"><span class="hb-co">' + esc(k) + '</span><span class="hb-num">' + v + '</span>' +
+        '<div class="hb-bar" style="width:' + Math.max(2, Math.round((v / total) * 240)) + 'px"></div></div>').join('') +
+      (Array.isArray(p.recommendations) && p.recommendations.length
+        ? '<div class="hb-section-h">Recommendations</div>' + p.recommendations.slice(0, 8).map(r =>
+            '<div class="hb-row">' + esc(typeof r === 'string' ? r : (r.text || r.message || JSON.stringify(r))) + '</div>').join('')
+        : '');
+  }
+
+  function hbRenderInbox() {
+    const host = document.getElementById('gmail-content');
+    if (!host) return;
+    const g = hbData.groups;
+    if (!g) return; // connect card stays until groups load
+    if (!g.connected) return; // renderGmailConnect owns this state
+    const live = (g.inbox && g.inbox.live) || [];
+    const filed = (g.inbox && g.inbox.autoFiledCount) || 0;
+    const wrote = (g.inbox && g.inbox.autoAppliedCount) || 0;
+    if (!live.length) {
+      host.innerHTML = '<div class="hb-empty">Inbox clear — no live email signals</div>' +
+        (filed ? '<div class="hb-num">' + filed + ' emails auto-filed quietly (' + wrote + ' wrote the tracker)</div>' : '');
+      return;
+    }
+    host.innerHTML = '<div class="hb-meta">' + live.length + ' conversation group(s) · ' + filed + ' auto-filed quietly · grouped by company + role; Dismiss hides handled mail</div>' +
+      live.map(x => hbGroupCard(x, 'inbox')).join('');
+  }
+
+  // Role page placeholder — P2 fills this in.
+  function hbRenderRole(key) {
+    const host = document.getElementById('role-content');
+    if (host) host.innerHTML = '<div class="hb-empty">Loading role ' + esc(key) + '…</div>';
+  }
+
   // Boot
   refresh().then(scheduleRefresh);
   checkSetupStatus();
   refreshGmail();
+  refreshBrain();
   renderVerificationCodes();
   checkAutopilotStatus();
   checkPipelineStatus();
   renderManualQueue();
+  window.addEventListener('hashchange', hbRoute);
+  hbRoute();
   setInterval(refreshGmail, 5 * 60 * 1000);
+  setInterval(refreshBrain, 60 * 1000);
   setInterval(renderVerificationCodes, 15 * 1000);
   setInterval(checkPipelineStatus, 30 * 1000);
   setInterval(renderManualQueue, 60 * 1000);
@@ -7413,23 +8266,215 @@ async function handleRequest(req, res) {
       return sendJsonError(res, 400, 'num required (digits only)');
     }
     try {
+      let url = null;
       const files = await fs.readdir(REPORTS_DIR).catch(() => []);
       const candidate = files.find(f => f.startsWith(String(num).padStart(3, '0') + '-') || f.startsWith(num + '-'));
-      if (!candidate) {
-        return sendJsonError(res, 404, 'no report');
+      if (candidate) {
+        const safePath = resolveSafeReportPath(candidate);
+        if (safePath) {
+          const text = await fs.readFile(safePath, 'utf8');
+          const m = text.match(/\*\*URL[^:*]*:\*\*\s*(https?:\/\/[^\s|]+)/);
+          url = m ? m[1].trim() : null;
+        }
       }
-      const safePath = resolveSafeReportPath(candidate);
-      if (!safePath) {
-        return sendJsonError(res, 400, 'invalid report path');
+      // Pool/Indeed-lane rows have no report — resolve through the role index
+      // ("No URL found in report for #120" was every pool row's Open story).
+      if (!url) {
+        const index = await getRoleIndex();
+        const role = index.byKey ? index.byKey['t' + num] : null;
+        if (role && role.url) url = role.url;
       }
-      const text = await fs.readFile(safePath, 'utf8');
-      const m = text.match(/\*\*URL[^:*]*:\*\*\s*(https?:\/\/[^\s|]+)/);
-      const url = m ? m[1].trim() : null;
+      if (!url) return sendJsonError(res, 404, 'no posting URL on file');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, url }));
     } catch (err) {
       sendJsonError(res, 500, 'failed to read report', err);
     }
+    return;
+  }
+
+  // ── API: Email groups (Inbox / Needs Review / Radar payload) ──
+  if (pathname === '/api/groups') {
+    try {
+      const index = await getRoleIndex();
+      const hist = loadHistory(HISTORY_FILE);
+      const touches = await readTouchesByNum();
+      const sentIdx = buildSentIndex(gmailCache.sentIndex || []);
+      const groups = groupSignals({ signals: gmailCache.signals || [], sentIndex: sentIdx, touchesByNum: touches });
+      for (const g of groups) {
+        const poolKey = g.emails.map(e => e.poolKey).find(Boolean);
+        const liveRole = (g.num != null && index.byKey) ? index.byKey['t' + g.num]
+          : (poolKey && index.byKey) ? index.byKey[poolKey] : null;
+        if (liveRole) {
+          g.status = liveRole.status;
+          g.roleKey = liveRole.key;
+          if (!g.roles.length && liveRole.role) g.roles = [liveRole.role];
+          if (g.num != null) {
+            const ts = latestStatusDate(hist, g.num, liveRole.status);
+            g.statusDate = ts ? String(ts).slice(0, 10) : null;
+          }
+        } else if (poolKey) { g.roleKey = poolKey; }
+      }
+      const inbox = groupsForInbox(groups);
+      const review = groupsForReview(groups);
+      const radar = await runAnalyzer('engine/tracker/followup-cadence.mjs', 60_000);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        connected: !!(gmailTokens && gmailTokens.refresh_token),
+        scannedAt: gmailCache.scanned_at || null,
+        inbox, review,
+        radar: radar && radar.entries
+          ? { metadata: radar.metadata || {}, entries: radar.entries.filter(e => e.urgency && e.urgency !== 'waiting').slice(0, 60) }
+          : { metadata: {}, entries: [] },
+      }));
+    } catch (err) { sendJsonError(res, 500, 'groups failed', err); }
+    return;
+  }
+
+  // ── API: Classify a reviewed email group (the 4-button desk) ──
+  // interview-scheduled → Interview (+interview_at) · follow-up → Responded ·
+  // rejection → Rejected · confirmation → filed, status untouched.
+  // Pool-only / unmatched groups get their tracker row created here — the
+  // USER's click is what mints rows, never the scanner.
+  if (pathname === '/api/classify' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const { action, ids, poolKey, company, role, interviewAt } = body;
+      const ACTIONS = { 'interview-scheduled': 'Interview', 'follow-up': 'Responded', 'rejection': 'Rejected', 'confirmation': null };
+      if (!(action in ACTIONS)) return sendJsonError(res, 400, 'invalid action');
+      if (!Array.isArray(ids) || !ids.length || ids.length > 100) return sendJsonError(res, 400, 'ids required');
+      let num = body.num != null && /^\d{1,5}$/.test(String(body.num)) ? String(body.num) : null;
+      if (!num) num = await createTrackerRowFor({ poolKey, company, role });
+      const index = await getRoleIndex();
+      const liveRole = index.byKey ? index.byKey['t' + num] : null;
+      const current = liveRole ? String(liveRole.status || '').toLowerCase() : '';
+      const target = ACTIONS[action];
+      if (target) {
+        // follow-up never downgrades a live conversation; the others are the
+        // user's explicit call on what the email WAS.
+        const write = action === 'follow-up'
+          ? ['applied', 'evaluated', 'submitted'].includes(current)
+          : current !== target.toLowerCase();
+        if (write) await updateApplicationStatus(num, target, 'classify');
+      }
+      if (action === 'interview-scheduled' && interviewAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(interviewAt))) {
+        try {
+          setInterviewDate(HISTORY_FILE, {
+            ts: new Date().toISOString().slice(0, 16), num,
+            company: (liveRole && liveRole.company) || company || '',
+            role: (liveRole && liveRole.role) || role || '',
+            neu: String(interviewAt).slice(0, 16), source: 'classify',
+          });
+        } catch { /* best-effort */ }
+      }
+      let marked = 0;
+      for (const s of (gmailCache.signals || [])) {
+        if (!ids.includes(s.id)) continue;
+        s.classified = action; s.dismissed = true;
+        if (!s.num) s.num = num;
+        marked++;
+      }
+      await saveGmailCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, num, marked }));
+    } catch (err) { sendJsonError(res, 400, 'classify failed', err); }
+    return;
+  }
+
+  // ── API: Dismiss inbox signals (unlimited — only unhandled mail shows) ──
+  if (pathname === '/api/inbox/dismiss' && req.method === 'POST') {
+    try {
+      const { ids } = await readJsonBody(req);
+      if (!Array.isArray(ids) || !ids.length || ids.length > 200) return sendJsonError(res, 400, 'ids required');
+      let n = 0;
+      for (const s of (gmailCache.signals || [])) {
+        if (ids.includes(s.id) && !s.dismissed) { s.dismissed = true; n++; }
+      }
+      await saveGmailCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, dismissed: n }));
+    } catch (err) { sendJsonError(res, 400, 'dismiss failed', err); }
+    return;
+  }
+
+  // ── API: Apply-queue head (pool) ──
+  if (pathname === '/api/queue') {
+    try {
+      let pool = null;
+      try { pool = JSON.parse(await fs.readFile(POOL_FILE, 'utf8')); } catch {}
+      const rows = (pool && pool.rows) || [];
+      const pending = rows.filter(r => !r.status && !r.applied && !r.skipped);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        nextRank: pool ? pool.nextRank ?? null : null,
+        total: rows.length,
+        pendingCount: pending.length,
+        head: pending.slice(0, 25).map(r => ({
+          key: 'p' + r.n, rank: r.rank, n: r.n, company: r.company, title: (r.title || '').trim(),
+          ats: r.ats, loc: r.loc, tier: r.tier,
+          url: r.ats === 'indeed' ? (r.indeed || r.url) : r.url,
+        })),
+      }));
+    } catch (err) { sendJsonError(res, 500, 'queue failed', err); }
+    return;
+  }
+
+  // ── API: Scan feed ──
+  if (pathname === '/api/scanfeed') {
+    try {
+      let lines = [];
+      try { lines = (await fs.readFile(path.join(DATA_DIR, 'scan-history.tsv'), 'utf8')).trim().split('\n'); } catch {}
+      if (lines.length < 2) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ total: 0, lastSeen: null, recent: [] }));
+        return;
+      }
+      const header = lines[0].split('\t');
+      const rows = lines.slice(1).map(l => {
+        const c = l.split('\t');
+        return Object.fromEntries(header.map((h, i) => [h, c[i] ?? '']));
+      });
+      rows.sort((a, b) => (b.first_seen || '').localeCompare(a.first_seen || ''));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ total: rows.length, lastSeen: rows[0]?.first_seen ?? null, recent: rows.slice(0, 40) }));
+    } catch (err) { sendJsonError(res, 500, 'scanfeed failed', err); }
+    return;
+  }
+
+  // ── API: Patterns (analyzer, cached 5 min) ──
+  if (pathname === '/api/patterns') {
+    try {
+      const data = await runAnalyzer('engine/tracker/analyze-patterns.mjs', 5 * 60_000);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data || { error: 'analyzer unavailable' }));
+    } catch (err) { sendJsonError(res, 500, 'patterns failed', err); }
+    return;
+  }
+
+  // ── API: Interviews (rows + dates + prep coverage) ──
+  if (pathname === '/api/interviews') {
+    try {
+      const index = await getRoleIndex();
+      const hist = loadHistory(HISTORY_FILE);
+      let prepFiles = [];
+      try { prepFiles = (await fs.readdir(path.join(ROOT, 'interview-prep'))).filter(f => !f.startsWith('.') && !f.startsWith('_')); } catch {}
+      const rows = (index.roles || [])
+        .filter(r => r.num != null && String(r.status).toLowerCase() === 'interview')
+        .map(r => {
+          const slug = String(r.company).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          const prep = prepFiles.filter(f => f.toLowerCase().includes(slug.split('-')[0]));
+          return {
+            key: 't' + r.num, num: r.num, company: r.company, role: r.role,
+            date: r.date, notes: r.notes || '',
+            interviewAt: interviewDateFor(hist, r.num)
+              || extractInterviewDateFromText(r.notes || '', { referenceDate: new Date().toISOString().slice(0, 10) }),
+            prepFiles: prep.slice(0, 6),
+          };
+        })
+        .sort((a, b) => String(a.interviewAt || '9999').localeCompare(String(b.interviewAt || '9999')));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ count: rows.length, rows }));
+    } catch (err) { sendJsonError(res, 500, 'interviews failed', err); }
     return;
   }
 
