@@ -121,14 +121,97 @@ if (existsSync(SCAN)) {
   writeJson('scanfeed.json', { missing: true });
 }
 
-// ── 5. inbox.json — pending URLs from data/pipeline.md ───────────────────────
+// ── 5. inbox.json — Gmail signals + pending URLs from data/pipeline.md ───────
+// The Inbox tab is the mail-shaped view: what the Gmail auto-sort saw (live
+// signals + a quiet auto-filed tally), plus any unprocessed job URLs. Before
+// 2026-06-12 it bound ONLY to pipeline.md, so it read "Inbox empty" while the
+// user's Gmail was visibly full — the signals lived in data/gmail-cache.json
+// and never reached the vault.
 const INBOX = join(ROOT, 'data', 'pipeline.md');
-if (existsSync(INBOX)) {
-  const text = readFileSync(INBOX, 'utf8');
-  const urls = [...text.matchAll(/^\s*[-*]\s+(?:\[[^\]]*\]\()?(https?:\/\/\S+?|local:\S+?)(?:\))?\s*$/gm)].map((m) => m[1]);
-  writeJson('inbox.json', { sourceMtime: mtime(INBOX), pendingCount: urls.length, pending: urls.slice(0, 50) });
-} else {
-  writeJson('inbox.json', { missing: true });
+const GMAIL_CACHE = join(ROOT, 'data', 'gmail-cache.json');
+function readGmailSignals() {
+  if (!existsSync(GMAIL_CACHE)) return { connected: false, signals: [] };
+  try {
+    const cache = JSON.parse(readFileSync(GMAIL_CACHE, 'utf8'));
+    return { connected: true, signals: cache.signals || [], scannedAt: cache.scanned_at || null };
+  } catch { return { connected: false, signals: [] }; }
+}
+const gmail = readGmailSignals();
+const slimSignal = (s) => ({
+  id: s.id, threadId: s.threadId || null, num: s.num ?? null, company: s.company || '', role: s.role || '',
+  kind: s.signal, unmatched: !!s.unmatched, subject: s.subject || '',
+  snippet: s.snippet || '', from: s.from || '', date: s.date || '',
+  autoApplied: s.autoApplied || null, userResponded: !!s.userResponded,
+  respondedAt: s.respondedAt || null,
+});
+// Last logged touch per application (data/follow-ups.md) — a touch on/after
+// an email's receipt date means the user already handled that conversation.
+const lastTouchByApp = (() => {
+  const f = join(ROOT, 'data', 'follow-ups.md');
+  const map = new Map();
+  if (!existsSync(f)) return map;
+  for (const line of readFileSync(f, 'utf8').split('\n')) {
+    const cells = line.split('|').map((c) => c.trim());
+    if (cells.length < 9 || !/^\d+$/.test(cells[2] || '') || !/^\d{4}-\d{2}-\d{2}$/.test(cells[3] || '')) continue;
+    const prev = map.get(cells[2]);
+    if (!prev || cells[3] > prev) map.set(cells[2], cells[3]);
+  }
+  return map;
+})();
+{
+  const urls = existsSync(INBOX)
+    ? [...readFileSync(INBOX, 'utf8').matchAll(/^\s*[-*]\s+(?:\[[^\]]*\]\()?(https?:\/\/\S+?|local:\S+?)(?:\))?\s*$/gm)].map((m) => m[1])
+    : [];
+  const live = gmail.signals.filter((s) => !s.dismissed).map(slimSignal);
+  const autoFiled = gmail.signals.filter((s) => s.dismissed);
+  writeJson('inbox.json', {
+    sourceMtime: mtime(INBOX),
+    gmailMtime: mtime(GMAIL_CACHE),
+    gmailConnected: gmail.connected,
+    signals: live.slice(0, 50),
+    signalCount: live.length,
+    autoFiledCount: autoFiled.length,
+    autoAppliedCount: autoFiled.filter((s) => s.autoApplied).length,
+    pendingCount: urls.length,
+    pending: urls.slice(0, 50),
+  });
+}
+
+// ── 5b. needsreview.json — "response: reasoning unknown" + unverified flags ──
+// Everything the classifier refused to decide on its own: unknown-meaning
+// responses, low-confidence interview flags, and strong signals that matched
+// no tracker row. The user reads the email and says what it was. Items the
+// user already replied to (sent-mail detection) drop out automatically.
+{
+  const reviewable = gmail.signals.filter((s) =>
+    (s.signal === 'unknown' || s.unmatched || (s.signal === 'interview' && !s.autoApplied && !s.dismissed))
+    && !s.dismissed);
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  const stamped = reviewable.map((s) => {
+    const d = new Date(s.date || '');
+    const received = isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    const respondBy = isNaN(d.getTime()) ? null : new Date(d.getTime() + sevenDays).toISOString().slice(0, 10);
+    return { ...slimSignal(s), received, respondBy };
+  });
+  // Cleared = the user replied (sent-mail detection) OR logged a touch on/after
+  // the email arrived (a held call or hand-logged nudge counts as handled).
+  const open = stamped.filter((s) => !s.userResponded &&
+    !(s.num != null && s.received && (lastTouchByApp.get(String(s.num)) || '') >= s.received));
+  // One conversation = one card: collapse same-thread items, keep the newest.
+  const byThread = new Map();
+  for (const s of open) {
+    const key = s.threadId || s.id;
+    const prev = byThread.get(key);
+    if (!prev || (s.received || '') > (prev.received || '')) byThread.set(key, s);
+  }
+  const items = [...byThread.values()];
+  writeJson('needsreview.json', {
+    gmailMtime: mtime(GMAIL_CACHE),
+    gmailConnected: gmail.connected,
+    count: items.length,
+    repliedCount: reviewable.length - open.length,
+    items: items.slice(0, 50),
+  });
 }
 
 // ── 6. interviews.json — Interview-stage rows + prep coverage ────────────────
@@ -187,7 +270,7 @@ try {
 const overdueTop = (() => {
   try {
     const f = JSON.parse(readFileSync(join(API, 'followups.json'), 'utf8'));
-    return (f.entries || []).filter((e) => /overdue|urgent/i.test(e.urgency || ''))
+    return (f.entries || []).filter((e) => /overdue|urgent|respond-pending/i.test(e.urgency || ''))
       .sort((a, b) => (b.daysSinceApplication || 0) - (a.daysSinceApplication || 0)).slice(0, 5);
   } catch { return []; }
 })();
@@ -205,7 +288,9 @@ const digest = [
   '## 🔥 Follow-ups due (top 5 overdue)',
   ...(overdueTop.length ? overdueTop.map((e) => e.nextStepEmail
     ? `- **${e.company}** — ${e.role} — ⚠ possible next-step email: “${e.nextStepEmail.subject}”`
-    : `- **${e.company}** — ${e.role} (${e.daysSinceApplication}d since apply, ${e.followupCount} follow-ups sent)`) : ['- nothing overdue']),
+    : e.urgency === 'respond-pending'
+      ? `- **${e.company}** — ${e.role} — they wrote ${e.inboundDate}; respond by ${e.respondBy}`
+      : `- **${e.company}** — ${e.role} (${e.daysSinceApplication}d since apply, ${e.followupCount} follow-ups sent)`) : ['- nothing overdue']),
   '',
   '## 🗂 Queue head',
   ...(queueHead.length ? queueHead.map((r) => `- #${r.rank} **${r.company}** — ${r.title}`) : ['- no ranked pool']),

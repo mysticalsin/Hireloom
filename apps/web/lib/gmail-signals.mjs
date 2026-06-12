@@ -34,6 +34,13 @@ export const STRONG_REJECTION_SIGNALS = ['not moving forward','not be moving for
 // not (yet) been filled" from reading as a rejection.
 export const STRONG_REJECTION_REGEXES = [
   /position[^.!?]{0,80}\b(?:has|have|had)\b(?![^.!?]{0,40}\bnot\b)[^.!?]{0,40}\bfilled\b/,
+  // "we have been successful in filling our role" — a real Hootsuite rejection
+  // (2026-06-12) carried no "position ... filled" sentence; its only rejection
+  // language was the filling-success phrasing, while a body mention of "our
+  // interview process" matched the loose interview list and auto-flipped the
+  // row to Interview. Cover filled/filling phrased around the role noun.
+  /\bsuccess(?:ful(?:ly)?)?\s+in\s+filling\b/,
+  /\bfill(?:ed|ing)\s+(?:our|the|this)\s+(?:role|position|opening|vacancy)\b/,
 ];
 // Soft words that ALSO appear in auto-ack disclaimers ("unfortunately we can't reply
 // to everyone"); only treated as a rejection when the subject isn't an acknowledgment.
@@ -60,6 +67,11 @@ export const JOB_ALERT_SIGNALS = ['new jobs posted','jobs posted from','new jobs
 export const VERIFICATION_SIGNALS = ['verification code','verify your email','confirm your email',
   'one-time password','security code','your code is','enter this code',
   'otp','confirmation link','click to verify','verify your account','passcode'];
+// Automated-mailbox senders. A response from a HUMAN address that fits none of
+// the categories above is still a response — it becomes type 'unknown'
+// ("response — reasoning unknown") for the user to read and classify, instead
+// of being dropped on the floor as 'other'.
+export const AUTOMATED_SENDER_RE = /no-?reply|do-?not-?reply|notification|mailer|automated|updates?@|jobs@|careers?@|talent[-.]?(?:acquisition|team)?@|recruiting@|hello@|info@|news(?:letter)?@|digest@|alerts?@/i;
 
 export function extractVerificationCodes(bodyText, subject) {
   const text = (bodyText || '') + ' ' + (subject || '');
@@ -99,10 +111,19 @@ export function detectSignal(subject, snippet, bodyText, from) {
   //    precision by design: yes, some auto-acks describe the interview process
   //    and will land here, but the user would rather review a false next-step
   //    than have a real invite silently filed as a confirmation.
+  //    Confidence ladder (tightened 2026-06-12 after the Hootsuite rejection
+  //    auto-flipped a row to Interview on loose language alone):
+  //      strict scheduling language        → interview, confident (auto-writes)
+  //      loose language inside an ack      → interview, not confident (flag)
+  //      loose language, NOT an ack        → 'unknown' — a real response whose
+  //        meaning the classifier can't pin down. Never auto-written; the user
+  //        reads the email and says what it was.
   if (INTERVIEW_SIGNALS.some(s => text.includes(s))) {
     const strict = INTERVIEW_SIGNALS_STRICT.some(s => text.includes(s));
     const ackSubj = ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
-    return { type: 'interview', confident: strict || !ackSubj };
+    if (strict) return { type: 'interview', confident: true };
+    if (ackSubj) return { type: 'interview', confident: false };
+    return { type: 'unknown' };
   }
   // 3. Acknowledgment by SUBJECT → "received" (auto-acks carry "unfortunately
   //    we can't reply to everyone" disclaimers that would mis-flag below).
@@ -112,6 +133,9 @@ export function detectSignal(subject, snippet, bodyText, from) {
   if (WEAK_REJECTION_SIGNALS.some(s => text.includes(s))) return { type: 'rejected' };
   // 5. Received (body-level acks) as the fallback.
   if (RECEIVED_SIGNALS.some(s => text.includes(s))) return { type: 'received' };
+  // 6. A human (non-automated mailbox) wrote about a tracked application and
+  //    nothing above matched → still a response, reasoning unknown.
+  if (from && !AUTOMATED_SENDER_RE.test(from)) return { type: 'unknown' };
   return { type: 'other' };
 }
 

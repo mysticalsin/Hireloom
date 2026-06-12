@@ -436,11 +436,24 @@ async function loadData() {
     if (!appNum || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     if (!lastTouchByApp.has(appNum) || date > lastTouchByApp.get(appNum)) lastTouchByApp.set(appNum, date);
   }
-  // Gmail next-step flags (low-confidence interview signals awaiting a human
-  // glance) — these ARE follow-ups, regardless of cadence math.
+  // Gmail next-step flags (low-confidence interview signals + unknown-meaning
+  // responses awaiting a human glance) — these ARE follow-ups, regardless of
+  // cadence math. A signal the user already replied to (sent-mail detection)
+  // no longer asks.
   const nextStepNums = new Set((gmailCache.signals || [])
-    .filter(s => s.signal === 'interview' && !s.dismissed && !s.autoApplied)
+    .filter(s => ['interview', 'unknown'].includes(s.signal) && !s.dismissed && !s.autoApplied && !s.userResponded)
     .map(s => String(s.num)));
+  // Latest inbound response email per app — the silence clock must anchor to
+  // the response date, not the application age (a response received today on a
+  // 20-day-old application is NOT overdue).
+  const inboundAgeByApp = new Map();
+  for (const s of (gmailCache.signals || [])) {
+    if (!s.num || !['interview', 'unknown'].includes(s.signal)) continue;
+    const d = new Date(s.date || '');
+    if (isNaN(d.getTime())) continue;
+    const age = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (!inboundAgeByApp.has(String(s.num)) || age < inboundAgeByApp.get(String(s.num))) inboundAgeByApp.set(String(s.num), age);
+  }
 
   const rawRows = parseMarkdownTable(appsContent)
     .filter(r => { const n = r['#']||r['num']||''; return n && /\d/.test(n); })
@@ -463,11 +476,13 @@ async function loadData() {
       // days of silence, anchored to the last logged touch in follow-ups.md.
       // A Gmail next-step flag overrides everything — the company may have moved.
       const touchAge = lastTouchByApp.has(num) ? daysSince(lastTouchByApp.get(num)) : null;
-      const silence = touchAge !== null && age !== null ? Math.min(age, touchAge) : (touchAge ?? age);
+      const inboundAge = inboundAgeByApp.has(num) ? inboundAgeByApp.get(num) : null;
+      const anchors = [age, touchAge, inboundAge].filter(v => v !== null && v !== undefined);
+      const silence = anchors.length ? Math.min(...anchors) : null;
       const nextStepEmail = nextStepNums.has(num);
       const needsFollowUp = nextStepEmail ||
         (['responded','interview'].includes(status) && silence !== null && silence >= 7);
-      return { num, date, company, role, score, status, hasPdf, reportLink, notes, age, needsFollowUp, nextStepEmail };
+      return { num, date, company, role, score, status, hasPdf, reportLink, notes, age, silenceDays: silence, needsFollowUp, nextStepEmail };
     });
 
   // Attach comp data — concurrent reads, but capped to avoid file-handle blowup on 800+ reports
@@ -753,6 +768,49 @@ async function gmailApiGet(endpoint, token) {
   return httpsGet(base + endpoint, { Authorization: 'Bearer ' + token });
 }
 
+// "Devyn Kelly <devyn.kelly@compass-canada.com>" → "Compass Canada".
+// Best-effort display name for signals that match no tracker row. Freemail
+// domains say nothing about the company — use the sender's display name
+// instead (a recruiter on gmail.com shouldn't render as company "Gmail").
+const FREEMAIL_RE = /^(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|proton|protonmail|aol)\./i;
+function guessCompanyFromSender(from) {
+  const dom = (String(from).match(/@([a-z0-9.-]+)/i) || [])[1] || '';
+  const root = dom.replace(/\.[a-z]{2,4}(\.[a-z]{2})?$/i, '').split('.').pop() || '';
+  if (FREEMAIL_RE.test(root + '.')) {
+    const disp = String(from).replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+    if (disp && !disp.includes('@')) return disp;
+  }
+  const words = root.split(/[-_]/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1));
+  return words.join(' ') || dom || 'Unknown sender';
+}
+
+function parseEmailDate(raw) {
+  const d = new Date(raw || '');
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// A detected user reply is a REAL touch — log it to data/follow-ups.md so the
+// cadence radar anchors to it, exactly as a hand-logged nudge would. Idempotent
+// by the sent message id embedded in the notes column.
+async function logGmailTouch(signal) {
+  if (!signal.num || !signal.userReplyId) return false;
+  const file = path.join(DATA_DIR, 'follow-ups.md');
+  let content;
+  try { content = await fs.readFile(file, 'utf8'); } catch { return false; }
+  const marker = `[gmail:${signal.userReplyId}]`;
+  if (content.includes(marker)) return false;
+  let maxNum = 0;
+  for (const line of content.split('\n')) {
+    const m = line.match(/^\|\s*(\d+)\s*\|/);
+    if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+  }
+  const date = (signal.respondedAt || new Date().toISOString()).slice(0, 10);
+  const contact = (signal.userReplyTo || signal.from || '').replace(/^.*</, '').replace(/>.*$/, '').trim();
+  const row = `| ${maxNum + 1} | ${signal.num} | ${date} | ${signal.company} | ${signal.role || ''} | email | ${contact} | Reply sent — auto-logged from Gmail ${marker} |`;
+  await fs.writeFile(file, content.trimEnd() + '\n' + row + '\n', 'utf8');
+  return true;
+}
+
 async function scanGmailInbox() {
   const token = await getAccessToken();
   if (!token) return;
@@ -780,12 +838,24 @@ async function scanGmailInbox() {
   // and for the dismissed-state merge at the end.
   const existingById = Object.fromEntries((gmailCache.signals || []).map(s => [s.id, s]));
 
-  for (const msg of messages.slice(0, 50)) {
+  // Only detail-fetch messages we haven't classified yet. Idempotency is by
+  // message id, so the read/unread state is irrelevant — mail that arrived
+  // (and was even read + answered by hand) while the server was down still
+  // gets scanned on relaunch. The per-scan cap bounds a cold backlog without
+  // re-burning API calls on every 5-minute rescan.
+  const toFetch = messages.filter(m => !existingById[m.id]).slice(0, 80);
+
+  for (const msg of toFetch) {
     const msgRes = await gmailApiGet(`messages/${msg.id}?format=full`, token);
     if (msgRes.status !== 200) continue;
 
     let parsed;
     try { parsed = JSON.parse(msgRes.body); } catch { continue; }
+
+    // The unfiltered list query returns ALL mail — the user's own sent
+    // replies included. Those are never inbound signals (they showed up as
+    // company "Ramy Sherif" review cards on the first live run).
+    if ((parsed.labelIds || []).includes('SENT') || (parsed.labelIds || []).includes('DRAFT')) continue;
 
     const headers = parsed.payload?.headers || [];
     const from    = headers.find(h => h.name === 'From')?.value || '';
@@ -797,9 +867,32 @@ async function scanGmailInbox() {
     // Match against companies; with several applications at the same company,
     // the row whose role title the email names wins (see matchApplication).
     const matched = matchApplication(apps, { from, subject, text: snippet + ' ' + bodyText });
-    if (!matched) continue;
-
     const signal = detectSignal(subject, snippet, bodyText, from);
+
+    if (!matched) {
+      // No tracker row — historically dropped on the floor, which is how a
+      // real recruiter invite for an untracked application went unseen
+      // (Compass Group, 2026-06-12). Strong signals now surface as
+      // "unmatched" needs-review cards; weak/ambiguous ones stay dropped to
+      // keep personal mail out of the dashboard.
+      const strong = signal.type === 'rejected' || (signal.type === 'interview' && signal.confident);
+      if (!strong) continue;
+      signals.push({
+        id: msg.id, threadId: parsed.threadId || null,
+        num: null, unmatched: true,
+        company: guessCompanyFromSender(from),
+        role: '', currentStatus: null,
+        signal: signal.type, codes: [],
+        subject: subject.substring(0, 120),
+        snippet: snippet.substring(0, 200),
+        from: from.substring(0, 80),
+        date,
+        suggestedStatus: null,
+        dismissed: false,
+      });
+      continue;
+    }
+
     if (signal.type === 'other') continue;
 
     // Don't re-surface already-closed applications for non-status-changing signals
@@ -808,8 +901,10 @@ async function scanGmailInbox() {
 
     const signalObj = {
       id: msg.id,
+      threadId: parsed.threadId || null,
       num: matched.num,
       company: matched.company,
+      role: matched.role,
       currentStatus: matched.status,
       signal: signal.type,
       codes: signal.codes || [],
@@ -820,13 +915,16 @@ async function scanGmailInbox() {
       // 'received' = auto-ack ("we got your application") — that is NOT a
       // response, so no status suggestion; the row stays Applied. Only a
       // genuine human/interview/rejection signal earns a "Mark as" button.
-      suggestedStatus: signal.type === 'interview' ? 'Interview' : signal.type === 'rejected' ? 'Rejected' : signal.type === 'received' || signal.type === 'verification' ? null : 'Responded',
+      // 'unknown' = response, reasoning unknown — the USER classifies it, so
+      // no suggestion and never an auto-write.
+      suggestedStatus: signal.type === 'interview' ? 'Interview' : signal.type === 'rejected' ? 'Rejected' : 'Responded',
       // Auto-acks ("we received your application") are informational only —
       // filed as dismissed at scan time so they never demand a click. The UI
       // shows them as a passive "N confirmations auto-filed" line instead of
       // action cards. Real signals (interview/rejection) still surface live.
       dismissed: signal.type === 'received',
     };
+    if (signal.type === 'received' || signal.type === 'verification' || signal.type === 'unknown') signalObj.suggestedStatus = null;
 
     // Auto-sort (user decision 2026-06-11, replaces the Mark-as/Dismiss
     // buttons): confident signals write the tracker status directly, once
@@ -853,6 +951,12 @@ async function scanGmailInbox() {
       // Status already reflects the signal (e.g. interview reminders for a
       // row that's already Interview) — file quietly, nothing to review.
       signalObj.dismissed = true;
+    } else if (done && ['unknown', 'interview'].includes(signal.type)) {
+      // Chatter on a CLOSED row (reminders, scheduling echoes, stale invites
+      // for a chase the user already ended) — file quietly. The user closed
+      // the row deliberately; a genuine reopen still lands in the inbox feed
+      // history, and re-opening is a tracker-status decision, not auto-sort's.
+      signalObj.dismissed = true;
     }
     signals.push(signalObj);
 
@@ -872,8 +976,56 @@ async function scanGmailInbox() {
     }
   }
 
-  // Merge with existing cache (keep dismissed state, avoid dups)
+  // Merge with existing cache (keep dismissed state, avoid dups). Previously
+  // classified messages weren't re-fetched, so carry their signals forward
+  // verbatim; prune anything older than 30 days to bound the cache.
+  const newIds = new Set(signals.map(s => s.id));
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  for (const prior of (gmailCache.signals || [])) {
+    if (newIds.has(prior.id)) continue;
+    const d = parseEmailDate(prior.date);
+    if (d && d.getTime() < cutoff) continue;
+    signals.push(prior);
+  }
   const merged = signals.map(s => ({ ...s, dismissed: s.dismissed || existingById[s.id]?.dismissed || false }));
+
+  // ── Sent-mail awareness: did the user already reply to a signal's thread? ──
+  // A reply found in `in:sent` marks the signal userResponded (so review tabs
+  // and the radar stop asking) and auto-logs the touch to data/follow-ups.md.
+  try {
+    const needReply = merged.filter(s => s.threadId && !s.userResponded &&
+      ['interview', 'unknown', 'rejected'].includes(s.signal));
+    if (needReply.length) {
+      const byThread = new Map(needReply.map(s => [s.threadId, s]));
+      const sq = encodeURIComponent('in:sent newer_than:14d');
+      const sentList = await gmailApiGet(`messages?q=${sq}&maxResults=100`, token);
+      if (sentList.status === 200) {
+        const sentMsgs = JSON.parse(sentList.body).messages || [];
+        for (const sm of sentMsgs.filter(m => byThread.has(m.threadId))) {
+          const sig = byThread.get(sm.threadId);
+          const metaRes = await gmailApiGet(`messages/${sm.id}?format=metadata&metadataHeaders=Date&metadataHeaders=To`, token);
+          if (metaRes.status !== 200) continue;
+          let meta; try { meta = JSON.parse(metaRes.body); } catch { continue; }
+          const mh = meta.payload?.headers || [];
+          const sentDate = parseEmailDate(mh.find(h => h.name === 'Date')?.value);
+          const inboundDate = parseEmailDate(sig.date);
+          // Only a reply sent AFTER the signal email counts as answering it.
+          if (!sentDate || (inboundDate && sentDate < inboundDate)) continue;
+          sig.userResponded = true;
+          sig.respondedAt = sentDate.toISOString();
+          sig.userReplyId = sm.id;
+          sig.userReplyTo = (mh.find(h => h.name === 'To')?.value || '').substring(0, 80);
+        }
+      }
+    }
+    // Log newly detected replies as real touches (idempotent per sent msg id).
+    for (const sig of merged) {
+      if (sig.userResponded && !sig.touchLogged && sig.num && ['interview', 'unknown'].includes(sig.signal)) {
+        try { await logGmailTouch(sig); sig.touchLogged = true; } catch { /* next scan retries */ }
+      }
+    }
+  } catch { /* sent-scan is best-effort — inbox signals already saved below */ }
+
   gmailCache = { signals: merged, scanned_at: new Date().toISOString() };
   await saveGmailCache();
 }
@@ -3725,6 +3877,7 @@ const HTML = /* html */ `<!DOCTYPE html>
 
     /* ── Verification codes ── */
     .signal-verification { color: var(--purple); background: var(--purple-bg); border-color: rgba(191,90,242,.25); }
+    .signal-unknown { color: var(--orange); background: var(--orange-bg, rgba(255,159,10,.12)); border-color: rgba(255,159,10,.25); }
     .vcode-card {
       background: var(--surface2); border-radius: var(--r-md);
       padding: 12px; margin-bottom: 8px;
@@ -5162,7 +5315,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       '<div class="followup-item">' +
         '<div class="followup-info">' +
           '<div class="followup-company">' + esc(a.company) + '</div>' +
-          '<div class="followup-age">' + (a.nextStepEmail ? '✉ possible next step — check email' : a.age + 'd — follow up now') + '</div>' +
+          '<div class="followup-age">' + (a.nextStepEmail ? '✉ possible next step — check email' : (a.silenceDays ?? a.age) + 'd silent — follow up now') + '</div>' +
         '</div>' +
         '<span class="status-badge ' + statusClass(a.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>' +
       '</div>'
@@ -5450,7 +5603,7 @@ const HTML = /* html */ `<!DOCTYPE html>
 
     c.innerHTML = feed.slice(0, 8).map(s => {
       const typeClass = 'signal-' + s.signal;
-      const typeLabel = s.signal.charAt(0).toUpperCase() + s.signal.slice(1);
+      const typeLabel = s.signal === 'unknown' ? 'Response?' : s.signal.charAt(0).toUpperCase() + s.signal.slice(1);
       const codeDisplay = (s.signal === 'verification' && s.codes && s.codes.length)
         ? s.codes.map(c => c.type === 'numeric'
             ? '<div class="vcode-value" style="margin:6px 0;font-size:22px">' + esc(c.value) + '</div>'
@@ -5459,12 +5612,28 @@ const HTML = /* html */ `<!DOCTYPE html>
         : '';
       const outcome = s.autoApplied
         ? '<div style="font-size:11px;color:var(--green,#34c759);padding-top:6px">✓ Tracker auto-updated: #' + esc(s.num) + ' → ' + esc(s.autoApplied) + '</div>'
-        : (s.signal === 'interview'
+        : s.userResponded
+        ? '<div style="font-size:11px;color:var(--green,#34c759);padding-top:6px">✓ You replied ' + esc(String(s.respondedAt || '').slice(0, 10)) + '</div>'
+        : (s.signal === 'unknown'
+          ? '<div style="font-size:11px;color:var(--orange,#ff9f0a);padding-top:6px">🧐 Response — reasoning unknown. Read it, then tell the agent what it was.</div>'
+          : s.unmatched
+          ? '<div style="font-size:11px;color:var(--orange,#ff9f0a);padding-top:6px">⚠ Not in your tracker — untracked application?</div>'
+          : s.signal === 'interview'
           ? '<div style="font-size:11px;color:var(--orange,#ff9f0a);padding-top:6px">⚠ Possible next step — check the email</div>'
           : '');
+      // Respond = pre-filled Gmail COMPOSE in a new tab. Never sends — the
+      // user always hits Send themselves (ethics rule: no auto-send, ever).
+      const mailBtns = (!s.autoApplied && !s.userResponded && ['interview', 'unknown', 'rejected'].includes(s.signal))
+        ? '<div class="signal-actions">' +
+            '<a class="signal-btn" style="text-decoration:none" href="https://mail.google.com/mail/u/0/#all/' + esc(s.id) + '" target="_blank" rel="noopener">✉ Open email</a>' +
+            (gmailReplyAddr(s.from)
+              ? '<a class="signal-btn signal-btn-confirm" style="text-decoration:none;background:var(--purple)" href="' + esc(gmailComposeUrl(s)) + '" target="_blank" rel="noopener" title="Opens a pre-filled Gmail draft — nothing sends until you hit Send">↩ Respond</a>'
+              : '') +
+          '</div>'
+        : '';
       return '<div class="signal-card" data-id="' + esc(s.id) + '">' +
         '<div class="signal-header">' +
-          '<div class="signal-company">' + esc(s.company) + '</div>' +
+          '<div class="signal-company">' + esc(s.company) + (s.num ? ' <span style="color:var(--text-ter)">#' + esc(s.num) + '</span>' : '') + '</div>' +
           '<span class="signal-type ' + typeClass + '">' + typeLabel + '</span>' +
         '</div>' +
         '<div class="signal-subject">' + esc(s.subject) + '</div>' +
@@ -5473,9 +5642,32 @@ const HTML = /* html */ `<!DOCTYPE html>
         (s.signal === 'verification' && s.codes?.length && s.codes[0].type === 'numeric'
           ? '<div class="signal-actions"><button class="signal-btn signal-btn-confirm" style="background:var(--purple)" onclick="copyCode(\\'' + esc(s.codes[0].value) + '\\',this)">Copy code</button></div>'
           : '') +
+        mailBtns +
         outcome +
       '</div>';
     }).join('') + ackLine;
+  }
+
+  // Reply helpers — links only; the dashboard never sends mail.
+  function gmailReplyAddr(from) {
+    const m = (from || '').match(/<([^>]+)>/) || (from || '').match(/[\\w.+-]+@[\\w.-]+/);
+    return m ? (m[1] || m[0]) : '';
+  }
+  function gmailComposeUrl(s) {
+    const to = gmailReplyAddr(s.from);
+    const disp = (s.from || '').replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+    let name = 'there';
+    if (disp && disp.indexOf('@') === -1) {
+      const parts = disp.split(/[\\s,]+/).filter(Boolean);
+      name = disp.indexOf(',') !== -1 ? parts[parts.length - 1] : parts[0];
+    } else if (to) {
+      const local = to.split('@')[0].split(/[._-]/)[0];
+      name = local ? local.charAt(0).toUpperCase() + local.slice(1) : 'there';
+    }
+    const about = s.role ? 'the ' + s.role + ' role' : 'my application' + (s.company ? ' to ' + s.company : '');
+    const body = 'Hi ' + name + ',\\n\\nThank you for your email regarding ' + about + '. ';
+    return 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) +
+      '&su=' + encodeURIComponent('Re: ' + (s.subject || '')) + '&body=' + encodeURIComponent(body);
   }
 
   // showGmailSetup is defined above (in the Gmail block) — it now opens a

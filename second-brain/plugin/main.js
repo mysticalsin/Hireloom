@@ -8,7 +8,7 @@
 
 const { Plugin, ItemView, PluginSettingTab, Setting, Notice } = require('obsidian');
 
-const BUILD_STAMP = 'hireloom-brain v0.1.0 · build 2026-06-11.6';
+const BUILD_STAMP = 'hireloom-brain v0.2.0 · build 2026-06-12.1';
 const VIEW_TYPE = 'hireloom-brain-view';
 const API_DIR = '_brain_api';
 
@@ -23,7 +23,8 @@ const EMPTY = {
   interviews: 'Nothing in interview stage yet',
   scan: 'Scanner hasn’t run — node engine/scan/scan.mjs',
   patterns: 'Too few outcomes to analyze yet',
-  inbox: 'Inbox empty',
+  inbox: 'Inbox empty — no live email signals, no pending URLs',
+  review: 'Nothing needs review — unclear responses land here for you to classify',
 };
 
 const TABS = [
@@ -31,11 +32,46 @@ const TABS = [
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'queue', label: 'Apply Queue' },
   { id: 'radar', label: 'Follow-up Radar' },
+  { id: 'review', label: 'Needs Review' },
   { id: 'interviews', label: 'Interviews' },
   { id: 'scan', label: 'Scan Feed' },
   { id: 'patterns', label: 'Patterns' },
   { id: 'inbox', label: 'Inbox' },
 ];
+
+// ── Gmail helpers (links only — the plugin NEVER sends mail) ────────────────
+const senderEmail = (from) => ((from || '').match(/<([^>]+)>/) || [])[1] || ((from || '').match(/[\w.+-]+@[\w.-]+/) || [])[0] || '';
+function senderName(from) {
+  const disp = (from || '').replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+  if (disp && !disp.includes('@')) {
+    const parts = disp.split(/[,\s]+/).filter(Boolean);
+    return disp.includes(',') ? parts[parts.length - 1] : parts[0]; // "Kelly, Devyn" → Devyn
+  }
+  const local = (senderEmail(from).split('@')[0] || '').split(/[._-]/)[0];
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : 'there';
+}
+const gmailMsgUrl = (id) => `https://mail.google.com/mail/u/0/#all/${id}`;
+// Pre-filled Gmail compose — opens the user's Gmail in the browser with a
+// draft started. Sending is ALWAYS the user's click, never the plugin's.
+function gmailComposeUrl(sig) {
+  const to = senderEmail(sig.from);
+  const su = `Re: ${sig.subject || ''}`;
+  const about = sig.role ? `the ${sig.role} role` : `my application${sig.company ? ` to ${sig.company}` : ''}`;
+  const body = `Hi ${senderName(sig.from)},\n\nThank you for your email regarding ${about}. `;
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(su)}&body=${encodeURIComponent(body)}`;
+}
+function mailActions(host, sig) {
+  const wrap = host.createDiv({ cls: 'hb-mail-actions' });
+  if (sig.id) wrap.createEl('a', { cls: 'hb-btn hb-btn-ghost', text: '✉ open email', href: gmailMsgUrl(sig.id) });
+  if (senderEmail(sig.from)) wrap.createEl('a', { cls: 'hb-btn hb-btn-respond', text: '↩ Respond', href: gmailComposeUrl(sig), attr: { title: 'Opens Gmail with a pre-filled draft — nothing is sent until you hit Send' } });
+}
+const KIND_LABEL = {
+  unknown: 'response — reasoning unknown',
+  interview: 'possible next step',
+  rejected: 'rejection',
+  received: 'confirmation',
+  verification: 'verification',
+};
 
 class BrainData {
   constructor(app) {
@@ -69,7 +105,7 @@ function rowsOrEmpty(el, items, emptyText, renderRow) {
 const RENDERERS = {
   // Overview — the command-center landing: ask-bar + colored stat cards.
   // Every number binds to _brain_api; absent sources show honest empty text.
-  async overview(el, data, plugin) {
+  async overview(el, data, plugin, view) {
     // Ask bar
     const ask = el.createDiv({ cls: 'hb-ask' });
     const input = ask.createEl('input', { attr: { placeholder: 'Ask your second brain…' } });
@@ -84,16 +120,26 @@ const RENDERERS = {
       c.onClickEvent(() => { input.value = q; fire(); });
     });
 
-    const [p, f, q, s, iv, spend] = await Promise.all([
+    const [p, f, q, s, iv, spend, rv] = await Promise.all([
       data.json('pipeline'), data.json('followups'), data.json('queue'),
       data.json('scanfeed'), data.json('interviews'), data.json('spend'),
+      data.json('needsreview'),
     ]);
     const grid = el.createDiv({ cls: 'hb-cards' });
-    const card = (color, title) => {
-      const c = grid.createDiv({ cls: `hb-ccard hb-cc-${color}` });
+    // Each card is a doorway to its tab — clicking anywhere on it jumps there.
+    const card = (color, title, tabId) => {
+      const c = grid.createDiv({ cls: `hb-ccard hb-cc-${color}${tabId && view ? ' hb-clickable' : ''}` });
       const h = c.createDiv({ cls: 'hb-ccard-h' });
       h.createSpan({ cls: 'hb-cdot' });
       h.createSpan({ text: title });
+      if (tabId && view) {
+        h.createSpan({ cls: 'hb-jump', text: '→' });
+        c.setAttr('title', `Open ${tabId}`);
+        c.onClickEvent((evt) => {
+          if (evt.target && (evt.target.tagName === 'A' || evt.target.tagName === 'BUTTON' || evt.target.tagName === 'INPUT')) return;
+          view.activeTab = tabId; view.render();
+        });
+      }
       return c;
     };
 
@@ -116,25 +162,39 @@ const RENDERERS = {
       cs.createDiv({ cls: 'hb-empty', text: 'Spend card not generated — node second-brain/plugin/spend.mjs' });
     }
 
-    // 🔥 Needs you now — overdue follow-ups
-    const cn = card('orange', '🔥 Needs you now');
+    // 🔥 Needs you now — pending follow-ups (urgent + overdue + respond-pending)
+    const cn = card('orange', '🔥 Needs you now', 'radar');
     // urgent first (Gmail next-step flags), then oldest cadence-overdue
-    const overdue = ((f && f.entries) || []).filter((e) => /overdue|urgent/i.test(e.urgency || ''))
+    const overdue = ((f && f.entries) || []).filter((e) => /overdue|urgent|respond-pending/i.test(e.urgency || ''))
       .sort((a, b) => ((a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1))
         || ((b.daysSinceApplication || 0) - (a.daysSinceApplication || 0)));
     if (overdue.length === 0) cn.createDiv({ cls: 'hb-empty', text: EMPTY.radar });
     else {
       cn.createDiv({ cls: 'hb-big', text: String(overdue.length) });
-      cn.createDiv({ cls: 'hb-big-sub', text: 'follow-ups need you' });
+      cn.createDiv({ cls: 'hb-big-sub', text: 'follow-ups pending' });
       overdue.slice(0, 5).forEach((e) => {
         const l = cn.createDiv({ cls: 'hb-line' });
         l.createSpan({ cls: 'hb-co', text: e.company });
-        l.createSpan({ cls: 'hb-num', text: e.nextStepEmail ? '✉ next step?' : `${e.daysSinceApplication}d` });
+        l.createSpan({ cls: 'hb-num', text: e.nextStepEmail ? '✉ next step?' : e.urgency === 'respond-pending' ? `respond by ${e.respondBy || ''}` : `${e.daysSinceApplication}d` });
+      });
+    }
+
+    // 🧐 Needs review — responses awaiting the user's read
+    const cv = card('orange', '🧐 Needs review', 'review');
+    const rvItems = (rv && rv.items) || [];
+    if (rvItems.length === 0) cv.createDiv({ cls: 'hb-empty', text: EMPTY.review });
+    else {
+      cv.createDiv({ cls: 'hb-big', text: String(rvItems.length) });
+      cv.createDiv({ cls: 'hb-big-sub', text: 'emails to classify — open + tell the agent' });
+      rvItems.slice(0, 5).forEach((s) => {
+        const l = cv.createDiv({ cls: 'hb-line' });
+        l.createSpan({ cls: 'hb-co', text: s.company });
+        l.createSpan({ cls: 'hb-num', text: s.unmatched ? 'not in tracker' : (KIND_LABEL[s.kind] || s.kind) });
       });
     }
 
     // 🎤 Interviews
-    const ci = card('gold', '🎤 Interviews');
+    const ci = card('gold', '🎤 Interviews', 'interviews');
     const ivRows = (iv && iv.rows) || [];
     if (ivRows.length === 0) ci.createDiv({ cls: 'hb-empty', text: EMPTY.interviews });
     else {
@@ -148,7 +208,7 @@ const RENDERERS = {
     }
 
     // 🗂 Apply queue
-    const cq = card('teal', '🗂 Apply queue');
+    const cq = card('teal', '🗂 Apply queue', 'queue');
     if (!q || !q.head || q.head.length === 0) cq.createDiv({ cls: 'hb-empty', text: EMPTY.queue });
     else {
       cq.createDiv({ cls: 'hb-big', text: String(q.pendingCount) });
@@ -161,7 +221,7 @@ const RENDERERS = {
     }
 
     // 📊 Pipeline
-    const cp = card('green', '📊 Pipeline');
+    const cp = card('green', '📊 Pipeline', 'pipeline');
     const by = (p && p.byStatus) || {};
     const total = Object.values(by).reduce((a, b) => a + b, 0);
     if (!total) cp.createDiv({ cls: 'hb-empty', text: EMPTY.pipeline });
@@ -178,7 +238,7 @@ const RENDERERS = {
     }
 
     // 📡 Scanner
-    const cr = card('violet', '📡 Scanner');
+    const cr = card('violet', '📡 Scanner', 'scan');
     if (!s || !s.total) cr.createDiv({ cls: 'hb-empty', text: EMPTY.scan });
     else {
       cr.createDiv({ cls: 'hb-big', text: String(s.total) });
@@ -240,20 +300,64 @@ const RENDERERS = {
     if (f && f.error) { el.createDiv({ cls: 'hb-empty', text: `${EMPTY.radar} (${f.error})` }); return; }
     if (actionable.length === 0) { el.createDiv({ cls: 'hb-empty', text: EMPTY.radar }); return; }
     const m = f.metadata || {};
-    el.createDiv({ cls: 'hb-meta', text: `${m.actionable ?? actionable.length} actionable · ${m.overdue ?? '–'} overdue · source: engine/tracker/followup-cadence.mjs` });
+    el.createDiv({ cls: 'hb-meta', text: `${m.pending ?? actionable.length} pending (${m.overdue ?? 0} overdue · ${m.urgent ?? 0} check-email · ${m.respondPending ?? 0} respond) · source: engine/tracker/followup-cadence.mjs` });
+    const order = { urgent: 0, overdue: 1, 'respond-pending': 2, cold: 3 };
     actionable
       .slice()
-      .sort((a, b) => (b.daysSinceApplication || 0) - (a.daysSinceApplication || 0))
+      .sort((a, b) => ((order[a.urgency] ?? 9) - (order[b.urgency] ?? 9)) || ((b.daysSinceApplication || 0) - (a.daysSinceApplication || 0)))
       .slice(0, 40)
       .forEach((e) => {
         const row = el.createDiv({ cls: 'hb-row' });
-        row.createSpan({ cls: `hb-chip${/overdue|urgent/i.test(e.urgency) ? ' hb-hot' : ''}`, text: e.nextStepEmail ? 'next step?' : e.urgency });
+        const chipText = e.nextStepEmail ? 'next step?' : e.urgency === 'respond-pending' ? 'respond' : e.urgency;
+        row.createSpan({ cls: `hb-chip${/overdue|urgent/i.test(e.urgency) ? ' hb-hot' : ''}${e.urgency === 'respond-pending' ? ' hb-warm' : ''}`, text: chipText });
         row.createSpan({ cls: 'hb-co', text: e.company });
         row.createSpan({ text: e.role });
+        // Deadlines anchor to the RESPONSE date when one exists — "20d since
+        // apply" on a response received today reads as overdue when it isn't.
         row.createSpan({ cls: 'hb-num', text: e.nextStepEmail
           ? `✉ “${(e.nextStepEmail.subject || '').slice(0, 60)}” — check the email`
-          : `${e.daysSinceApplication}d since apply · follow-ups: ${e.followupCount}${e.nextFollowupDate ? ` · next ${e.nextFollowupDate}` : ''}` });
+          : e.awaitingReply
+            ? `they wrote ${e.inboundDate} · respond by ${e.respondBy}`
+            : `${e.daysSinceApplication}d since apply · follow-ups: ${e.followupCount}${e.nextFollowupDate ? ` · next ${e.nextFollowupDate}` : ''}` });
+        // Respond straight from the radar (pre-filled Gmail draft, never auto-sent)
+        if (e.awaitingReply || e.nextStepEmail) {
+          mailActions(row, {
+            id: (e.nextStepEmail && e.nextStepEmail.id) || null,
+            from: e.inboundFrom || (e.nextStepEmail && e.nextStepEmail.from) || (e.contacts && e.contacts[0] && e.contacts[0].email) || '',
+            subject: (e.nextStepEmail && e.nextStepEmail.subject) || `${e.role} — ${e.company}`,
+            role: e.role, company: e.company,
+          });
+        }
       });
+  },
+
+  // Needs Review — responses the classifier refused to decide on its own:
+  // unknown-meaning responses, low-confidence next-step flags, and strong
+  // signals that matched no tracker row. The user opens the email, assesses,
+  // and tells the agent what it was; replied items drop out automatically
+  // via sent-mail detection.
+  async review(el, data) {
+    const r = await data.json('needsreview');
+    const items = (r && r.items) || [];
+    if (items.length === 0) {
+      el.createDiv({ cls: 'hb-empty', text: EMPTY.review });
+      if (r && r.repliedCount) el.createDiv({ cls: 'hb-meta', text: `${r.repliedCount} earlier item(s) cleared by your replies` });
+      return;
+    }
+    el.createDiv({ cls: 'hb-meta', text: `${items.length} to review${r.repliedCount ? ` · ${r.repliedCount} cleared by your replies` : ''} · read the email, then tell the agent what it was · source: data/gmail-cache.json` });
+    const today = new Date().toISOString().slice(0, 10);
+    items.slice().sort((a, b) => (a.respondBy || '9999').localeCompare(b.respondBy || '9999')).forEach((s) => {
+      const card = el.createDiv({ cls: 'hb-review-card' });
+      const top = card.createDiv({ cls: 'hb-row' });
+      const late = s.respondBy && s.respondBy < today;
+      top.createSpan({ cls: `hb-chip${late ? ' hb-hot' : ' hb-warm'}`, text: s.unmatched ? 'not in tracker' : (KIND_LABEL[s.kind] || s.kind) });
+      top.createSpan({ cls: 'hb-co', text: s.company + (s.num ? ` #${s.num}` : '') });
+      if (s.role) top.createSpan({ text: s.role });
+      top.createSpan({ cls: 'hb-num', text: `received ${s.received || '?'} · respond by ${s.respondBy || '?'}${late ? ' — OVERDUE' : ''}` });
+      card.createDiv({ cls: 'hb-review-subj', text: `“${s.subject}”` });
+      if (s.snippet) card.createDiv({ cls: 'hb-review-snip', text: s.snippet });
+      mailActions(card, s);
+    });
   },
 
   async interviews(el, data) {
@@ -309,14 +413,36 @@ const RENDERERS = {
 
   async inbox(el, data) {
     const i = await data.json('inbox');
+    const signals = (i && i.signals) || [];
     const pending = (i && i.pending) || [];
-    if (pending.length === 0) { el.createDiv({ cls: 'hb-empty', text: EMPTY.inbox }); return; }
-    el.createDiv({ cls: 'hb-meta', text: `${i.pendingCount} pending · source: data/pipeline.md` });
-    pending.forEach((u) => {
-      const row = el.createDiv({ cls: 'hb-row' });
-      if (/^https?:/.test(u)) row.createEl('a', { cls: 'hb-link', text: u, href: u });
-      else row.createSpan({ text: u });
-    });
+    if (signals.length === 0 && pending.length === 0) {
+      el.createDiv({ cls: 'hb-empty', text: EMPTY.inbox });
+      if (i && i.autoFiledCount) el.createDiv({ cls: 'hb-meta', text: `${i.autoFiledCount} emails auto-filed quietly (${i.autoAppliedCount || 0} wrote the tracker) · source: data/gmail-cache.json` });
+      else if (i && i.gmailConnected === false) el.createDiv({ cls: 'hb-meta', text: 'Gmail not connected — connect it from the web dashboard' });
+      return;
+    }
+    el.createDiv({ cls: 'hb-meta', text: `${signals.length} live email signal(s) · ${i.autoFiledCount || 0} auto-filed quietly · ${i.pendingCount || 0} pending URLs · source: data/gmail-cache.json + data/pipeline.md` });
+    if (signals.length) {
+      el.createDiv({ cls: 'hb-section-h', text: 'Email signals' });
+      signals.forEach((s) => {
+        const card = el.createDiv({ cls: 'hb-review-card' });
+        const row = card.createDiv({ cls: 'hb-row' });
+        row.createSpan({ cls: `hb-chip${s.kind === 'rejected' ? ' hb-hot' : s.kind === 'interview' ? '' : ' hb-warm'}`, text: s.unmatched ? 'not in tracker' : (KIND_LABEL[s.kind] || s.kind) });
+        row.createSpan({ cls: 'hb-co', text: s.company + (s.num ? ` #${s.num}` : '') });
+        if (s.role) row.createSpan({ text: s.role });
+        row.createSpan({ cls: 'hb-num', text: s.userResponded ? `✓ you replied ${String(s.respondedAt || '').slice(0, 10)}` : (s.date || '').slice(0, 16) });
+        card.createDiv({ cls: 'hb-review-subj', text: `“${s.subject}”` });
+        if (!s.userResponded) mailActions(card, s);
+      });
+    }
+    if (pending.length) {
+      el.createDiv({ cls: 'hb-section-h', text: 'Pending URLs (data/pipeline.md)' });
+      pending.forEach((u) => {
+        const row = el.createDiv({ cls: 'hb-row' });
+        if (/^https?:/.test(u)) row.createEl('a', { cls: 'hb-link', text: u, href: u });
+        else row.createSpan({ text: u });
+      });
+    }
   },
 };
 
@@ -349,7 +475,7 @@ class BrainView extends ItemView {
     const refreshBtn = actions.createEl('button', { cls: 'hb-btn', text: '↻ refresh data' });
     refreshBtn.onClickEvent(() => this.plugin.runRefresh());
     const body = root.createDiv();
-    await RENDERERS[this.activeTab](body, this.plugin.data, this.plugin);
+    await RENDERERS[this.activeTab](body, this.plugin.data, this.plugin, this);
   }
 
   // Greeting + KPI stat cards — every number binds to _brain_api (no theater).
@@ -376,7 +502,7 @@ class BrainView extends ItemView {
     const counts0 = (meta && meta.counts) || {};
     const standBits = [];
     if (counts0.interviews) standBits.push(`${counts0.interviews} interview${counts0.interviews === 1 ? '' : 's'} live`);
-    if (f && f.metadata && f.metadata.overdue) standBits.push(`${f.metadata.overdue} follow-ups overdue`);
+    if (f && f.metadata && f.metadata.pending) standBits.push(`${f.metadata.pending} follow-up${f.metadata.pending === 1 ? '' : 's'} pending${f.metadata.overdue ? ` (${f.metadata.overdue} overdue)` : ''}`);
     if (q && q.nextRank != null) standBits.push(`queue head #${q.nextRank}`);
     hero.createDiv({
       cls: 'hb-subline',
@@ -391,18 +517,25 @@ class BrainView extends ItemView {
     const counts = (meta && meta.counts) || {};
     const by = counts.byStatus || {};
     const kpis = hero.createDiv({ cls: 'hb-kpis' });
-    const kpi = (label, value, accent) => {
-      const card = kpis.createDiv({ cls: `hb-kpi hb-acc-${accent}` });
+    // Every KPI is a doorway: clicking jumps to the tab holding its detail.
+    const kpi = (label, value, accent, tabId) => {
+      const card = kpis.createDiv({ cls: `hb-kpi hb-acc-${accent}${tabId ? ' hb-clickable' : ''}` });
       card.createDiv({ cls: 'hb-kpi-v', text: String(value ?? '–') });
       card.createDiv({ cls: 'hb-kpi-l', text: label });
+      if (tabId) {
+        card.setAttr('title', `Open ${tabId}`);
+        card.onClickEvent(() => { this.activeTab = tabId; this.render(); });
+      }
     };
-    kpi('tracked', counts.tracked, 'ox');
-    kpi('applied', by.Applied || 0, 'ember');
-    kpi('interviews', counts.interviews, 'gold');
-    kpi('responded', by.Responded || 0, 'sage');
-    kpi('overdue follow-ups', f && f.metadata ? f.metadata.overdue : '–', 'ox');
-    kpi('queue pending', q && q.pendingCount != null ? q.pendingCount : '–', 'ember');
-    kpi('scanned all-time', s && s.total != null ? s.total : '–', 'slate');
+    const fm = (f && f.metadata) || {};
+    kpi('tracked', counts.tracked, 'ox', 'pipeline');
+    kpi('applied', by.Applied || 0, 'ember', 'pipeline');
+    kpi('interviews', counts.interviews, 'gold', 'interviews');
+    kpi('responded', by.Responded || 0, 'sage', 'pipeline');
+    kpi('follow-ups pending', fm.pending ?? '–', 'gold', 'radar');
+    kpi('follow-ups overdue', fm.overdue ?? '–', 'ox', 'radar');
+    kpi('queue pending', q && q.pendingCount != null ? q.pendingCount : '–', 'ember', 'queue');
+    kpi('scanned all-time', s && s.total != null ? s.total : '–', 'slate', 'scan');
     // Stacked pipeline bar — proportional, real counts, canonical order.
     const total = Object.values(by).reduce((a, b) => a + b, 0);
     if (total > 0) {
@@ -456,18 +589,21 @@ module.exports = class HireloomBrain extends Plugin {
 
   async tabCounts() {
     const d = this.data;
-    const [p, q, f, iv, s, ib] = await Promise.all([
-      d.json('pipeline'), d.json('queue'), d.json('followups'), d.json('interviews'), d.json('scanfeed'), d.json('inbox'),
+    const [p, q, f, iv, s, ib, rv] = await Promise.all([
+      d.json('pipeline'), d.json('queue'), d.json('followups'), d.json('interviews'), d.json('scanfeed'), d.json('inbox'), d.json('needsreview'),
     ]);
     return {
       overview: null,
       pipeline: p && p.rows ? p.rows.length : 0,
       queue: q && q.pendingCount != null ? q.pendingCount : 0,
-      radar: f && f.metadata ? (f.metadata.actionable ?? 0) : 0,
+      // Radar badge = what the tab actually lists (pending action), not the
+      // analyzer's raw actionable count — "84" over a 1-row list was a lie.
+      radar: f && f.metadata ? (f.metadata.pending ?? 0) : 0,
+      review: rv && rv.count != null ? rv.count : 0,
       interviews: iv && iv.count != null ? iv.count : 0,
       scan: s && s.total != null ? s.total : 0,
       patterns: null,
-      inbox: ib && ib.pendingCount != null ? ib.pendingCount : 0,
+      inbox: ib ? (ib.signalCount || 0) + (ib.pendingCount || 0) : 0,
     };
   }
 
