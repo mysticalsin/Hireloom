@@ -89,3 +89,19 @@
 .hb-link { color: var(--hb-accent-hi); }
 .hb-section-h { font-weight: 750; margin: 14px 0 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--hb-muted); }
 .hb-bar { height: 9px; border-radius: 5px; background: linear-gradient(90deg, var(--hb-accent-hi), var(--hb-accent)); box-shadow: 0 0 8px var(--hb-glow); }
+
+/* ── v0.2.0 (2026-06-12): Needs Review tab, Respond buttons, clickable nav ── */
+.hb-clickable { cursor: pointer; }
+.hb-kpi.hb-clickable:hover, .hb-ccard.hb-clickable:hover { border-color: var(--hb-accent); box-shadow: 0 0 12px var(--hb-glow); transform: translateY(-1px); transition: all .15s ease; }
+.hb-jump { margin-left: auto; color: var(--hb-muted); font-size: 12px; }
+.hb-ccard.hb-clickable:hover .hb-jump { color: var(--hb-accent-hi); }
+.hb-chip.hb-warm { background: rgba(245, 158, 11, .18); border-color: var(--hb-orange); }
+.hb-review-card { background: var(--hb-card); border: 1px solid var(--hb-border); border-radius: 10px; padding: 9px 12px; margin: 7px 0; }
+.hb-review-subj { font-weight: 650; margin: 5px 0 2px; font-size: 12.5px; }
+.hb-review-snip { color: var(--hb-muted); font-size: 11.5px; line-height: 1.45; }
+.hb-mail-actions { display: flex; gap: 7px; margin-top: 7px; margin-left: auto; align-items: center; }
+.hb-row .hb-mail-actions { margin-top: 0; }
+a.hb-btn { text-decoration: none; display: inline-block; }
+.hb-btn-ghost { opacity: .85; }
+.hb-btn-respond { background: rgba(139, 92, 246, .22); border-color: var(--hb-accent); font-weight: 650; }
+.hb-btn-respond:hover { background: var(--hb-accent); }

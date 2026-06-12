@@ -13,7 +13,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const CAREER_OPS = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -143,21 +143,44 @@ function parseFollowups() {
   return entries;
 }
 
-// --- Parse Gmail next-step flags ---
-// The inbox scanner (apps/web/server.mjs) writes data/gmail-cache.json. A
-// signal with type 'interview' that was neither auto-applied to the tracker
-// nor filed quietly is a "possible next step" — an email that looks like the
-// company moved, pending a human glance. Those ARE the follow-ups that
-// matter most, so they surface here as urgent, ahead of cadence math.
-function parseNextStepFlags() {
-  if (!existsSync(GMAIL_CACHE_FILE)) return [];
+// --- Parse Gmail inbound responses ---
+// The inbox scanner (apps/web/server.mjs) writes data/gmail-cache.json.
+// Two distinct things come out of it:
+//
+// 1. FLAGS — a signal of type 'interview' or 'unknown' that was neither
+//    auto-applied to the tracker nor filed quietly, and that the user hasn't
+//    already replied to (sent-mail detection), is a "check the email" item.
+//    Those ARE the follow-ups that matter most, so they surface as urgent,
+//    ahead of cadence math.
+//
+// 2. ANCHORS — EVERY inbound response email (interview/unknown, including
+//    auto-applied ones) re-anchors the silence clock for its row. A response
+//    received today on a 20-day-old application is a follow-up PENDING from
+//    today, not 13 days overdue (the Hootsuite radar bug, 2026-06-12).
+function parseInboundResponses() {
+  if (!existsSync(GMAIL_CACHE_FILE)) return { flags: [], byNum: new Map() };
   try {
     const cache = JSON.parse(readFileSync(GMAIL_CACHE_FILE, 'utf-8'));
-    return (cache.signals || [])
-      .filter(s => s.signal === 'interview' && !s.dismissed && !s.autoApplied)
-      .map(s => ({ num: parseInt(s.num), subject: s.subject || '', date: s.date || '', from: s.from || '' }))
-      .filter(s => Number.isFinite(s.num));
-  } catch { return []; }
+    const flags = [];
+    const byNum = new Map();
+    for (const s of (cache.signals || [])) {
+      const num = parseInt(s.num);
+      if (!Number.isFinite(num)) continue;
+      if (!['interview', 'unknown'].includes(s.signal)) continue;
+      const d = new Date(s.date || '');
+      const inboundDate = isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+      if (!s.dismissed && !s.autoApplied && !s.userResponded) {
+        flags.push({ num, id: s.id || null, subject: s.subject || '', date: s.date || '', from: s.from || '', kind: s.signal });
+      }
+      if (inboundDate) {
+        const prev = byNum.get(num);
+        if (!prev || inboundDate > prev.inboundDate) {
+          byNum.set(num, { inboundDate, userResponded: !!s.userResponded, respondedAt: s.respondedAt || null, from: s.from || '', subject: s.subject || '' });
+        }
+      }
+    }
+    return { flags, byNum };
+  } catch { return { flags: [], byNum: new Map() }; }
 }
 
 // --- Extract contacts from notes ---
@@ -186,39 +209,51 @@ function resolveReportPath(reportField) {
 }
 
 // --- Compute urgency ---
-function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
+// `inbound` (optional): { daysSinceInbound, awaitingReply } — the latest
+// response email for this row and whether the user has yet to answer it.
+export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount, inbound = null, autoApplied = AUTO_APPLIED) {
   if (status === 'applied') {
     // Plain applications carry NO follow-up cadence — silence is a normal
     // outcome of volume applying. Opt-in only (followups.auto_applied /
     // --auto-applied) for users who want to chase every application.
-    if (!AUTO_APPLIED) return 'waiting';
+    if (!autoApplied) return 'waiting';
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
     if (followupCount > 0 && daysSinceLastFollowup !== null && daysSinceLastFollowup >= CADENCE.applied_subsequent) return 'overdue';
     return 'waiting';
   }
   if (status === 'responded' || status === 'interview') {
-    // Live conversations: flag after a week of silence. The clock anchors to
-    // the LAST logged touch (data/follow-ups.md), falling back to the
-    // application date — so logging a nudge or a held interview resets it.
-    const anchorDays = daysSinceLastFollowup !== null ? daysSinceLastFollowup : daysSinceApp;
+    // The company wrote and the user hasn't answered: that's a follow-up
+    // PENDING from the day the response arrived — overdue only once the
+    // response window lapses. Receipt date anchors it, NEVER application age.
+    if (inbound && inbound.awaitingReply) {
+      return inbound.daysSinceInbound >= CADENCE.conversation_silence ? 'overdue' : 'respond-pending';
+    }
+    // Otherwise: live conversation, flag after a week of silence. The clock
+    // anchors to the MOST RECENT event — last logged touch (data/follow-ups.md)
+    // or last inbound response — falling back to the application date.
+    const anchors = [daysSinceLastFollowup, inbound ? inbound.daysSinceInbound : null, daysSinceApp]
+      .filter(v => v !== null && v !== undefined);
+    const anchorDays = anchors.length ? Math.min(...anchors) : 0;
     return anchorDays >= CADENCE.conversation_silence ? 'overdue' : 'waiting';
   }
   return 'waiting';
 }
 
 // --- Compute next follow-up date ---
-function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount) {
+export function computeNextFollowupDate(status, appDate, lastFollowupDate, followupCount, inboundDate = null, autoApplied = AUTO_APPLIED) {
   if (status === 'applied') {
-    if (!AUTO_APPLIED) return null; // no cadence on plain applications
+    if (!autoApplied) return null; // no cadence on plain applications
     if (followupCount >= CADENCE.applied_max_followups) return null; // cold
     if (followupCount === 0) return addDays(parseDate(appDate), CADENCE.applied_first);
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.applied_subsequent);
     return addDays(parseDate(appDate), CADENCE.applied_first);
   }
   if (status === 'responded' || status === 'interview') {
-    const anchor = lastFollowupDate || appDate;
-    return addDays(parseDate(anchor), CADENCE.conversation_silence);
+    // Anchor = the most recent of (last touch, last inbound response, apply date).
+    const anchor = [lastFollowupDate, inboundDate, appDate]
+      .filter(d => d && parseDate(d)).sort().pop();
+    return addDays(parseDate(anchor || appDate), CADENCE.conversation_silence);
   }
   return null;
 }
@@ -239,6 +274,7 @@ function analyze() {
     followupsByApp.get(fu.appNum).push(fu);
   }
 
+  const inbound = parseInboundResponses();
   const now = today();
   const entries = [];
 
@@ -263,8 +299,22 @@ function analyze() {
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
-    const urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
-    const nextFollowupDate = computeNextFollowupDate(normalized, app.date, lastFollowupDate, followupCount);
+    // Latest inbound response email for this row (Gmail), if any.
+    const inb = inbound.byNum.get(app.num) || null;
+    let inboundInfo = null;
+    if (inb) {
+      const inbDate = parseDate(inb.inboundDate);
+      const daysSinceInbound = inbDate ? daysBetween(inbDate, now) : null;
+      // "Awaiting reply" = no sent-mail reply detected AND no touch logged on
+      // or after the day the response arrived.
+      const touchCovers = lastFollowupDate && lastFollowupDate >= inb.inboundDate;
+      if (daysSinceInbound !== null) {
+        inboundInfo = { daysSinceInbound, awaitingReply: !inb.userResponded && !touchCovers };
+      }
+    }
+
+    const urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount, inboundInfo);
+    const nextFollowupDate = computeNextFollowupDate(normalized, app.date, lastFollowupDate, followupCount, inb ? inb.inboundDate : null);
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
@@ -287,13 +337,19 @@ function analyze() {
       urgency,
       nextFollowupDate,
       daysUntilNext,
+      // Inbound-response context (null when no response email is on file):
+      inboundDate: inb ? inb.inboundDate : null,
+      awaitingReply: !!(inboundInfo && inboundInfo.awaitingReply),
+      respondedByUser: !!(inb && inb.userResponded),
+      respondBy: inboundInfo && inboundInfo.awaitingReply ? addDays(parseDate(inb.inboundDate), CADENCE.conversation_silence) : null,
+      inboundFrom: inb ? inb.from : null,
     });
   }
 
   // Gmail next-step flags upgrade their row to urgent — an email that looks
   // like the company moved beats any cadence clock.
   const flagsByNum = new Map();
-  for (const flag of parseNextStepFlags()) {
+  for (const flag of inbound.flags) {
     if (!flagsByNum.has(flag.num)) flagsByNum.set(flag.num, []);
     flagsByNum.get(flag.num).push(flag);
   }
@@ -305,23 +361,28 @@ function analyze() {
     }
   }
 
-  // Sort by urgency priority: urgent > overdue > waiting > cold
-  const urgencyOrder = { urgent: 0, overdue: 1, waiting: 2, cold: 3 };
+  // Sort by urgency priority: urgent > overdue > respond-pending > waiting > cold
+  const urgencyOrder = { urgent: 0, overdue: 1, 'respond-pending': 2, waiting: 3, cold: 4 };
   entries.sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
 
   const filtered = overdueOnly
     ? entries.filter(e => e.urgency === 'overdue' || e.urgency === 'urgent')
     : entries;
 
+  const count = (u) => entries.filter(e => e.urgency === u).length;
   return {
     metadata: {
       analysisDate: now.toISOString().split('T')[0],
       totalTracked: apps.length,
       actionable: entries.length,
-      overdue: entries.filter(e => e.urgency === 'overdue').length,
-      urgent: entries.filter(e => e.urgency === 'urgent').length,
-      cold: entries.filter(e => e.urgency === 'cold').length,
-      waiting: entries.filter(e => e.urgency === 'waiting').length,
+      overdue: count('overdue'),
+      urgent: count('urgent'),
+      respondPending: count('respond-pending'),
+      // "Pending" = everything that needs the user's action now (includes
+      // overdue) — the dashboard's "follow-ups pending" headline number.
+      pending: count('overdue') + count('urgent') + count('respond-pending'),
+      cold: count('cold'),
+      waiting: count('waiting'),
     },
     entries: filtered,
     cadenceConfig: CADENCE,
@@ -348,8 +409,8 @@ function printSummary(result) {
   }
 
   // Status summary
-  const urgencyIcon = { urgent: 'URGENT', overdue: 'OVERDUE', waiting: 'waiting', cold: 'COLD' };
-  console.log(`  ${metadata.urgent} urgent | ${metadata.overdue} overdue | ${metadata.waiting} waiting | ${metadata.cold} cold\n`);
+  const urgencyIcon = { urgent: 'URGENT', overdue: 'OVERDUE', 'respond-pending': 'RESPOND', waiting: 'waiting', cold: 'COLD' };
+  console.log(`  ${metadata.pending} pending (${metadata.urgent} urgent | ${metadata.overdue} overdue | ${metadata.respondPending} respond) | ${metadata.waiting} waiting | ${metadata.cold} cold\n`);
 
   // Table header
   console.log('  ' + '#'.padEnd(5) + 'Company'.padEnd(16) + 'Status'.padEnd(12) + 'Days'.padEnd(6) + 'F/U'.padEnd(5) + 'Next'.padEnd(13) + 'Urgency'.padEnd(10) + 'Contact');
@@ -375,13 +436,16 @@ function printSummary(result) {
   console.log('');
 }
 
-// --- Run ---
-const result = analyze();
+// --- Run (only when executed directly — the pure helpers above are imported
+// by tests/followup-cadence.test.mjs without triggering an analysis) ---
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = analyze();
 
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-if (result.error) process.exit(1);

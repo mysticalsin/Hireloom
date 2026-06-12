@@ -81,6 +81,62 @@ test('loose next-step language inside an ack subject flags but is not confident'
   assert.equal(signal.confident, false);
 });
 
+test('rejection: "successful in filling our role" (the Hootsuite miss, 2026-06-12)', () => {
+  // Real Hootsuite rejection auto-flipped a row to Interview: no known
+  // rejection phrasing matched, while "our interview process" in the body hit
+  // the loose interview list and the subject didn't read as an ack.
+  const signal = detectSignal(
+    'Your Hootsuite Application - Customer Success Manager | Responsable du Succès Client',
+    'Hi Ramy, Thank you for taking the time to apply for the Customer Success Manager position at Hootsuite.',
+    'There has been a lot of interest in this position, and we have been successful in filling our role. Unfortunately, we were unable to review your application when you applied as we had other candidates further along in our interview process.',
+    'no-reply.hiring@hootsuite.com');
+  assert.equal(signal.type, 'rejected');
+});
+
+test('rejection: filling-phrasing variants', () => {
+  for (const variant of [
+    'we were successful in filling this position',
+    'we have successfully filled the role with another candidate',
+    'we are in the process of filling our position internally',
+  ]) {
+    assert.equal(detectSignal('Application update', variant, '', 'jobs@x.com').type, 'rejected', variant);
+  }
+});
+
+test('loose interview language WITHOUT an ack subject is unknown, never confident (Hootsuite guard)', () => {
+  // Old behavior: loose + non-ack subject → confident interview → silent
+  // tracker write. New behavior: that combination is a response whose meaning
+  // the classifier can't pin down — the user reads the email and decides.
+  const signal = detectSignal(
+    'Your Acme Application - Customer Success Manager',
+    'Thanks for your patience while our team works through the interview process.',
+    '', 'no-reply.hiring@acme.com');
+  assert.equal(signal.type, 'unknown');
+});
+
+test('human sender with unclassifiable body is unknown, automated sender stays other', () => {
+  const human = detectSignal(
+    'Quick question about your background',
+    'Hi Ramy, I came across your profile while reviewing — do you have experience managing vendor transitions?',
+    '', '"Kelly, Devyn" <devyn.kelly@compass-canada.com>');
+  assert.equal(human.type, 'unknown');
+  const robot = detectSignal(
+    'Quick question about your background',
+    'Hi Ramy, I came across your profile while reviewing — do you have experience managing vendor transitions?',
+    '', 'no-reply@compass-canada.com');
+  assert.equal(robot.type, 'other');
+});
+
+test('strict scheduling language from a human stays confident interview (the Compass invite)', () => {
+  const signal = detectSignal(
+    'Initial Discussion | Project Manager, Program Management | Compass Group Canada',
+    'Thank you for expressing interest in the Project Manager, Program Management role.',
+    'After reviewing your profile, we would love to connect. You can book some time in my calendar using this link: https://calendly.com/devyn-kelly-compass-canada/30min',
+    'Devyn.Kelly@compass-canada.com');
+  assert.equal(signal.type, 'interview');
+  assert.equal(signal.confident, true);
+});
+
 // ── matchApplication ────────────────────────────────────────────────────────
 
 const APPS = [

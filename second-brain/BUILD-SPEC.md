@@ -100,10 +100,19 @@ file changes (skip-prefix the generated dirs), and a hot-reload dev loop.
 | **Pipeline** (kanban by state) | `data/applications.md` per `templates/states.yml` | "No applications tracked — paste a job URL or run /career-ops scan" |
 | **Apply Queue** (next up) | `output/pool-apply-order.json` when present | "No ranked pool — run the batch pipeline or paste URLs into data/pipeline.md" |
 | **Follow-up Radar** (going cold) | `node engine/tracker/followup-cadence.mjs` JSON + `data/follow-ups.md` | "No applied roles awaiting response" |
+| **Needs Review** (unclear responses) | `data/gmail-cache.json` signals of type `unknown`, low-confidence interview flags, and unmatched strong signals — items the user replied to (sent-mail detection) drop out | "Nothing needs review — unclear responses land here for you to classify" |
 | **Interviews** (upcoming + prep state) | tracker rows with status `Interview` + `interview-prep/` contents | "Nothing in interview stage yet" |
 | **Scan Feed** (fresh postings) | `data/scan-history.tsv` + last-scan timestamp | "Scanner hasn't run — node engine/scan/scan.mjs" |
 | **Patterns** (rejection analytics) | `node engine/tracker/analyze-patterns.mjs` JSON | "Too few outcomes to analyze yet" |
-| **Inbox** (pending URLs) | `data/pipeline.md` | "Inbox empty" |
+| **Inbox** (email signals + pending URLs) | `data/gmail-cache.json` (live signals + auto-filed tally) + `data/pipeline.md` (pending URLs) | "Inbox empty — no live email signals, no pending URLs" |
+
+Radar/Needs Review buttons: "✉ open email" (Gmail deep link) and "↩ Respond" — a
+pre-filled Gmail **compose** link. The plugin NEVER sends mail; the user always
+hits Send themselves. Hero KPIs and Overview cards are doorways: each clicks
+through to the tab holding its detail. Hero shows "follow-ups pending" (every
+item needing action now, overdue included) AND "follow-ups overdue" (deadline
+lapsed) — pending deadlines anchor to the response email's receipt date, never
+to application age.
 
 Gate: the tabs show the user's actual tracker rows, and the build stamp in
 the plugin settings matches the code you just wrote.
