@@ -23,7 +23,7 @@
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { chromium } from 'playwright';
-import { createResolver, extractFieldsInPage, isDecline } from './autoapply-core.mjs';
+import { createResolver, extractFieldsInPage, isDecline, preferTechnical } from './autoapply-core.mjs';
 
 const PROJECT_DIR = process.cwd();
 const SDIR = '.apply-session';
@@ -112,7 +112,11 @@ Return ONLY a JSON object mapping each field id to its value. No prose, no code 
   } catch { return {}; }
 }
 
-const NEXT_RE   = /^(next|continue|save (and|&) continue|proceed|review|apply now|apply|start application|get started|begin)\b/i;
+// "apply now"/"apply" REMOVED from NEXT_RE (2026-06-11): on some ATSes (Samsara)
+// the filled form's "Apply Now" button IS the submit — auto-clicking it submitted
+// a live application. Ambiguous labels now stop the session; the user clicks them.
+const NEXT_RE   = /^(next|continue|save (and|&) continue|proceed|review)\b/i;
+const SUBMIT_ALSO_RE = /^(apply now|apply)\b/i; // treat as submit-grade: never auto-click
 const SUBMIT_RE = /^(submit|submit application|send application|finish|complete application)\b/i;
 
 async function selectComboboxes(frame, fields, answers) {
@@ -157,11 +161,14 @@ async function selectComboboxes(frame, fields, answers) {
     for (let i = 0; i < oc; i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
     let idx = texts.findIndex(t => t.toLowerCase() === wl);
     if (idx < 0) idx = texts.findIndex(t => t && (t.toLowerCase().includes(wl) || wl.includes(t.toLowerCase())));
+    // No matching option → close the dropdown and LEAVE IT BLANK for the user.
+    // (Old behavior pressed Enter on whatever was highlighted — that selected
+    // "Agender" for gender=Male on Samsara. Never select an unverified option.)
     if (idx >= 0) { await opts.nth(idx).click({ timeout: 2500 }).catch(() => {}); clicked = true; }
-    else { await loc.press('Enter').catch(() => {}); }
+    else { await loc.press('Escape').catch(() => {}); }
 
     await frame.waitForTimeout(200);
-    log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ${clicked ? `clicked "${want.slice(0, 30)}"` : 'Enter (highlighted)'}`);
+    log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ${clicked ? `clicked "${want.slice(0, 30)}"` : `⚠ no option matched "${want.slice(0, 30)}" — LEFT BLANK, fill by hand`}`);
   }
 }
 
@@ -169,13 +176,16 @@ async function selectComboboxes(frame, fields, answers) {
 // Returns a short status string. Does NOT close the browser.
 async function fillForward(page) {
   const MAX_PAGES = 8;
+  const seenSigs = new Set(); // field-id signature per filled page — repeat = loop
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     log(`\n── page ${pageNum} ──`);
+    const pageFieldIds = [];
 
     for (const frame of page.frames()) {
       let fields = [];
       try { fields = await frame.evaluate(extractFieldsInPage); } catch { continue; }
       if (!fields.length) continue;
+      pageFieldIds.push(...fields.map(f => f.id || f.name || ''));
 
       let kimiMap = {};
       try { kimiMap = await kimiFillPage(fields); }
@@ -252,18 +262,42 @@ async function fillForward(page) {
       await selectComboboxes(frame, fields, answers).catch(() => {});
     }
 
-    // attach CV + cover to empty file inputs (first → resume, next → cover)
-    const fileInputs = page.locator('input[type="file"]');
-    const fc = await fileInputs.count().catch(() => 0);
-    let attached = 0;
-    for (let i = 0; i < fc; i++) {
-      const fi = fileInputs.nth(i);
-      const val = await fi.inputValue().catch(() => '');
-      if (val) continue;
-      const f = attached === 0 ? CTX.cv : CTX.cover;
-      if (f && existsSync(f)) { await fi.setInputFiles(f).catch(() => {}); attached++; }
+    // attach CV + cover to empty file inputs (first → resume, next → cover).
+    // Search EVERY frame, not just the top page — embedded ATS forms (Greenhouse
+    // on okta.com) keep their file inputs inside an iframe; the old page-only
+    // scan silently missed the cover letter there. Count only SUCCESSFUL
+    // uploads: the old `attached++` after a swallowed failure made the next
+    // input receive the cover while the resume slot stayed empty.
+    // Slot = file-input ORDER (0 → resume, 1 → cover), not attach count: with
+    // the old empty-only/count logic, a pre-populated resume input shifted the
+    // resume into the cover slot. A pre-filled slot gets REPLACED with this
+    // role's file — never trust carried-over state.
+    let attached = 0, slot = 0;
+    for (const fr of page.frames()) {
+      const fileInputs = fr.locator('input[type="file"]');
+      const fc = await fileInputs.count().catch(() => 0);
+      for (let i = 0; i < fc && slot < 2; i++, slot++) {
+        const fi = fileInputs.nth(i);
+        const f = slot === 0 ? CTX.cv : CTX.cover;
+        const name = slot === 0 ? 'resume' : 'cover letter';
+        if (!f || !existsSync(f)) continue;
+        const hadVal = await fi.inputValue().catch(() => '');
+        const ok = await fi.setInputFiles(f).then(() => true).catch(() => false);
+        if (ok) { attached++; log(`  📎 ${name} ${hadVal ? 'REPLACED a carried-over file' : 'attached'}`); }
+        else log(`  ⚠ ${name} upload failed — attach by hand`);
+      }
     }
-    if (attached) log(`  📎 attached ${attached} file(s)`);
+    if (!attached && (CTX.cv || CTX.cover)) log(`  ⚠ no file inputs found — check resume/cover attached by hand`);
+
+    // Loop guard: if we've already filled a page with this exact field set,
+    // we're in a re-render loop (validation errors, or a post-submit page that
+    // re-shows the form). Never click anything again — hand over.
+    const sig = pageFieldIds.filter(Boolean).sort().join('|');
+    if (sig && seenSigs.has(sig)) {
+      log(`\n⚠ Same form fields seen twice — stopping before clicking anything. Take over manually.`);
+      return 'stopped — page repeated (validation loop?), take over manually';
+    }
+    if (sig) seenSigs.add(sig);
 
     await page.waitForTimeout(800);
     const btns = page.locator('button, input[type="submit"], input[type="button"], a[role="button"]');
@@ -274,7 +308,7 @@ async function fillForward(page) {
       if (!(await b.isVisible().catch(() => false))) continue;
       const t = ((await b.textContent().catch(() => '')) || (await b.getAttribute('value').catch(() => '')) || '').trim();
       if (!t) continue;
-      if (SUBMIT_RE.test(t)) { submitSeen = true; }
+      if (SUBMIT_RE.test(t) || SUBMIT_ALSO_RE.test(t)) { submitSeen = true; }
       else if (NEXT_RE.test(t) && !nextBtn) { nextBtn = b; }
     }
 
@@ -306,6 +340,13 @@ function readCmd() {
   try { return JSON.parse(readFileSync(CMD, 'utf8')); } catch { return null; }
 }
 
+// Portals where a SAVED LOGIN matters → use the persistent .apply-profile
+// window. Everything else (Greenhouse/Lever/Ashby/Workday/company sites) gets a
+// FRESH ephemeral window per goto: same-window ATS state was carrying the
+// PREVIOUS role's resume into the next form (Greenhouse "reuse last resume",
+// 2026-06-11), so direct-ATS applications must start cold every time.
+const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
+
 (async () => {
   mkdirSync(SDIR, { recursive: true });
   const ctx = await chromium.launchPersistentContext('.apply-profile', {
@@ -313,17 +354,35 @@ function readCmd() {
     viewport: null,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--start-maximized'],
   });
-  let page = ctx.pages()[0] || await ctx.newPage();
-  await page.goto('about:blank').catch(() => {});
+  let ppage = ctx.pages()[0] || await ctx.newPage();
+  await ppage.goto('about:blank').catch(() => {});
+  let page = ppage;          // the ACTIVE page all commands operate on
+  let eph = null;            // ephemeral browser for the current direct-ATS role
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const safeUrl = () => { try { return page && !page.isClosed() ? page.url() : '(no page)'; } catch { return '(no page)'; } };
-  // If the user closed the tab but the window/context is still alive, reopen a page.
-  // If the whole context is gone (window closed), this throws → caught by caller → clean exit.
+
+  async function freshWindow() {
+    if (eph) await eph.close().catch(() => {});
+    eph = await chromium.launch({
+      headless: false, ...(EXE ? { executablePath: EXE } : {}),
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--start-maximized'],
+    });
+    const ectx = await eph.newContext({ viewport: null });
+    page = await ectx.newPage();
+    log('  🪟 fresh window for this role (no carried-over ATS state)');
+  }
+
+  // If the user closed the active tab: for the persistent window reopen a page;
+  // for an ephemeral window fall back to the persistent one (next goto will
+  // open a fresh window anyway). If the persistent context is gone too, this
+  // throws → caught by caller → clean exit.
   async function ensurePage() {
     if (page && !page.isClosed()) return true;
+    if (eph) { await eph.close().catch(() => {}); eph = null; }
     const open = ctx.pages().filter(p => !p.isClosed());
-    page = open[0] || await ctx.newPage();
+    ppage = open[0] || await ctx.newPage();
+    page = ppage;
     return true;
   }
 
@@ -347,12 +406,24 @@ function readCmd() {
         if (c.cmd === 'goto') {
           setStatus('navigating', `goto ${c.url}`);
           log(`\n▶ goto ${c.url}`);
+          let host = ''; try { host = new URL(c.url).hostname; } catch {}
+          if (PERSIST_RE.test(host)) {
+            if (eph) { await eph.close().catch(() => {}); eph = null; }
+            page = ppage;
+          } else {
+            await freshWindow();
+          }
           await page.goto(c.url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
           await sleep(1500);
           writeJsonAtomic(OUT, { id: c.id, ok: true, msg: `navigated to ${safeUrl()}` });
           setStatus('idle', `at ${safeUrl()}`);
         } else if (c.cmd === 'fill') {
-          CTX = { cv: c.cv || '', cover: c.cover || '', jd: c.jd || '', companyRole: c.companyRole || '' };
+          // c.jd is a PATH from apply-cmd — read the content; the old code
+          // pasted the literal path string into the Kimi prompt as the "JOB".
+          let jdText = c.jd || '';
+          try { if (jdText && existsSync(jdText)) jdText = readFileSync(jdText, 'utf8').slice(0, 12000); } catch {}
+          CTX = { cv: preferTechnical(c.cv || ''), cover: preferTechnical(c.cover || ''), jd: jdText, companyRole: c.companyRole || '' };
+          if (/\(technical\)/i.test(CTX.cv) && !/\(technical\)/i.test(c.cv || '')) log(`  ⬆ upgraded to (Technical) package variant`);
           setStatus('filling', `fill: ${CTX.companyRole || safeUrl()}`);
           log(`\n▶ fill — ${CTX.companyRole || safeUrl()}`);
           const msg = await fillForward(page);
@@ -439,6 +510,7 @@ function readCmd() {
     await sleep(600);
   }
 
+  if (eph) await eph.close().catch(() => {});
   await ctx.close().catch(() => {});
   process.exit(0);
 })();

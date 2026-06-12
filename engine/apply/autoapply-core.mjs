@@ -29,6 +29,16 @@ export const DECLINE_RE = /prefer not|decline|don'?t wish|do not wish|rather not
 export const isDecline = (v) => DECLINE_RE.test(String(v || ''));
 export const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
+// If a "(Technical)" sibling of the given PDF exists, prefer it. Technical
+// variants are only built for technical-archetype roles, so existence of the
+// sibling means this role wants the technical CV/cover.
+export function preferTechnical(p) {
+  if (!p || /\(technical\)/i.test(p)) return p;
+  const tech = p.replace(/\.pdf$/i, ' (Technical).pdf');
+  try { if (tech !== p && existsSync(tech)) return tech; } catch {}
+  return p;
+}
+
 // Pick the listed option that best matches a desired value (exact → substring →
 // token-overlap). Returns null when nothing plausibly matches.
 export function bestOption(desired, options) {
@@ -362,7 +372,8 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     try { j = JSON.parse(readFileSync(jsonPath, 'utf8')); } catch { return null; }
     const abs = (p) => (p && !p.startsWith('/') ? join(projectDir, p) : p) || '';
     return {
-      url: (j.url || '').trim(), cvPath: abs(j.cvPath), coverPath: abs(j.coverPath),
+      url: (j.url || '').trim(),
+      cvPath: preferTechnical(abs(j.cvPath)), coverPath: preferTechnical(abs(j.coverPath)),
       salary: j.salary || '', why: j.why || '', company: j.company || '', role: j.role || '',
       answers: j.answers || {},
     };
