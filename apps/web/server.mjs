@@ -29,7 +29,7 @@ import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
-import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes } from './lib/role-index.mjs';
+import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes, reconcilePoolKeys } from './lib/role-index.mjs';
 import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview, signalPendingReview, NO_REVIEW_STATUSES } from './lib/email-groups.mjs';
 import { autoFitScore, explainFit } from './lib/fit-score.mjs';
 import { appendHistory, loadHistory, latestStatusDate, interviewDateFor, setInterviewDate, extractInterviewDateFromText } from './lib/status-history.mjs';
@@ -10564,6 +10564,12 @@ async function start() {
 
   await loadTokens();
   await loadGmailCache();
+  // One-shot heal for the n→rank pool re-key: rewrite any stale p<n> poolKey on
+  // a persisted signal to its role's canonical key (no-op once clean).
+  try {
+    const healed = reconcilePoolKeys(gmailCache.signals, await getRoleIndex(true));
+    if (healed) { await saveGmailCache(); console.log(`[startup] reconciled ${healed} stale pool key(s) on Gmail signals`); }
+  } catch (err) { console.error('[startup] poolKey reconcile skipped:', err?.message || err); }
   await loadAutopilotLog();
   if (gmailTokens?.refresh_token) startGmailPolling();
 

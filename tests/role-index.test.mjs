@@ -7,6 +7,7 @@ import {
   parseTrackerRows, buildRoleIndex, matchEmailToRole, loadRoleIndex,
   domainMatchesCompany, companiesMatch, titlesSimilar,
   parseAppFolder, parseAecomFolder, loadLanes, ROLE_KEY_RE, LANE_SOURCE,
+  reconcilePoolKeys,
 } from '../apps/web/lib/role-index.mjs';
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
@@ -101,6 +102,31 @@ test('pool keys are unique by rank even when n collides (the p147 wrong-role bug
   assert.equal(byKey.p2.poolN, 147);                      // n preserved (folder name / display)
   assert.equal(byKey.p183.poolN, 147);
   assert.ok(!('p147' in byKey));                          // the colliding n is no longer a key
+});
+
+test('reconcilePoolKeys heals stale n-based signal poolKeys (incl. the collision case)', () => {
+  // Samsara was pool n=18 / rank=73; a signal persisted poolKey 'p18'. After the
+  // n→rank re-key, 'p18' resolves to whoever ranks 18th (here: a different
+  // company) — a wrong attachment. Re-resolve by poolN + company → 'p73'.
+  const pool = { rows: [
+    { rank: 73, n: 18,  title: 'Field Operations PM', company: 'Samsara', ats: 'greenhouse', url: 'https://s' },
+    { rank: 18, n: 200, title: 'Project Manager', company: 'Confidential', ats: 'lever', url: 'https://c' }, // now owns 'p18'
+    { rank: 5,  n: 99,  title: 'PM', company: 'Other Co', ats: 'ashby', url: 'https://o' },
+  ] };
+  const idx = buildRoleIndex({ pool });
+  assert.equal(idx.byKey.p18.company, 'Confidential'); // the collision the heal must see past
+  const signals = [
+    { id: 'a', poolKey: 'p18', company: 'Samsara', num: null },  // stale + collides → p73
+    { id: 'b', poolKey: 'p5',  company: 'Other Co', num: null }, // already canonical → untouched
+    { id: 'c', num: '12', company: 'Acme' },                     // no poolKey → skipped
+    { id: 'd', poolKey: 'p18', company: '', num: null },         // no company to disambiguate → left alone
+  ];
+  const changed = reconcilePoolKeys(signals, idx);
+  assert.equal(changed, 1);
+  assert.equal(signals[0].poolKey, 'p73', 'stale Samsara key re-resolved past the rank-18 collision');
+  assert.equal(signals[1].poolKey, 'p5', 'canonical key untouched');
+  assert.equal(signals[3].poolKey, 'p18', 'no company → left as-is, never guessed');
+  assert.equal(reconcilePoolKeys(signals, idx), 0, 'idempotent: second run changes nothing');
 });
 
 // ── buildRoleIndex: tracker+pool join ────────────────────────────────────────

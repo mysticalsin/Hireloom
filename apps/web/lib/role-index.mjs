@@ -372,6 +372,38 @@ export function matchEmailToRole(index, { from = '', subject = '', text = '', ro
   return open[0] || pool[0];
 }
 
+// Heal stale pool poolKeys on persisted Gmail signals after the n→rank re-key.
+// A signal stored poolKey 'p'+n at match time; pool roles now key by RANK, so a
+// legacy 'p'+n key no longer just orphans — it COLLIDES with the rank-n role
+// (byKey['p18'] resolves to whoever ranks 18th, not the n=18 role), so a
+// byKey-lookup consumer would attach the email to the wrong company. Re-resolve
+// each p<n> poolKey to its role's canonical key by matching poolN AND company.
+// Pure: mutates the signal objects in place and returns how many changed; a
+// no-op (returns 0) once every poolKey is canonical, so it is safe every boot.
+// (Only a cache built on the pre-merge unified-registry branch can carry
+// n-based keys — no shipped version ever persisted them.)
+export function reconcilePoolKeys(signals, index) {
+  if (!Array.isArray(signals) || !index || !index.byKey) return 0;
+  const poolRoles = [];
+  for (const r of (index.roles || [])) {
+    const pr = r.pool || (r.source === 'pool' ? r : null);
+    if (pr && pr.poolN != null) poolRoles.push({ key: r.key, company: r.company, poolN: pr.poolN });
+  }
+  let changed = 0;
+  for (const s of signals) {
+    const m = /^p(\d+)$/.exec((s && s.poolKey) || '');
+    if (!m) continue;
+    const cur = index.byKey[s.poolKey];
+    // Already canonical: the key resolves to a role whose company matches.
+    if (cur && companiesMatch(cur.company, s.company || cur.company)) continue;
+    if (!s.company) continue; // no company to disambiguate on → leave it untouched
+    const n = Number(m[1]);
+    const hit = poolRoles.find(p => p.poolN === n && companiesMatch(p.company, s.company));
+    if (hit && hit.key !== s.poolKey) { s.poolKey = hit.key; changed++; }
+  }
+  return changed;
+}
+
 // ── application-folder name parsers (pure, exported for tests) ───────────────
 
 // "01 - MDA Space - Transformation Process Manager" → {company, role}
