@@ -5306,14 +5306,23 @@ const HTML = /* html */ `<!DOCTYPE html>
         </div>
         <div class="filter-pills">
           <button class="filter-pill active" onclick="setFilter('all',this)" data-filter="all">All</button>
-          <button class="filter-pill money" onclick="setFilter('high-paying',this)" data-filter="high-paying" title="$200K+ base, $300K+ TC/OTE, or premium-tier company (Anthropic, OpenAI, NVIDIA, etc.)">💰 High-Paying</button>
           <button class="filter-pill" onclick="setFilter('followup',this)" data-filter="followup">⚡ Follow-up</button>
+          <button class="filter-pill" onclick="setFilter('pending',this)" data-filter="pending">Pipeline</button>
           <button class="filter-pill" onclick="setFilter('applied',this)" data-filter="applied">Applied</button>
           <button class="filter-pill" onclick="setFilter('interview',this)" data-filter="interview">Interview</button>
           <button class="filter-pill" onclick="setFilter('offer',this)" data-filter="offer">Offer</button>
           <button class="filter-pill" onclick="setFilter('evaluated',this)" data-filter="evaluated">Evaluated</button>
           <button class="filter-pill" onclick="setFilter('rejected',this)" data-filter="rejected">Rejected</button>
+          <!-- least-used pill rides at the far right (user ask 06-13) -->
+          <button class="filter-pill money" onclick="setFilter('high-paying',this)" data-filter="high-paying" title="$200K+ base, $300K+ TC/OTE, or premium-tier company (Anthropic, OpenAI, NVIDIA, etc.)">💰 High-Paying</button>
         </div>
+        <select id="roles-per-page" onchange="rolesPerPageChange()" aria-label="Rows per page"
+                style="background:var(--surface);border:1px solid var(--separator2);border-radius:8px;color:var(--text-sec);padding:6px 8px;font-size:12px">
+          <option value="16">16 / page</option>
+          <option value="32" selected>32 / page</option>
+          <option value="64">64 / page</option>
+          <option value="128">128 / page</option>
+        </select>
       </div>
       <div class="table-card">
         <table>
@@ -5334,6 +5343,7 @@ const HTML = /* html */ `<!DOCTYPE html>
           </tbody>
         </table>
       </div>
+      <div id="roles-pager"></div>
     </section>
 
     <!-- All-in-one Role page (#role/<key>) -->
@@ -5715,24 +5725,29 @@ const HTML = /* html */ `<!DOCTYPE html>
     // rows; the posting URL lives on the role page now). Apply stays per-row
     // for Evaluated roles; the report icon stays a direct shortcut.
     tbody.innerHTML = apps.map(a => {
+      const isPool = a.num == null; // pool-only inventory row (never applied / pool lane)
       const fuTag = a.needsFollowUp ? '<span class="followup-tag">⚡ ' + a.age + 'd</span>' : '';
       const cls = a.needsFollowUp ? ' class="followup-row"' : '';
       const reportBtn = a.reportLink
         ? '<a class="report-btn" href="/reports/' + esc(a.reportLink) + '" target="_blank" onclick="event.stopPropagation()" aria-label="Open report for ' + esc(a.company || a.num) + '" title="Open evaluation report">📄</a> '
         : '';
-      const applyBtn = a.status === 'evaluated'
+      const applyBtn = !isPool && a.status === 'evaluated'
         ? '<button class="btn-row-apply" onclick="event.stopPropagation();applyOne(\\'' + esc(a.num) + '\\')" aria-label="Apply to ' + esc(a.company || a.num) + ' and mark applied" title="Open job URL and mark Applied">Apply →</button>'
         : '';
       // Pending-review rows show NO real status until the user classifies
       // (the review-desk rule) — the tracker's value rides in the tooltip.
+      // Pool rows get a plain chip: their status lives in the pool file,
+      // not applications.md, so the dropdown writer doesn't apply.
       const statusBadge = a.pendingReview
         ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a)" onclick="event.stopPropagation();hbSwitchTab(\\'review\\')" title="Emails awaiting your classification (tracker: ' + esc(a.status||'—') + ') — click to open Needs Review">pending review</span>'
+        : isPool
+        ? '<span class="status-badge ' + statusClass(a.status) + '" title="Pool-lane status (output/pool-apply-order.json)">' + esc(a.status||'pending') + '</span>'
         : '<span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>';
       // Column order is the user's scan order: identity + dates first,
       // verdict columns (score · comp · status) pinned at the right edge.
       // Notes column dropped — it lives in the row tooltip + role page.
-      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.num) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
-        '<td class="td-num">' + esc(a.num) + '</td>' +
+      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(isPool ? a.key : a.num) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
+        '<td class="td-num">' + (isPool ? '<span style="color:var(--text-ter)" title="pool rank — not in the tracker yet">r' + esc(String(a.rank ?? '?')) + '</span>' : esc(a.num)) + '</td>' +
         '<td><div class="td-company"><div class="company-avatar">' + avatarLetter(a.company) + '</div>' + reportBtn + esc(a.company) + '</div></td>' +
         '<td class="td-role">' + esc(a.role) + '</td>' +
         '<td class="td-date">' + esc(a.date||'—') + '</td>' +
@@ -5778,7 +5793,9 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   function getSortVal(app, field) {
     if (field === 'score') return parseFloat(app.score) || 0;
-    if (field === 'num')   return parseInt(app.num) || 0;
+    // Pool rows have no tracker number — they sort after tracker rows, in
+    // rank order.
+    if (field === 'num')   return app.num != null ? (parseInt(app.num) || 0) : 100000 + (app.rank || 0);
     if (field === 'date')  return app.date || '';
     if (field === 'comp')  return app.compSort || 0;
     return (app[field] || '').toLowerCase();
@@ -5796,9 +5813,36 @@ const HTML = /* html */ `<!DOCTYPE html>
     applyFilter();
   }
 
+  // Pool-only roles (the never-applied pipeline inventory) ride the All
+  // Roles table next to tracker rows — the table is the UNION (user ask
+  // 06-13: "add even the non-applied status, the stuff in our pipeline").
+  var allRolesPool = [];
+  async function refreshPoolRoles() {
+    try {
+      const data = await (await fetch('/api/roles')).json();
+      allRolesPool = (data.roles || []).filter(r => r.source === 'pool').map(r => ({
+        key: r.key, num: null, rank: r.rank, company: r.company, role: r.role,
+        status: r.status || 'pending', date: r.date || null,
+        score: r.score || null, notes: r.notes || '',
+        pendingReview: !!r.pendingReview, comp: null, compSort: 0,
+        age: r.date ? Math.max(0, Math.floor((Date.now() - Date.parse(r.date)) / 86400000)) : null,
+        source: 'pool',
+      }));
+      applyFilter();
+    } catch { /* the table still shows tracker rows */ }
+  }
+
+  var rolesPage = 0, rolesPerPage = 32; // standard steps: 16/32/64/128
+  function rolesGo(p) { rolesPage = p; applyFilter(); }
+  function rolesPerPageChange() {
+    rolesPerPage = parseInt(document.getElementById('roles-per-page')?.value, 10) || 32;
+    rolesPage = 0;
+    applyFilter();
+  }
+
   function applyFilter() {
     searchQuery = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
-    let filtered = allApps;
+    let filtered = allApps.concat(allRolesPool);
     if (currentFilter === 'followup')      filtered = filtered.filter(a => a.needsFollowUp);
     else if (currentFilter === 'high-paying') filtered = filtered.filter(a => a.highPaying);
     else if (currentFilter === 'pipeline') filtered = filtered; // shown in sidebar
@@ -5810,7 +5854,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       filtered = filtered.filter(a => {
         const hay = ((a.company||'') + ' ' + (a.role||'') + ' ' + (a.notes||'') + ' ' +
           (a.status||'') + ' ' + (a.num||'') + ' ' + (a.date||'') + ' ' +
-          (a.score||'') + ' ' + (a.comp||'')).toLowerCase();
+          (a.score||'') + ' ' + (a.comp||'') + ' ' + (a.source||'')).toLowerCase();
         return terms.every(t => hay.includes(t));
       });
     }
@@ -5819,8 +5863,14 @@ const HTML = /* html */ `<!DOCTYPE html>
       const av = getSortVal(a, sortField), bv = getSortVal(b, sortField);
       return sortAsc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
     });
-    document.getElementById('apps-count') && (document.getElementById('apps-count').textContent = filtered.length + ' of ' + allApps.length);
-    renderApps(filtered);
+    // Paginate (per-page selector: 16/32/64/128)
+    const pages = Math.max(1, Math.ceil(filtered.length / rolesPerPage));
+    if (rolesPage >= pages) rolesPage = pages - 1;
+    document.getElementById('apps-count') && (document.getElementById('apps-count').textContent =
+      filtered.length + ' of ' + (allApps.length + allRolesPool.length));
+    renderApps(filtered.slice(rolesPage * rolesPerPage, (rolesPage + 1) * rolesPerPage));
+    const pager = document.getElementById('roles-pager');
+    if (pager) pager.innerHTML = hbPager(rolesPage, pages, 'rolesGo');
   }
 
   /* ── Render sidebar sections ── */
@@ -5952,9 +6002,11 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
   });
 
-  function rowClick(event, num) {
-    // The whole row is a doorway to the all-in-one role page.
-    goRole('t' + num);
+  function rowClick(event, numOrKey) {
+    // The whole row is a doorway to the all-in-one role page. Tracker rows
+    // pass a bare number; pool rows pass their full key ('p18').
+    const s = String(numOrKey);
+    goRole(/^[tp]\d/.test(s) ? s : 't' + s);
   }
 
   /* ── Gmail ── */
@@ -7579,6 +7631,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       allApps = data.applications;
       lastStats = data.stats;
       lastUser = data.user || null;
+      refreshPoolRoles(); // async — re-applies the filter when it lands
       renderStats(data.stats);
       updateApplyBanner(data.applications);
       applyFilter();
@@ -7745,7 +7798,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       scan: hbData.scanfeed ? hbData.scanfeed.total : null,
       patterns: null,
       inbox: g && g.inbox ? (g.inbox.live || []).length : null,
-      roles: lastStats ? lastStats.total : null,
+      // The union count — tracker rows + pool-only inventory.
+      roles: lastStats ? lastStats.total + (allRolesPool ? allRolesPool.length : 0) : null,
     };
   }
 
@@ -8194,17 +8248,20 @@ const HTML = /* html */ `<!DOCTYPE html>
       nav +
       slice.map(r => {
         // The columns ARE the doorway: matched discoveries click through to
-        // the all-in-one role page; Open stays the raw listing.
-        const co = '<span class="hb-co">' + esc(r.company || '') + '</span><span>' + esc(r.title || '') + '</span>';
+        // the all-in-one role page; Open stays the raw listing. Everything
+        // is pinned to ONE line — long titles ellipsize into their tooltip
+        // (unmatched rows were ballooning to double height).
+        const co = '<span class="hb-co" style="flex:0 0 auto;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.company || '') + '</span>' +
+          '<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.title || '') + '">' + esc(r.title || '') + '</span>';
         const body = r.roleKey
           ? '<a class="hb-link" style="display:contents" href="#role/' + encodeURIComponent(r.roleKey) + '">' + co + '</a>'
           : co;
         const st = r.roleKey
-          ? '<span class="hb-chip' + (/rejected|discarded|skip|expired/.test(r.roleStatus || '') ? ' hb-hot' : '') + '">' + esc(r.roleStatus || 'tracked') + '</span>'
-          : '<span class="hb-chip hb-warm">not picked up</span>';
-        return '<div class="hb-row"><span class="hb-num">' + esc(r.first_seen || '') + '</span>' + body +
-          '<span class="hb-chip">' + esc(r.portal || '') + '</span>' + st +
-          (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>';
+          ? '<span class="hb-chip' + (/rejected|discarded|skip|expired/.test(r.roleStatus || '') ? ' hb-hot' : '') + '" style="white-space:nowrap">' + esc(r.roleStatus || 'tracked') + '</span>'
+          : '<span class="hb-chip hb-warm" style="white-space:nowrap">not picked up</span>';
+        return '<div class="hb-row" style="flex-wrap:nowrap"><span class="hb-num" style="white-space:nowrap">' + esc(r.first_seen || '') + '</span>' + body +
+          '<span class="hb-chip" style="white-space:nowrap">' + esc(r.portal || '') + '</span>' + st +
+          (r.url ? '<a class="hb-link hb-num" style="margin-left:auto;white-space:nowrap" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>';
       }).join('') + nav;
   }
 
@@ -8216,14 +8273,30 @@ const HTML = /* html */ `<!DOCTYPE html>
     if (p.error || !p.metadata || !p.metadata.total) { host.innerHTML = '<div class="hb-empty">Too few outcomes to analyze yet</div>'; return; }
     const out = p.metadata.byOutcome || {};
     const total = Object.values(out).reduce((a, b) => a + b, 0) || 1;
+    // What each bucket MEANS (mirrors classifyOutcome in analyze-patterns.mjs)
+    // — bare labels read as judgments without the status mapping behind them.
+    const OUTCOME_DEFS = {
+      positive: 'still alive or advanced — Applied · Responded · Interview · Offer',
+      negative: 'closed against you — Rejected · Discarded',
+      self_filtered: 'you passed — SKIP (didn\\'t fit, never applied)',
+      pending: 'evaluated but not applied yet',
+    };
+    const impactChip = (i) => i ? '<span class="hb-chip' + (i === 'high' ? ' hb-hot' : i === 'medium' ? ' hb-warm' : '') + '">' + esc(i) + ' impact</span>' : '';
     host.innerHTML = '<div class="hb-meta">' + p.metadata.total + ' analyzed · source: engine/tracker/analyze-patterns.mjs</div>' +
       '<div class="hb-section-h">Outcomes</div>' +
       Object.entries(out).map(([k, v]) =>
-        '<div class="hb-row"><span class="hb-co">' + esc(k) + '</span><span class="hb-num">' + v + '</span>' +
-        '<div class="hb-bar" style="width:' + Math.max(2, Math.round((v / total) * 240)) + 'px"></div></div>').join('') +
+        '<div class="hb-row"><span class="hb-co" style="min-width:96px">' + esc(k) + '</span><span class="hb-num">' + v + '</span>' +
+        '<div class="hb-bar" style="width:' + Math.max(2, Math.round((v / total) * 240)) + 'px"></div>' +
+        '<span class="hb-num" style="margin-left:auto">' + (OUTCOME_DEFS[k] || '') + '</span></div>').join('') +
       (Array.isArray(p.recommendations) && p.recommendations.length
-        ? '<div class="hb-section-h">Recommendations</div>' + p.recommendations.slice(0, 8).map(r =>
-            '<div class="hb-row">' + esc(typeof r === 'string' ? r : (r.text || r.message || JSON.stringify(r))) + '</div>').join('')
+        ? '<div class="hb-section-h">Recommendations</div>' + p.recommendations.slice(0, 8).map(r => {
+            if (typeof r === 'string') return '<div class="hb-row">' + esc(r) + '</div>';
+            // analyzer shape: { action, reasoning, impact } — render it as a
+            // sentence, never raw JSON.
+            return '<div class="hb-row" style="flex-wrap:wrap">' + impactChip(r.impact) +
+              '<span style="font-weight:600">' + esc(r.action || r.text || r.message || '') + '</span>' +
+              (r.reasoning ? '<span class="hb-num">' + esc(r.reasoning) + '</span>' : '') + '</div>';
+          }).join('')
         : '');
   }
 
@@ -8533,19 +8606,21 @@ const HTML = /* html */ `<!DOCTYPE html>
 </script>
 
 <!-- ── Footer credit ───────────────────────────────────────────────
-     Tony Walteur built this. Lives outside the main grid so it
-     doesn't compete with the data table for attention; clicks open
-     his LinkedIn in a new tab. ─────────────────────────────────── -->
+     The two-author product: Tony Walteur + Ramy Sherif. Lives outside
+     the main grid so it doesn't compete with the data table; each
+     name opens its LinkedIn in a new tab. ──────────────────────── -->
 <footer class="built-by" role="contentinfo">
-  <a class="built-by-pill"
-     href="https://www.linkedin.com/in/tonywalteur/"
-     target="_blank" rel="noopener noreferrer"
-     title="Built by Tony Walteur — open LinkedIn profile in new tab">
+  <span class="built-by-pill">
     <span class="built-by-dot" aria-hidden="true"></span>
-    Built by <strong style="font-weight:600;color:var(--text)">Tony Walteur</strong>
+    Built by
+    <a href="https://www.linkedin.com/in/tonywalteur/" target="_blank" rel="noopener noreferrer"
+       title="Tony Walteur — open LinkedIn profile in new tab"
+       style="font-weight:600;color:var(--text);text-decoration:none">Tony Walteur&nbsp;↗</a>
     <span style="opacity:.5">·</span>
-    <span style="opacity:.7">LinkedIn ↗</span>
-  </a>
+    <a href="https://www.linkedin.com/in/ramy-sherif/" target="_blank" rel="noopener noreferrer"
+       title="Ramy Sherif — open LinkedIn profile in new tab"
+       style="font-weight:600;color:var(--text);text-decoration:none">Ramy Sherif&nbsp;↗</a>
+  </span>
 </footer>
 
 </body>
@@ -9202,12 +9277,23 @@ async function handleRequest(req, res) {
     try {
       const index = await getRoleIndex();
       const hist = loadHistory(HISTORY_FILE);
+      const reviewKeys = pendingReviewKeys();
       const roles = (index.roles || []).map(r => ({
         key: r.key, num: r.num ?? null, company: r.company, role: r.role,
         status: r.status, date: r.date || r.appliedOn || null,
         lastEdited: r.num != null ? (() => { const e = hist.filter(h => String(h.num) === String(r.num)).pop(); return e ? String(e.ts).slice(0, 10) : (r.date || null); })() : (r.appliedOn || null),
         notes: (r.notes || r.note || '').slice(0, 160),
         source: r.source, rank: r.rank ?? null,
+        // Score (eval-report value or auto-fit estimate) + pending-review
+        // flag so the All Roles union renders pool rows like tracker rows.
+        score: (r.score && r.score !== 'N/A' ? r.score : null) || autoFitScore({
+          title: r.role,
+          tier: r.tier ?? (r.pool && r.pool.tier) ?? null,
+          archetype: r.archetype || (r.pool && r.pool.archetype) || null,
+          ats: r.ats || null,
+        }).display,
+        pendingReview: !NO_REVIEW_STATUSES.has(String(r.status || '').toLowerCase()) &&
+          (reviewKeys.has(r.key) || Boolean(r.pool && reviewKeys.has(r.pool.key))),
       }));
       // Tracker rows first (the usual attach targets), then pool, newest first.
       roles.sort((a, b) => ((a.num != null ? 0 : 1) - (b.num != null ? 0 : 1)) || String(b.date || '').localeCompare(String(a.date || '')));
