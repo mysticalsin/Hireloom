@@ -4096,8 +4096,6 @@ const HTML = /* html */ `<!DOCTYPE html>
       vertical-align: middle;
     }
     .td-num { color: var(--text-ter); font-size: var(--t-caption); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-    .lane-tag { display: block; margin-top: 2px; font-size: 8.5px; line-height: 1; letter-spacing: .4px;
-      text-transform: uppercase; color: var(--text-ter); opacity: .7; font-family: var(--font-sans); }
     .apps-count { color: var(--text-ter); font-size: var(--t-caption); font-family: var(--font-mono); align-self: center; margin-left: 2px; }
     .hb-edit-l { display: block; font-size: 11px; color: var(--text-ter); margin-top: 8px; }
     .hb-edit-l input, .hb-edit-l select, .hb-edit-l textarea {
@@ -5251,15 +5249,6 @@ const HTML = /* html */ `<!DOCTYPE html>
     </div>
 
     <!-- Page header — Linear-style, NOT a hero. -->
-    <!-- Apply banner — only shows when 4.0+ roles are ready to apply -->
-    <div class="apply-banner" id="apply-banner">
-      <div class="apply-banner-text">
-        <div class="apply-banner-title" id="apply-banner-title">17 roles ready to apply</div>
-        <div class="apply-banner-sub" id="apply-banner-sub">Evaluated roles scoring 4.0+ — open them all in one click</div>
-      </div>
-      <button class="btn btn-apply-batch" onclick="openApplyModal()">Apply now</button>
-    </div>
-
     <!-- HB hero — greeting, where-things-stand subline, clickable KPI cards,
          stacked pipeline bar. Mirrors the Obsidian Brain hero 1:1. -->
     <section class="hb-hero" aria-label="Overview statistics">
@@ -5797,7 +5786,6 @@ const HTML = /* html */ `<!DOCTYPE html>
     // old ↗ Open button died with PR — it errored on report-less pool/Indeed
     // rows; the posting URL lives on the role page now). Apply stays per-row
     // for Evaluated roles; the report icon stays a direct shortcut.
-    const LANE_LABEL = { pool: 'pool', aviation: 'aviation', aecom: 'aecom', indeed: 'indeed', loose: 'other' };
     tbody.innerHTML = apps.map(a => {
       const isTracker = a.num != null; // a tracked application (applications.md row)
       const fuTag = a.needsFollowUp ? '<span class="followup-tag">⚡ ' + a.age + 'd</span>' : '';
@@ -5816,12 +5804,10 @@ const HTML = /* html */ `<!DOCTYPE html>
       const statusBadge = a.pendingReview
         ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a)" onclick="event.stopPropagation();hbSwitchTab(\\'review\\')" title="Emails awaiting your classification (tracker: ' + esc(a.status||'—') + ') — click to open Needs Review">pending review</span>'
         : '<span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.key) + '\\',this)" data-key="' + esc(a.key) + '" title="Click to change status">' + esc(a.status||'pending') + '</span>';
-      const laneTag = isTracker ? ''
-        : '<span class="lane-tag" title="' + esc(a.source) + ' lane — in your pipeline">' + esc(LANE_LABEL[a.source] || a.source) + '</span>';
       // Column order is the user's scan order: identity + dates first,
       // verdict columns (score · comp · status) pinned at the right edge.
       return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.key) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
-        '<td class="td-num">' + esc(a.index) + laneTag + '</td>' +
+        '<td class="td-num">' + esc(a.index) + '</td>' +
         '<td><div class="td-company"><div class="company-avatar">' + avatarLetter(a.company) + '</div>' + reportBtn + esc(a.company) + '</div></td>' +
         '<td class="td-role">' + esc(a.role) + '</td>' +
         '<td class="td-date">' + esc(a.date||'—') + '</td>' +
@@ -6037,20 +6023,9 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
   }
 
-  function updateApplyBanner(apps) {
-    // Threshold removed at user request — all evaluated roles count as "ready to apply"
-    // (we vet each one during the apply/pipeline step anyway). Was: && score >= 4.0.
-    const ready = apps.filter(a => a.status === 'evaluated');
-    const banner = document.getElementById('apply-banner');
-    if (ready.length > 0) {
-      banner.classList.add('show');
-      document.getElementById('apply-banner-title').textContent = ready.length + ' role' + (ready.length > 1 ? 's' : '') + ' ready to apply';
-      const top3 = ready.sort((a,b) => parseFloat(b.score) - parseFloat(a.score)).slice(0,3).map(a => a.company).join(', ');
-      document.getElementById('apply-banner-sub').textContent = 'Top: ' + top3 + ' — evaluated and waiting for review';
-    } else {
-      banner.classList.remove('show');
-    }
-  }
+  // Apply banner removed at user request (2026-06-13) — it was noise. The
+  // Apply Queue tab + the per-row Apply button cover the same ground.
+  function updateApplyBanner() { /* no-op: banner removed */ }
 
   /* ── Status dropdown ── (works on ANY lane via the role key) */
   function openDropdown(key, triggerEl) {
