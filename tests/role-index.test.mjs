@@ -6,6 +6,7 @@ import { join } from 'path';
 import {
   parseTrackerRows, buildRoleIndex, matchEmailToRole, loadRoleIndex,
   domainMatchesCompany, companiesMatch, titlesSimilar,
+  parseAppFolder, parseAecomFolder, loadLanes, ROLE_KEY_RE, LANE_SOURCE,
 } from '../apps/web/lib/role-index.mjs';
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
@@ -389,4 +390,66 @@ test('attach merge: incoming file paths overwrite, blanks defer to target (the u
   assert.equal(r.score, '4.0/5', 'set target field is kept');
   assert.equal(r.absorbed.length, 1);
   assert.ok(!idx.roles.some(x => x.key === 'p33'), 'absorbed role leaves the list');
+});
+
+// ── orphan-lane ingestion (the unified directory) ────────────────────────────
+
+test('parseAppFolder: strips lead number / EXTRA prefix, splits company - role', () => {
+  assert.deepEqual(parseAppFolder('01 - MDA Space - Transformation Process Manager'),
+    { company: 'MDA Space', role: 'Transformation Process Manager' });
+  assert.deepEqual(parseAppFolder('Bombardier - Methods Project Specialist (11727)'),
+    { company: 'Bombardier', role: 'Methods Project Specialist (11727)' });
+  assert.deepEqual(parseAppFolder('EXTRA - Acme - Project Manager'),
+    { company: 'Acme', role: 'Project Manager' });
+  assert.equal(parseAppFolder('NoSeparatorHere'), null);
+});
+
+test('parseAecomFolder: company is always AECOM, role keeps its dashes', () => {
+  assert.deepEqual(parseAecomFolder('3 - Ioana Ardelean - Program Manager - Rail & Transit'),
+    { company: 'AECOM', role: 'Program Manager - Rail & Transit', recruiter: 'Ioana Ardelean' });
+  assert.equal(parseAecomFolder('too - short'), null);
+});
+
+test('ROLE_KEY_RE accepts every lane prefix, rejects junk', () => {
+  for (const k of ['t1', 'p350', 'v12', 'a5', 'i40', 'x3']) assert.ok(ROLE_KEY_RE.test(k), k + ' valid');
+  for (const k of ['tp151', 'z1', 't', '1', 'p1234567', 'av2']) assert.ok(!ROLE_KEY_RE.test(k), k + ' invalid');
+  assert.equal(LANE_SOURCE.v, 'aviation');
+  assert.equal(LANE_SOURCE.i, 'indeed');
+});
+
+test('lanes fold in: a matching lane row JOINS its canonical role, a new one stands alone', () => {
+  const idx = buildRoleIndex({
+    trackerContent: TRACKER_HEADER + '| 5 | 2026-05-20 | Capgemini | Program Delivery Lead | 4.0/5 | Applied | ✅ | [005](reports/5.md) | x |\n',
+    pool: { rows: [{ rank: 9, n: 9, title: 'Project Mgr', company: 'GTAA' }] },
+    // indeed row duplicates the tracker Capgemini role → must join t5 (carry laneN)
+    indeed: [{ company: 'Capgemini', role: 'Program Delivery Lead', n: 41, status: 'applied' }],
+    // aviation row is unique → its own canonical role
+    aviation: [{ company: 'Porter Airlines', role: 'Business Analyst', folder: 'output/applications-aviation/03 - Porter' }],
+  });
+  const cap = idx.byKey['t5'];
+  assert.equal(idx.byKey['i1'], cap, 'duplicate indeed row resolves to the tracker role');
+  assert.equal(cap.laneN, 41, 'the indeed lane number rides onto the canonical role (for JD pairing)');
+  assert.ok(cap.lanes.includes('indeed') && cap.lanes.includes('tracker'), 'role spans both lanes');
+  const av = idx.roles.find(r => r.key === 'v1');
+  assert.ok(av && av.company === 'Porter Airlines', 'a unique aviation row becomes its own role');
+  assert.equal(av.folder, 'output/applications-aviation/03 - Porter', 'lane folder carried for Show-in-Finder');
+});
+
+test('overrides win last: status + fields applied by canonical key', () => {
+  const idx = buildRoleIndex({
+    pool: { rows: [{ rank: 1, n: 1, title: 'PM', company: 'Acme', status: 'pending' }] },
+    overrides: [{ key: 'p1', status: 'Interview', notes: 'phone screen booked', comp: 'C$130K' }],
+  });
+  const r = idx.byKey['p1'];
+  assert.equal(r.status, 'interview', 'override status applied (lowercased)');
+  assert.equal(r.notes, 'phone screen booked', 'override notes applied');
+  assert.equal(r.compOverride, 'C$130K', 'comp override stored separately');
+});
+
+test('loadLanes is tolerant of a missing output/ tree (returns empty lanes)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lanes-'));
+  try {
+    const lanes = loadLanes(dir);
+    assert.deepEqual(lanes, { aviation: [], aecom: [], indeed: [], loose: [] });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

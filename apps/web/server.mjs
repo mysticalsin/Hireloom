@@ -29,7 +29,7 @@ import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
-import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar } from './lib/role-index.mjs';
+import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes } from './lib/role-index.mjs';
 import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview, signalPendingReview, NO_REVIEW_STATUSES } from './lib/email-groups.mjs';
 import { autoFitScore, explainFit } from './lib/fit-score.mjs';
 import { appendHistory, loadHistory, latestStatusDate, interviewDateFor, setInterviewDate, extractInterviewDateFromText } from './lib/status-history.mjs';
@@ -49,6 +49,7 @@ const TOKENS_FILE = path.join(DATA_DIR, 'gmail-tokens.json');
 const CACHE_FILE = path.join(DATA_DIR, 'gmail-cache.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'status-history.tsv');
 const LINKS_FILE = path.join(DATA_DIR, 'role-links.json');
+const OVERRIDES_FILE = path.join(DATA_DIR, 'role-overrides.json');
 const POOL_FILE = path.join(ROOT, 'output', 'pool-apply-order.json');
 
 // Gmail OAuth config — set in .env
@@ -407,10 +408,42 @@ async function findIndeedLaneRow(company, role) {
   return rows.find(r => titlesSimilar(r.title, role)) || (rows.length === 1 ? rows[0] : null);
 }
 
-// Every JD we applied to is saved locally — pool lane keyed by RANK
-// (output/pool-jds/047.json = rank 47), Indeed lane keyed by row n. The
-// company on the file is verified before serving so a re-rank can never
-// show the wrong JD. Returns { text, source, url, salary } or null.
+// Aviation JDs (output/aviation-jds/*.json: {company, role, url, jd}) and AECOM
+// JDs (output/aecom/jds/*.md: raw markdown, slug-named) are the orphan lanes'
+// saved postings. Loaded once, matched by company+title / filename slug.
+let aviationJdCache = null;
+async function loadAviationJds() {
+  if (aviationJdCache) return aviationJdCache;
+  const out = [];
+  try {
+    for (const f of await fs.readdir(path.join(ROOT, 'output', 'aviation-jds'))) {
+      if (!f.endsWith('.json')) continue;
+      try { const j = JSON.parse(await fs.readFile(path.join(ROOT, 'output', 'aviation-jds', f), 'utf8')); if (j.jd) out.push({ ...j, file: 'output/aviation-jds/' + f }); } catch {}
+    }
+  } catch {}
+  return (aviationJdCache = out);
+}
+let aecomJdCache = null;
+async function loadAecomJds() {
+  if (aecomJdCache) return aecomJdCache;
+  const out = [];
+  const kebab = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  try {
+    for (const f of await fs.readdir(path.join(ROOT, 'output', 'aecom', 'jds'))) {
+      if (!f.endsWith('.md')) continue;
+      // strip a trailing random hash like "-yYZKb" before slug comparison
+      const slug = kebab(f.replace(/\.md$/, '').replace(/-[A-Za-z0-9]{5,6}$/, ''));
+      out.push({ file: 'output/aecom/jds/' + f, slug });
+    }
+  } catch {}
+  return (aecomJdCache = out);
+}
+
+// Every JD we applied to is saved locally — pool by RANK (pool-jds/047.json),
+// Indeed by row n, aviation by company+title, AECOM by filename slug. Tries
+// each lane in turn (a role can span lanes) and returns the first hit; the
+// company is verified for keyed lanes so a re-rank never shows the wrong JD.
+// Returns { text, source, url, salary } or null.
 async function readJdForRole(role) {
   const rank = role.rank ?? (role.pool && role.pool.rank);
   if (rank != null) {
@@ -422,12 +455,26 @@ async function readJdForRole(role) {
       }
     } catch { /* fall through to the Indeed lane */ }
   }
-  const laneRow = await findIndeedLaneRow(role.company, role.role);
+  // Indeed: a merged indeed role carries laneN; otherwise match by company/title.
+  const laneRow = role.laneN != null ? { n: role.laneN } : await findIndeedLaneRow(role.company, role.role);
   if (laneRow && laneRow.n != null) {
     try {
       const j = JSON.parse(await fs.readFile(path.join(ROOT, 'output', 'indeed-jds', String(laneRow.n) + '.json'), 'utf8'));
       if (j.jd) return { text: j.jd, source: 'output/indeed-jds/' + laneRow.n + '.json', url: j.url || null, salary: j.salary || null };
     } catch { /* no saved JD for this lane row */ }
+  }
+  // Aviation lane.
+  const av = (await loadAviationJds()).filter(j => companiesMatch(j.company, role.company));
+  const avHit = av.find(j => titlesSimilar(j.role || '', role.role)) || (av.length === 1 ? av[0] : null);
+  if (avHit) return { text: avHit.jd, source: avHit.file, url: avHit.url || null, salary: null };
+  // AECOM lane (company is always AECOM; match the role slug to the filename).
+  if (companiesMatch(role.company, 'AECOM')) {
+    const rk = String(role.role || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const aecomJds = await loadAecomJds();
+    const aeHit = rk && aecomJds.find(j => j.slug && (j.slug === rk || j.slug.startsWith(rk) || rk.startsWith(j.slug)));
+    if (aeHit) {
+      try { const text = await fs.readFile(path.join(ROOT, aeHit.file), 'utf8'); if (text.trim()) return { text, source: aeHit.file, url: null, salary: null }; } catch {}
+    }
   }
   return null;
 }
@@ -923,15 +970,32 @@ async function gmailApiGet(endpoint, token) {
 let roleIndexCache = { at: 0, index: null };
 async function getRoleIndex(force = false) {
   if (!force && roleIndexCache.index && Date.now() - roleIndexCache.at < 30_000) return roleIndexCache.index;
-  let trackerContent = '', pool = null, links = null;
+  let trackerContent = '', pool = null, links = null, overrides = [];
   try { trackerContent = await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'); } catch {}
   try { pool = JSON.parse(await fs.readFile(POOL_FILE, 'utf8')); } catch {}
   try { links = JSON.parse(await fs.readFile(LINKS_FILE, 'utf8')); } catch {}
-  const index = buildRoleIndex({ trackerContent, pool, links });
+  try { overrides = (JSON.parse(await fs.readFile(path.join(DATA_DIR, 'role-overrides.json'), 'utf8')).overrides) || []; } catch {}
+  // Orphan-queue lanes (aviation/aecom/indeed/loose) live under output/ —
+  // ROOT-relative, read via the shared loader. Absent tree → empty lanes, so
+  // tmp-config smoke tests still build a tracker∪pool index.
+  const lanes = loadLanes(ROOT);
+  const index = buildRoleIndex({ trackerContent, pool, links, overrides, ...lanes });
   roleIndexCache = { at: Date.now(), index };
   return index;
 }
 function invalidateRoleIndex() { roleIndexCache = { at: 0, index: null }; }
+
+// The catalog order behind the gapless 1→N index: tracker first (by num), then
+// pool (by rank), then the orphan lanes (by company). Shared by /api/roles
+// (assigns the index) and /api/role (shows the SAME number on the page).
+const CATALOG_SRC_ORDER = { tracker: 0, pool: 1, aviation: 2, aecom: 3, indeed: 4, loose: 5 };
+function catalogOrder(roles) {
+  return [...roles].sort((a, b) =>
+    ((CATALOG_SRC_ORDER[a.source] ?? 9) - (CATALOG_SRC_ORDER[b.source] ?? 9)) ||
+    (a.source === 'tracker' ? ((a.num || 0) - (b.num || 0))
+      : a.source === 'pool' ? ((a.rank || 0) - (b.rank || 0))
+      : String(a.company || '').localeCompare(String(b.company || ''))));
+}
 
 // Last logged touch per app (data/follow-ups.md) — shared by loadData, the
 // groups endpoint, and the cadence mirror.
@@ -4032,6 +4096,13 @@ const HTML = /* html */ `<!DOCTYPE html>
       vertical-align: middle;
     }
     .td-num { color: var(--text-ter); font-size: var(--t-caption); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .lane-tag { display: block; margin-top: 2px; font-size: 8.5px; line-height: 1; letter-spacing: .4px;
+      text-transform: uppercase; color: var(--text-ter); opacity: .7; font-family: var(--font-sans); }
+    .apps-count { color: var(--text-ter); font-size: var(--t-caption); font-family: var(--font-mono); align-self: center; margin-left: 2px; }
+    .hb-edit-l { display: block; font-size: 11px; color: var(--text-ter); margin-top: 8px; }
+    .hb-edit-l input, .hb-edit-l select, .hb-edit-l textarea {
+      display: block; width: 100%; margin-top: 3px; background: var(--surface); color: var(--text);
+      border: 1px solid var(--separator2); border-radius: 8px; padding: 6px 8px; font-size: 13px; font-family: inherit; box-sizing: border-box; }
     .td-company { font-weight: 600; display: flex; align-items: center; gap: var(--space-2); letter-spacing: -.01em; }
     .company-avatar {
       width: 26px; height: 26px; border-radius: var(--r-xs);
@@ -5323,15 +5394,17 @@ const HTML = /* html */ `<!DOCTYPE html>
           <option value="64">64 / page</option>
           <option value="128">128 / page</option>
         </select>
+        <button class="filter-pill" onclick="location.hash='#create-role'" title="Add a role to the directory by hand (URL/JD optional)" style="font-weight:650">＋ Create role</button>
+        <span id="apps-count" class="apps-count" aria-live="polite" title="matching of total roles in the directory"></span>
       </div>
       <div class="table-card">
         <table>
           <thead>
             <tr>
-              <th onclick="sortBy('num')">#<span class="sort-arrow" id="sort-num"></span></th>
+              <th onclick="sortBy('num')">#<span class="sort-arrow" id="sort-num">↑</span></th>
               <th onclick="sortBy('company')">Company<span class="sort-arrow" id="sort-company"></span></th>
               <th>Role</th>
-              <th onclick="sortBy('date')">Date<span class="sort-arrow" id="sort-date">↓</span></th>
+              <th onclick="sortBy('date')">Date<span class="sort-arrow" id="sort-date"></span></th>
               <th>Age</th>
               <th onclick="sortBy('score')" title="Eval-report score, or auto-fit estimate (marked *)">Score<span class="sort-arrow" id="sort-score"></span></th>
               <th onclick="sortBy('comp')" title="Sort by compensation (highest first)">Comp<span class="sort-arrow" id="sort-comp"></span></th>
@@ -5597,9 +5670,9 @@ const HTML = /* html */ `<!DOCTYPE html>
   let allApps = [];
   let currentFilter = 'all';
   let searchQuery = '';
-  let sortField = 'date';
-  let sortAsc = false;
-  let activeDropdownNum = null;
+  let sortField = 'num';  // default to the catalog index → the directory opens 1→N
+  let sortAsc = true;
+  let activeDropdownKey = null;
   let refreshTimer = null;
 
   /* ── Theme (light/dark) ──
@@ -5648,7 +5721,7 @@ const HTML = /* html */ `<!DOCTYPE html>
   // literals; without escaping ' an attacker-controlled company/role/notes
   // value (e.g. from a malicious JD) could break out of the JS string.
   function esc(s) {
-    return (s||'')
+    return String(s == null ? '' : s)
       .replace(/&/g,'&amp;')
       .replace(/</g,'&lt;')
       .replace(/>/g,'&gt;')
@@ -5724,30 +5797,31 @@ const HTML = /* html */ `<!DOCTYPE html>
     // old ↗ Open button died with PR — it errored on report-less pool/Indeed
     // rows; the posting URL lives on the role page now). Apply stays per-row
     // for Evaluated roles; the report icon stays a direct shortcut.
+    const LANE_LABEL = { pool: 'pool', aviation: 'aviation', aecom: 'aecom', indeed: 'indeed', loose: 'other' };
     tbody.innerHTML = apps.map(a => {
-      const isPool = a.num == null; // pool-only inventory row (never applied / pool lane)
+      const isTracker = a.num != null; // a tracked application (applications.md row)
       const fuTag = a.needsFollowUp ? '<span class="followup-tag">⚡ ' + a.age + 'd</span>' : '';
       const cls = a.needsFollowUp ? ' class="followup-row"' : '';
       const reportBtn = a.reportLink
-        ? '<a class="report-btn" href="/reports/' + esc(a.reportLink) + '" target="_blank" onclick="event.stopPropagation()" aria-label="Open report for ' + esc(a.company || a.num) + '" title="Open evaluation report">📄</a> '
+        ? '<a class="report-btn" href="/reports/' + esc(a.reportLink) + '" target="_blank" onclick="event.stopPropagation()" aria-label="Open report for ' + esc(a.company || a.index) + '" title="Open evaluation report">📄</a> '
         : '';
-      const applyBtn = !isPool && a.status === 'evaluated'
+      const applyBtn = isTracker && a.status === 'evaluated'
         ? '<button class="btn-row-apply" onclick="event.stopPropagation();applyOne(\\'' + esc(a.num) + '\\')" aria-label="Apply to ' + esc(a.company || a.num) + ' and mark applied" title="Open job URL and mark Applied">Apply →</button>'
         : '';
-      // Pending-review rows show NO real status until the user classifies
-      // (the review-desk rule) — the tracker's value rides in the tooltip.
-      // Pool rows get a plain chip: their status lives in the pool file,
-      // not applications.md, so the dropdown writer doesn't apply.
+      // Pending-review rows show NO real status until the user classifies (the
+      // review-desk rule). Every other row's status is editable in place — the
+      // dropdown writes applications.md for tracker rows, data/role-overrides
+      // for the other lanes (openDropdown routes by key). Catalog # is shown
+      // for ALL rows so the directory reads 1→N with no gaps.
       const statusBadge = a.pendingReview
         ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a)" onclick="event.stopPropagation();hbSwitchTab(\\'review\\')" title="Emails awaiting your classification (tracker: ' + esc(a.status||'—') + ') — click to open Needs Review">pending review</span>'
-        : isPool
-        ? '<span class="status-badge ' + statusClass(a.status) + '" title="Pool-lane status (output/pool-apply-order.json)">' + esc(a.status||'pending') + '</span>'
-        : '<span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>';
+        : '<span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.key) + '\\',this)" data-key="' + esc(a.key) + '" title="Click to change status">' + esc(a.status||'pending') + '</span>';
+      const laneTag = isTracker ? ''
+        : '<span class="lane-tag" title="' + esc(a.source) + ' lane — in your pipeline">' + esc(LANE_LABEL[a.source] || a.source) + '</span>';
       // Column order is the user's scan order: identity + dates first,
       // verdict columns (score · comp · status) pinned at the right edge.
-      // Notes column dropped — it lives in the row tooltip + role page.
-      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(isPool ? a.key : a.num) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
-        '<td class="td-num">' + (isPool ? '<span style="color:var(--text-ter)" title="pool rank — not in the tracker yet">r' + esc(String(a.rank ?? '?')) + '</span>' : esc(a.num)) + '</td>' +
+      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.key) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
+        '<td class="td-num">' + esc(a.index) + laneTag + '</td>' +
         '<td><div class="td-company"><div class="company-avatar">' + avatarLetter(a.company) + '</div>' + reportBtn + esc(a.company) + '</div></td>' +
         '<td class="td-role">' + esc(a.role) + '</td>' +
         '<td class="td-date">' + esc(a.date||'—') + '</td>' +
@@ -5795,7 +5869,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     if (field === 'score') return parseFloat(app.score) || 0;
     // Pool rows have no tracker number — they sort after tracker rows, in
     // rank order.
-    if (field === 'num')   return app.num != null ? (parseInt(app.num) || 0) : 100000 + (app.rank || 0);
+    if (field === 'num')   return app.index != null ? app.index : (app.num != null ? (parseInt(app.num) || 0) : 100000 + (app.rank || 0));
     if (field === 'date')  return app.date || '';
     if (field === 'comp')  return app.compSort || 0;
     return (app[field] || '').toLowerCase();
@@ -5813,23 +5887,35 @@ const HTML = /* html */ `<!DOCTYPE html>
     applyFilter();
   }
 
-  // Pool-only roles (the never-applied pipeline inventory) ride the All
-  // Roles table next to tracker rows — the table is the UNION (user ask
-  // 06-13: "add even the non-applied status, the stuff in our pipeline").
-  var allRolesPool = [];
-  async function refreshPoolRoles() {
+  // All Roles is the WHOLE directory: every lane (tracker, pool, aviation,
+  // aecom, indeed, loose) folded into one gapless 1→N catalog from /api/roles
+  // (user ask 06-12: "one concrete list of roles, no more overlapping
+  // queues"). Tracker rows are enriched with the rich comp/age/follow-up
+  // fields /api/data computes; other lanes derive age from their date. Every
+  // row has a key and a role page — All Roles is a directory of those pages.
+  var allRoles = [];
+  async function refreshAllRoles() {
     try {
       const data = await (await fetch('/api/roles')).json();
-      allRolesPool = (data.roles || []).filter(r => r.source === 'pool').map(r => ({
-        key: r.key, num: null, rank: r.rank, company: r.company, role: r.role,
-        status: r.status || 'pending', date: r.date || null,
-        score: r.score || null, notes: r.notes || '',
-        pendingReview: !!r.pendingReview, comp: null, compSort: 0,
-        age: r.date ? Math.max(0, Math.floor((Date.now() - Date.parse(r.date)) / 86400000)) : null,
-        source: 'pool',
-      }));
+      const rich = {};
+      for (const a of allApps) rich['t' + a.num] = a;
+      allRoles = (data.roles || []).map(r => {
+        const x = rich[r.key] || {};
+        return {
+          key: r.key, index: r.index, num: r.num, rank: r.rank,
+          company: r.company, role: r.role, source: r.source, lanes: r.lanes || [r.source],
+          status: r.status || 'pending', date: r.date || null,
+          score: r.score || x.score || null, notes: r.notes || x.notes || '',
+          pendingReview: !!r.pendingReview, edited: !!r.edited,
+          comp: r.comp || x.comp || null, compSort: x.compSort || 0,
+          compLow: x.compLow, compHigh: x.compHigh, compKind: x.compKind, compPremium: x.compPremium,
+          highPaying: !!x.highPaying, needsFollowUp: !!x.needsFollowUp, nextStepEmail: x.nextStepEmail || null,
+          hasPdf: x.hasPdf, reportLink: x.reportLink || null, statusDate: x.statusDate || null,
+          age: x.age != null ? x.age : (r.date ? Math.max(0, Math.floor((Date.now() - Date.parse(r.date)) / 86400000)) : null),
+        };
+      });
       applyFilter();
-    } catch { /* the table still shows tracker rows */ }
+    } catch { /* the table keeps whatever was last rendered */ }
   }
 
   var rolesPage = 0, rolesPerPage = 32; // standard steps: 16/32/64/128
@@ -5842,10 +5928,10 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   function applyFilter() {
     searchQuery = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
-    let filtered = allApps.concat(allRolesPool);
+    let filtered = allRoles.slice();
     if (currentFilter === 'followup')      filtered = filtered.filter(a => a.needsFollowUp);
     else if (currentFilter === 'high-paying') filtered = filtered.filter(a => a.highPaying);
-    else if (currentFilter === 'pipeline') filtered = filtered; // shown in sidebar
+    else if (currentFilter === 'pipeline') filtered = filtered.filter(a => a.num == null); // never-applied inventory
     else if (currentFilter !== 'all')      filtered = filtered.filter(a => a.status === currentFilter);
     if (searchQuery) {
       // Multi-term AND across every visible field — "kong rejected" or
@@ -5853,8 +5939,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       const terms = searchQuery.split(/\\s+/).filter(Boolean);
       filtered = filtered.filter(a => {
         const hay = ((a.company||'') + ' ' + (a.role||'') + ' ' + (a.notes||'') + ' ' +
-          (a.status||'') + ' ' + (a.num||'') + ' ' + (a.date||'') + ' ' +
-          (a.score||'') + ' ' + (a.comp||'') + ' ' + (a.source||'')).toLowerCase();
+          (a.status||'') + ' ' + (a.num||'') + ' #' + (a.index||'') + ' ' + (a.date||'') + ' ' +
+          (a.score||'') + ' ' + (a.comp||'') + ' ' + (a.source||'') + ' ' + ((a.lanes||[]).join(' '))).toLowerCase();
         return terms.every(t => hay.includes(t));
       });
     }
@@ -5867,7 +5953,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     const pages = Math.max(1, Math.ceil(filtered.length / rolesPerPage));
     if (rolesPage >= pages) rolesPage = pages - 1;
     document.getElementById('apps-count') && (document.getElementById('apps-count').textContent =
-      filtered.length + ' of ' + (allApps.length + allRolesPool.length));
+      filtered.length + ' of ' + allRoles.length);
     renderApps(filtered.slice(rolesPage * rolesPerPage, (rolesPage + 1) * rolesPerPage));
     const pager = document.getElementById('roles-pager');
     if (pager) pager.innerHTML = hbPager(rolesPage, pages, 'rolesGo');
@@ -5966,9 +6052,9 @@ const HTML = /* html */ `<!DOCTYPE html>
     }
   }
 
-  /* ── Status dropdown ── */
-  function openDropdown(num, triggerEl) {
-    activeDropdownNum = num;
+  /* ── Status dropdown ── (works on ANY lane via the role key) */
+  function openDropdown(key, triggerEl) {
+    activeDropdownKey = key;
     const dd = document.getElementById('status-dropdown');
     dd.classList.toggle('open');
     if (dd.classList.contains('open')) {
@@ -5980,17 +6066,19 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   async function applyStatus(newStatus) {
-    const num = activeDropdownNum;
+    const key = activeDropdownKey;
     document.getElementById('status-dropdown').classList.remove('open');
-    if (!num) return;
+    if (!key) return;
+    // Tracker rows keep their status canonical in applications.md (the existing
+    // path, num = key without the 't'); every other lane writes to
+    // data/role-overrides.json via /api/role/update.
+    const isTracker = /^t\\d/.test(String(key));
     try {
-      const res = await fetch('/api/update-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ num, status: newStatus }),
-      });
+      const res = isTracker
+        ? await fetch('/api/update-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ num: String(key).slice(1), status: newStatus }) })
+        : await fetch('/api/role/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, status: newStatus }) });
       const data = await res.json();
-      if (data.ok) { showToast('Updated #' + num + ' → ' + newStatus, 'success'); refresh(); }
+      if (data.ok) { showToast('Updated ' + key + ' → ' + newStatus, 'success'); refresh(); }
       else showToast(data.error || 'Update failed', 'error');
     } catch { showToast('Network error', 'error'); }
   }
@@ -6006,7 +6094,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     // The whole row is a doorway to the all-in-one role page. Tracker rows
     // pass a bare number; pool rows pass their full key ('p18').
     const s = String(numOrKey);
-    goRole(/^[tp]\\d/.test(s) ? s : 't' + s);
+    goRole(/^[tpvaix]\\d/.test(s) ? s : 't' + s);
   }
 
   /* ── Gmail ── */
@@ -7631,7 +7719,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       allApps = data.applications;
       lastStats = data.stats;
       lastUser = data.user || null;
-      refreshPoolRoles(); // async — re-applies the filter when it lands
+      refreshAllRoles(); // async — re-applies the filter when it lands
       renderStats(data.stats);
       updateApplyBanner(data.applications);
       applyFilter();
@@ -7799,7 +7887,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       patterns: null,
       inbox: g && g.inbox ? (g.inbox.live || []).length : null,
       // The union count — tracker rows + pool-only inventory.
-      roles: lastStats ? lastStats.total + (allRolesPool ? allRolesPool.length : 0) : null,
+      roles: allRoles.length || (lastStats ? lastStats.total : null),
     };
   }
 
@@ -8319,6 +8407,7 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   /* ── All-in-one role page (#role/<key>) ─────────────────────────────── */
+  let lastRole = null; // the role currently shown on the role page (for the edit form)
   async function hbRenderRole(key) {
     const host = document.getElementById('role-content');
     if (!host) return;
@@ -8328,6 +8417,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       const res = await fetch('/api/role?key=' + encodeURIComponent(key));
       if (!res.ok) { host.innerHTML = '<div class="hb-empty">Role not found (' + esc(key) + ') — it may have been merged or renumbered.</div>'; return; }
       r = await res.json();
+      lastRole = r;
     } catch (e) { host.innerHTML = '<div class="hb-empty">Failed to load role: ' + esc(e.message) + '</div>'; return; }
 
     const chip = (txt, cls) => '<span class="hb-chip' + (cls || '') + '">' + txt + '</span>';
@@ -8335,16 +8425,15 @@ const HTML = /* html */ `<!DOCTYPE html>
       '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px">' +
         '<button class="hb-btn hb-btn-ghost" onclick="history.back()">← back</button>' +
         '<span class="hb-greet" style="font-size:20px">' + esc(r.company) + '</span>' +
-        (r.num ? '<span class="hb-num">#' + esc(r.num) + '</span>' : chip('not in tracker — pool only', ' hb-warm')) +
+        (r.index ? '<span class="hb-num">#' + esc(r.index) + '</span>' : '') +
+        (r.num ? chip('tracker #' + esc(r.num)) : chip('not applied — ' + esc(r.source || 'pipeline') + ' lane', ' hb-warm')) +
       '</div>' +
       '<div style="font-size:14px;color:var(--text-sec);margin-bottom:8px">' + esc(r.role || '') + '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
         (r.pendingReview
           // Review-desk rule: no real status until the user classifies.
           ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a);cursor:pointer" onclick="hbSwitchTab(\\'review\\')" title="Emails awaiting your classification' + (r.status ? ' (tracker: ' + esc(r.status) + ')' : '') + ' — click to open Needs Review">pending your review</span>'
-          : r.num
-          ? '<span class="status-badge ' + statusClass(r.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(r.num) + '\\',this)" data-num="' + esc(r.num) + '">' + esc(r.status || '—') + '</span>'
-          : chip(esc(r.status || 'pending'))) +
+          : '<span class="status-badge ' + statusClass(r.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(r.key) + '\\',this)" data-key="' + esc(r.key) + '" title="Click to change status">' + esc(r.status || 'pending') + '</span>') +
         (r.statusDate && !r.pendingReview ? chip('since ' + esc(r.statusDate)) : '') +
         (r.date ? chip('applied ' + esc(r.date)) : '') +
         (r.interviewAt ? chip('📅 interview ' + esc(hbDT(r.interviewAt)), ' hb-warm') : '') +
@@ -8362,7 +8451,8 @@ const HTML = /* html */ `<!DOCTYPE html>
       (r.report && r.report.link ? '<a class="hb-btn" target="_blank" href="/reports/' + esc(r.report.link.replace(/^reports\\//, '')) + '">📄 Report</a>' : '') +
       (r.files || []).map(f => revealBtn(f.slot, f.label)).join('') +
       '<button class="hb-btn hb-btn-ghost" onclick="goAttach(\\'' + esc(r.key) + '\\')" title="Merge this role with another tracker row (duplicates, split records)">🔗 Attach to existing role</button>' +
-      '</div>';
+      '<button class="hb-btn hb-btn-ghost" onclick="hbToggleEdit()" title="Edit this role\\'s fields">✎ Edit</button>' +
+      '</div><div id="role-edit"></div>';
 
     const sect = (title, inner) => inner ? '<div class="hb-section-h">' + title + '</div>' + inner : '';
     // Eval-report rationale when one exists; the pool-heuristic explanation
@@ -8428,6 +8518,46 @@ const HTML = /* html */ `<!DOCTYPE html>
       if (!res.ok || !data.ok) throw new Error(data.error || 'reveal failed');
       showToast('Revealed in Finder', 'success');
     } catch (e) { showToast('Could not reveal: ' + e.message, 'error'); }
+  }
+
+  // Inline edit form on the role page — edits any field on any lane. Status +
+  // notes/comp/url/company/role POST to /api/role/update (tracker status routes
+  // to applications.md server-side; the rest become data/role-overrides).
+  function hbToggleEdit() {
+    const box = document.getElementById('role-edit');
+    if (!box || !lastRole) return;
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+    const r = lastRole;
+    const STATUSES = ['pending', 'Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP', 'expired'];
+    const cur = String(r.status || 'pending').toLowerCase();
+    const opts = STATUSES.map(s => '<option value="' + s + '"' + (s.toLowerCase() === cur ? ' selected' : '') + '>' + s + '</option>').join('');
+    const compVal = (r.comp && r.comp.display) ? r.comp.display : '';
+    box.innerHTML =
+      '<div class="hb-review-card" style="margin-top:10px">' +
+      '<div class="hb-section-h" style="margin-top:0">Edit role · ' + esc(r.key) + '</div>' +
+      '<label class="hb-edit-l">Status<select id="edit-status">' + opts + '</select></label>' +
+      '<label class="hb-edit-l">Company<input id="edit-company" value="' + esc(r.company || '') + '"></label>' +
+      '<label class="hb-edit-l">Role<input id="edit-role" value="' + esc(r.role || '') + '"></label>' +
+      '<label class="hb-edit-l">Comp (free text)<input id="edit-comp" value="' + esc(compVal) + '" placeholder="e.g. C$120K–150K"></label>' +
+      '<label class="hb-edit-l">Posting URL<input id="edit-url" value="' + esc(r.postingUrl || '') + '"></label>' +
+      '<label class="hb-edit-l">Notes<textarea id="edit-notes" rows="2">' + esc(r.notes || '') + '</textarea></label>' +
+      '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button class="hb-btn hb-btn-respond" onclick="hbSaveRoleEdit()">Save</button>' +
+      '<button class="hb-btn hb-btn-ghost" onclick="document.getElementById(\\'role-edit\\').innerHTML=\\'\\'">Cancel</button>' +
+      '</div></div>';
+  }
+  async function hbSaveRoleEdit() {
+    if (!lastRole) return;
+    const key = lastRole.key;
+    const val = id => (document.getElementById(id) || {}).value;
+    const body = { key, status: val('edit-status'), company: val('edit-company'),
+      role: val('edit-role'), comp: val('edit-comp'), url: val('edit-url'), notes: val('edit-notes') };
+    try {
+      const res = await fetch('/api/role/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.ok) { showToast('Saved ' + key, 'success'); hbRenderRole(key); if (typeof refreshAllRoles === 'function') refreshAllRoles(); }
+      else showToast(data.error || 'Save failed', 'error');
+    } catch { showToast('Network error', 'error'); }
   }
 
   function goAttach(key) { location.hash = '#attach/' + encodeURIComponent(key); }
@@ -9091,7 +9221,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/role') {
     try {
       const key = urlObj.searchParams.get('key') || '';
-      if (!/^[tp]\d{1,5}$/.test(key)) return sendJsonError(res, 400, 'invalid key');
+      if (!ROLE_KEY_RE.test(key)) return sendJsonError(res, 400, 'invalid key');
       const index = await getRoleIndex();
       const role = index.byKey ? index.byKey[key] : null;
       if (!role) return sendJsonError(res, 404, 'role not found');
@@ -9210,9 +9340,15 @@ async function handleRequest(req, res) {
       for (const e of emails) timeline.push({ at: (new Date(e.date || 0)).toISOString().slice(0, 16), kind: 'email', text: '[' + e.kind + '] ' + e.subject, id: e.id });
       timeline.sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
+      // Same catalog number the All Roles table shows, so table↔page agree.
+      const catIndex = catalogOrder(index.roles).findIndex(x => x.key === role.key) + 1;
+      // A user-set comp override wins over the report/JD-derived value.
+      const compOut = role.compOverride ? { display: role.compOverride, kind: 'you set this' }
+        : comp ? { display: comp.display, kind: comp.kind } : null;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        key: role.key, num, company: role.company, role: role.role,
+        key: role.key, index: catIndex || null, num, company: role.company, role: role.role,
+        source: role.source, lanes: role.lanes || [role.source],
         status: role.status, date: role.date || (role.pool && role.pool.appliedOn) || role.appliedOn || null,
         statusDate: num ? (() => { const ts = latestStatusDate(hist, num, role.status); return ts ? String(ts).slice(0, 10) : null; })() : null,
         interviewAt: num ? (interviewDateFor(hist, num) || extractInterviewDateFromText(role.notes || '', { referenceDate: new Date().toISOString().slice(0, 10) })) : null,
@@ -9222,7 +9358,7 @@ async function handleRequest(req, res) {
         rank: role.rank ?? (role.pool && role.pool.rank) ?? null,
         archetype: role.archetype || (role.pool && role.pool.archetype) || null,
         tier: role.tier ?? (role.pool && role.pool.tier) ?? null,
-        report, comp: comp ? { display: comp.display, kind: comp.kind } : null,
+        report, comp: compOut,
         compSuggested, poolRationale, pendingReview,
         jd: jd ? { text: String(jd.text).slice(0, 20000), source: jd.source } : null,
         pkg, files: fileSlots, emails, touches, timeline,
@@ -9238,7 +9374,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/reveal' && req.method === 'POST') {
     try {
       const { key, slot } = await readJsonBody(req);
-      if (!/^[tp]\d{1,5}$/.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
+      if (!ROLE_KEY_RE.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
       if (typeof slot !== 'string' || slot.length > 120) return sendJsonError(res, 400, 'invalid slot');
       const index = await getRoleIndex();
       const role = index.byKey ? index.byKey[key] : null;
@@ -9283,9 +9419,12 @@ async function handleRequest(req, res) {
         status: r.status, date: r.date || r.appliedOn || null,
         lastEdited: r.num != null ? (() => { const e = hist.filter(h => String(h.num) === String(r.num)).pop(); return e ? String(e.ts).slice(0, 10) : (r.date || null); })() : (r.appliedOn || null),
         notes: (r.notes || r.note || '').slice(0, 160),
-        source: r.source, rank: r.rank ?? null,
+        // source = primary lane; lanes = every queue this role appears in (one
+        // role, many pipelines folded together).
+        source: r.source, lanes: r.lanes || [r.source], rank: r.rank ?? null,
+        comp: r.compOverride || null, edited: !!r.edited,
         // Score (eval-report value or auto-fit estimate) + pending-review
-        // flag so the All Roles union renders pool rows like tracker rows.
+        // flag so every row renders the same whatever lane it came from.
         score: (r.score && r.score !== 'N/A' ? r.score : null) || autoFitScore({
           title: r.role,
           tier: r.tier ?? (r.pool && r.pool.tier) ?? null,
@@ -9295,8 +9434,11 @@ async function handleRequest(req, res) {
         pendingReview: !NO_REVIEW_STATUSES.has(String(r.status || '').toLowerCase()) &&
           (reviewKeys.has(r.key) || Boolean(r.pool && reviewKeys.has(r.pool.key))),
       }));
-      // Tracker rows first (the usual attach targets), then pool, newest first.
-      roles.sort((a, b) => ((a.num != null ? 0 : 1) - (b.num != null ? 0 : 1)) || String(b.date || '').localeCompare(String(a.date || '')));
+      // Stable catalog order → the gapless 1→N index. The `index` is a
+      // permanent catalog number; the table may re-sort by any column but
+      // every role keeps its number and the set stays 1..N with no gaps.
+      const ordered = catalogOrder(roles);
+      ordered.forEach((r, i) => { r.index = i + 1; });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ count: roles.length, roles }));
     } catch (err) { sendJsonError(res, 500, 'roles failed', err); }
@@ -9310,7 +9452,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/attach' && req.method === 'POST') {
     try {
       const { from, into } = await readJsonBody(req);
-      if (!/^[tp]\d{1,5}$/.test(String(from || '')) || !/^[tp]\d{1,5}$/.test(String(into || ''))) {
+      if (!ROLE_KEY_RE.test(String(from || '')) || !ROLE_KEY_RE.test(String(into || ''))) {
         return sendJsonError(res, 400, 'invalid keys');
       }
       const index = await getRoleIndex(true);
@@ -9385,7 +9527,7 @@ async function handleRequest(req, res) {
     try {
       const { ids, key } = await readJsonBody(req);
       if (!Array.isArray(ids) || !ids.length || ids.length > 100) return sendJsonError(res, 400, 'ids required');
-      if (!/^[tp]\d{1,5}$/.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
+      if (!ROLE_KEY_RE.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
       const index = await getRoleIndex();
       const role = index.byKey ? index.byKey[key] : null;
       if (!role) return sendJsonError(res, 404, 'role not found');
@@ -9416,6 +9558,52 @@ async function handleRequest(req, res) {
     } catch (err) {
       sendJsonError(res, 400, 'update failed', err);
     }
+    return;
+  }
+
+  // ── API: edit a role (status + fields) for ANY lane ──
+  // The dashboard is the home now, so every role is editable in place. Tracker
+  // status stays canonical in applications.md (via updateApplicationStatus);
+  // every other lane's status, plus notes/comp/url/company/role edits on any
+  // lane, are stored in data/role-overrides.json and applied last by the role
+  // index (overrides win). Keyed by the canonical role key.
+  if (pathname === '/api/role/update' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const key = String(body.key || '');
+      if (!ROLE_KEY_RE.test(key)) return sendJsonError(res, 400, 'invalid key');
+      const index = await getRoleIndex();
+      if (!index.byKey[key]) return sendJsonError(res, 404, 'role not found');
+      const CANON = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+      const POOLISH = ['pending', 'expired'];
+      let status = body.status != null ? String(body.status).trim() : null;
+      if (status) {
+        const canon = CANON.find(s => s.toLowerCase() === status.toLowerCase());
+        const poolish = POOLISH.find(s => s === status.toLowerCase());
+        if (!canon && !poolish) return sendJsonError(res, 400, 'invalid status');
+        status = canon || poolish;
+      }
+      // Tracker status → applications.md; it never becomes an override.
+      if (/^t\d/.test(key) && status && CANON.includes(status)) { await updateApplicationStatus(key.slice(1), status); status = null; }
+      const fields = {};
+      if (status) fields.status = status;
+      for (const f of ['company', 'role', 'notes', 'url', 'comp']) {
+        if (body[f] != null) fields[f] = String(body[f]).trim();
+      }
+      if (Object.keys(fields).length) {
+        let store = { overrides: [] };
+        try { store = JSON.parse(await fs.readFile(OVERRIDES_FILE, 'utf8')); } catch {}
+        if (!Array.isArray(store.overrides)) store.overrides = [];
+        const at = new Date().toISOString().slice(0, 16);
+        const existing = store.overrides.find(o => o.key === key);
+        if (existing) Object.assign(existing, fields, { at });
+        else store.overrides.push({ key, ...fields, at });
+        await fs.writeFile(OVERRIDES_FILE, JSON.stringify(store, null, 2), 'utf8');
+      }
+      invalidateRoleIndex();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) { sendJsonError(res, 400, 'update failed', err); }
     return;
   }
 
