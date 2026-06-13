@@ -9103,7 +9103,9 @@ async function handleRequest(req, res) {
       try { pool = JSON.parse(await fs.readFile(POOL_FILE, 'utf8')); } catch {}
       const rows = (pool && pool.rows) || [];
       const shape = (r) => ({
-        key: 'p' + r.n, rank: r.rank, n: r.n, company: r.company, title: (r.title || '').trim(),
+        // Key by rank to match buildRoleIndex (n is not unique in the pool — see
+        // role-index.mjs) so apply-queue rows click through to the right role.
+        key: 'p' + (r.rank ?? r.n), rank: r.rank, n: r.n, company: r.company, title: (r.title || '').trim(),
         ats: r.ats, loc: r.loc, tier: r.tier,
         url: r.ats === 'indeed' ? (r.indeed || r.url) : r.url,
         // 'Discarded'/'discarded' case drift exists in the wild — normalize.

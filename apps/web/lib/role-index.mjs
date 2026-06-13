@@ -147,8 +147,16 @@ export function buildRoleIndex({ trackerContent = '', pool = null, links = null,
   for (const row of (pool?.rows || [])) {
     if (!row) continue;
     const n = row.n ?? row.rank;
+    // Key pool roles by RANK, not n. `n` (the pool number) is NOT unique in the
+    // wild: the frozen 350-pool mis-numbers four rows (147-150) so two distinct
+    // roles share one n — 'p'+n collapsed them to a single key and a click on
+    // the directory row opened the collision partner's page. `rank` is a clean
+    // 1..N bijection AND is already how JDs are filed (output/pool-jds/047.json
+    // = rank 47), so the key now matches that convention. poolN keeps n for the
+    // app-folder name (output/applications/pool-192) and display.
+    const rank = row.rank ?? n;
     poolRoles.push({
-      key: 'p' + n, poolN: n, rank: row.rank, company: row.company,
+      key: 'p' + rank, poolN: n, rank, company: row.company,
       role: (row.title || '').trim(), // pool titles carry trailing spaces in the wild
       status: (row.status || 'pending').toLowerCase(), // 'Discarded'/'discarded' case drift; absent = pending
       // Both appliedAt (ISO) and appliedDate (date-only) exist in the wild.

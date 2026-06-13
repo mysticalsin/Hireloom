@@ -75,7 +75,7 @@ test('pool role mapping: status default/case, appliedOn variants, indeed url swa
     { rank: 3, n: 3, title: 'PM', company: 'Nimbus', ats: 'lever', url: 'https://y' },
   ] };
   const { byKey } = buildRoleIndex({ pool });
-  const sms = byKey.p192;
+  const sms = byKey.p47;
   assert.equal(sms.role, 'Business Systems, Continuous Improvement Project Manager');
   assert.equal(sms.url, SMS_POOL_ROW.indeed); // indeed rows: .url is a Google-search fallback
   assert.equal(sms.appliedOn, '2026-05-29'); // appliedDate (date-only) variant
@@ -84,6 +84,23 @@ test('pool role mapping: status default/case, appliedOn variants, indeed url swa
   assert.equal(byKey.p2.status, 'discarded'); // 'Discarded' case drift normalized
   assert.equal(byKey.p3.status, 'pending'); // absent status = pending
   assert.equal(byKey.p3.appliedOn, null);
+});
+
+test('pool keys are unique by rank even when n collides (the p147 wrong-role bug)', () => {
+  // The frozen 350-pool mis-numbers four rows: two distinct roles share an n
+  // (147-150 each appear twice). Keying by n routed both to one key, so a click
+  // on one directory row opened the OTHER role's page. Rank is unique → 1:1.
+  const pool = { rows: [
+    { rank: 2,   n: 147, title: 'Senior Project Manager', company: 'A.E.W. Limited Partnership', ats: 'lever', url: 'https://a' },
+    { rank: 183, n: 147, title: 'Sales Operations Specialist', company: 'TouchBistro', ats: 'greenhouse', url: 'https://b' },
+  ] };
+  const { roles, byKey } = buildRoleIndex({ pool });
+  assert.equal(roles.length, 2);                          // both survive (distinct company+title)
+  assert.equal(byKey.p2.company, 'A.E.W. Limited Partnership');
+  assert.equal(byKey.p183.company, 'TouchBistro');        // collision partner has its OWN key
+  assert.equal(byKey.p2.poolN, 147);                      // n preserved (folder name / display)
+  assert.equal(byKey.p183.poolN, 147);
+  assert.ok(!('p147' in byKey));                          // the colliding n is no longer a key
 });
 
 // ── buildRoleIndex: tracker+pool join ────────────────────────────────────────
@@ -96,7 +113,7 @@ test('join merges the SMS-like duplicate: tracker key wins, pool attached, artif
   const merged = byKey.t130;
   assert.equal(merged.source, 'tracker'); // tracker wins
   assert.equal(merged.pool.poolN, 192); // full pool role rides along
-  assert.equal(byKey.p192, merged); // pool key aliases to the merged role
+  assert.equal(byKey.p47, merged); // pool key aliases to the merged role
   assert.equal(merged.url, SMS_POOL_ROW.indeed); // backfilled (real posting, not the Google fallback)
   assert.equal(merged.rank, 47);
   assert.equal(merged.ats, 'indeed');
@@ -109,19 +126,19 @@ test('join needs title similarity: same company, unrelated title stays separate'
     '| 130 | 2026-05-29 | SMS Equipment | Warehouse Site Supervisor | N/A | Applied | ✅ | Pool | different role |\n';
   const { roles, byKey } = buildRoleIndex({ trackerContent, pool: { rows: [SMS_POOL_ROW] } });
   assert.equal(roles.length, 2);
-  assert.notEqual(byKey.p192, byKey.t130);
+  assert.notEqual(byKey.p47, byKey.t130);
 });
 
 test('links.merges: from-role absorbed, removed from roles, key aliases to the merged role', () => {
   const trackerContent = TRACKER_HEADER +
     '| 130 | 2026-05-29 | SMS Equipment | Warehouse Site Supervisor | N/A | Applied | ✅ | Pool | manual link |\n';
-  const links = { merges: [{ from: 'p192', into: 't130', at: '2026-06-12' }] };
+  const links = { merges: [{ from: 'p47', into: 't130', at: '2026-06-12' }] };
   const { roles, byKey } = buildRoleIndex({ trackerContent, pool: { rows: [SMS_POOL_ROW] }, links });
   assert.equal(roles.length, 1);
   assert.equal(byKey.t130.absorbed.length, 1);
-  assert.equal(byKey.t130.absorbed[0].key, 'p192');
-  assert.equal(byKey.p192, byKey.t130);
-  assert.ok(!roles.some(r => r.key === 'p192'));
+  assert.equal(byKey.t130.absorbed[0].key, 'p47');
+  assert.equal(byKey.p47, byKey.t130);
+  assert.ok(!roles.some(r => r.key === 'p47'));
 });
 
 // ── matchEmailToRole: the SMS bug ────────────────────────────────────────────
@@ -134,7 +151,7 @@ test('SMS pool row matched from its real interview invitation (the original miss
     text: '',
   });
   assert.ok(matched);
-  assert.equal(matched.key, 'p192');
+  assert.equal(matched.key, 'p47');
 });
 
 test('SMS matched from a bare address — pure domain path, no display name', () => {
@@ -144,7 +161,7 @@ test('SMS matched from a bare address — pure domain path, no display name', ()
     subject: 'Interview Invitation',
     text: '',
   });
-  assert.equal(matched?.key, 'p192');
+  assert.equal(matched?.key, 'p47');
 });
 
 // ── matchEmailToRole: domain-matching paths ──────────────────────────────────
@@ -337,7 +354,7 @@ test('loadRoleIndex: reads the three files, tolerant of every one missing', () =
     // no data/role-links.json — must still load
     const index = loadRoleIndex({ rootDir: dir });
     assert.equal(index.roles.length, 5); // 4 tracker + 1 pool
-    assert.equal(index.byKey.p192.company, 'SMS Equipment Inc.');
+    assert.equal(index.byKey.p47.company, 'SMS Equipment Inc.');
     assert.equal(index.byKey.t45.num, 45);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -360,8 +377,8 @@ test('two-pass join: exact-title pool twin wins over an earlier fuzzy sibling (K
       { rank: 65, n: 10, title: 'Senior Program Manager, Engineering Operations', company: 'Kong', url: 'https://y', ats: 'ashby', status: 'applied' },
     ] },
   });
-  assert.equal(idx.byKey['p10'].key, 't120', 'exact twin joins the tracker row');
-  assert.equal(idx.byKey['p9'].key, 'p9', 'the different role stays standalone');
+  assert.equal(idx.byKey['p65'].key, 't120', 'exact twin (rank 65) joins the tracker row');
+  assert.equal(idx.byKey['p64'].key, 'p64', 'the different role (rank 64) stays standalone');
   const matched = matchEmailToRole(idx, {
     from: 'Kong Hiring Team <no-reply@ashbyhq.com>',
     subject: 'Reminder: Your Upcoming Interview with Kong',
@@ -381,15 +398,15 @@ test('attach merge: incoming file paths overwrite, blanks defer to target (the u
       { rank: 9, n: 33, title: 'Project Mgr', company: 'Acme Corp Industries', url: 'https://pool-url', ats: 'lever',
         cv: 'output/p33/cv.pdf', cover: 'output/p33/cover.pdf', folder: 'output/p33', status: 'applied', appliedDate: '2026-05-21' },
     ] },
-    links: { merges: [{ from: 'p33', into: 't5', at: '2026-06-12' }] },
+    links: { merges: [{ from: 'p9', into: 't5', at: '2026-06-12' }] },
   });
   const r = idx.byKey['t5'];
-  assert.equal(idx.byKey['p33'], r, 'absorbed key aliases to target');
+  assert.equal(idx.byKey['p9'], r, 'absorbed key aliases to target');
   assert.equal(r.cvPath, 'output/p33/cv.pdf', 'incoming file path overwrites');
   assert.equal(r.url, 'https://pool-url', 'blank target field fills from absorbed');
   assert.equal(r.score, '4.0/5', 'set target field is kept');
   assert.equal(r.absorbed.length, 1);
-  assert.ok(!idx.roles.some(x => x.key === 'p33'), 'absorbed role leaves the list');
+  assert.ok(!idx.roles.some(x => x.key === 'p9'), 'absorbed role leaves the list');
 });
 
 // ── orphan-lane ingestion (the unified directory) ────────────────────────────
