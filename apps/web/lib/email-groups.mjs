@@ -252,16 +252,38 @@ const needsReview = (s, unmatched) =>
   s.signal === 'unknown' ||
   (s.signal === 'interview' && !s.autoApplied && s.confident !== true);
 // classification (or dismissal) is the terminal state for a review item.
-const isResolved = (s) => Boolean(s.dismissed || s.classified);
+export const isResolved = (s) => Boolean(s.dismissed || s.classified);
+
+// Statuses where the user already KNOWS where the application stands —
+// either a live conversation he is driving (responded/interview/offer) or a
+// row he deliberately closed. Ambiguous chatter on these never needs a
+// review card (user rule, 2026-06-13: "Amaris is in needs review even though
+// you know the status — don't do that; I'll update when I get an update, or
+// you automatically on a confident signal"). Review is for UNRESOLVED roles:
+// unmatched senders, pool-only applies awaiting a tracker row, and
+// applied/evaluated rows whose response could mean anything.
+export const NO_REVIEW_STATUSES = new Set(['responded', 'interview', 'offer',
+  'rejected', 'discarded', 'skip', 'expired']);
+
+// Does a signal still need the user's eyes? Shared with the server so role
+// pages / All Roles can show "pending your review" instead of a real status
+// (user rule: a role in Needs Review has NO status until he classifies it).
+// No tracker num = unmatched OR pool-only — both review like unmatched
+// groups do (every email needs eyes until a row exists).
+export function signalPendingReview(s) {
+  return needsReview(s, s.num == null || s.num === '') && !isResolved(s);
+}
 
 // Needs Review surface: groups with ≥1 unresolved review email — unknown
 // responses, unmatched groups (no tracker num: ALL their emails need eyes),
 // non-confident interview flags. HANDLED groups STAY here until classified
 // (handled:true lets the UI show "✓ you already replied" — the Amaris fix:
 // a replied-to unknown was suppressed before, leaving it unclassifiable).
+// Groups whose role already has a known/closed status are EXEMPT entirely.
 export function groupsForReview(groups) {
   const out = [];
   for (const g of groups || []) {
+    if (NO_REVIEW_STATUSES.has(String(g.status || '').toLowerCase())) continue;
     const unmatched = g.num == null;
     const pending = g.emails.filter(s => needsReview(s, unmatched) && !isResolved(s));
     if (!pending.length) continue;
