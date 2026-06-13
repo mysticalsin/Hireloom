@@ -25,6 +25,16 @@ import {
   parseProfileSummary,
   yamlQuote,
 } from './lib/onboard.mjs';
+import {
+  loadSecretsIntoEnv, keyStatus, validateKeysPayload, applyKeysPayload, PROVIDERS,
+} from './lib/secrets.mjs';
+import {
+  readProfileFields, validateProfileEdits, applyProfileEdits,
+} from './lib/profile-edit.mjs';
+import { analyzeProfile } from './lib/profile-diagnostics.mjs';
+import { probeProvider } from './lib/llm-probe.mjs';
+import { readPortals, validatePortalsAction, applyPortalsAction } from './lib/portals-edit.mjs';
+import { runDoctorChecks } from '../../engine/doctor.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
@@ -45,6 +55,14 @@ const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const REPORTS_DIR = process.env.REPORTS_DIR || path.join(ROOT, 'reports');
 // CONFIG_DIR isolates user-config writes (profile.yml) for safe smoke tests.
 const CONFIG_DIR = process.env.CONFIG_DIR || path.join(ROOT, 'config');
+
+// BYO-API-key store → process.env. MUST run before the module-level env reads
+// below (e.g. the Gmail OAuth consts) and before any engine spawn, so the
+// app-managed keys win over .env with zero engine changes. See lib/secrets.mjs.
+try {
+  const _injected = loadSecretsIntoEnv(CONFIG_DIR);
+  if (_injected.length) console.log(`[secrets] loaded ${_injected.length} key(s) from config/secrets.json`);
+} catch (e) { console.error('[secrets] load skipped:', e?.message || e); }
 const TOKENS_FILE = path.join(DATA_DIR, 'gmail-tokens.json');
 const CACHE_FILE = path.join(DATA_DIR, 'gmail-cache.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'status-history.tsv');
@@ -5157,6 +5175,38 @@ const HTML = /* html */ `<!DOCTYPE html>
     /* Views */
     .hb-view { display: none; }
     .hb-view.is-active { display: block; }
+    /* ── Settings (Phase A1) ─────────────────────────────────────────────── */
+    .hb-settings { display: flex; gap: 18px; align-items: flex-start; }
+    .hb-set-nav { display: flex; flex-direction: column; gap: 3px; min-width: 170px; flex-shrink: 0; position: sticky; top: 8px; }
+    .hb-set-nav button { text-align: left; padding: 8px 12px; border-radius: 9px; background: transparent; border: 1px solid transparent; color: var(--hb-muted); cursor: pointer; font-size: 13px; font-family: inherit; transition: all .14s ease; }
+    .hb-set-nav button:hover { color: var(--hb-text); border-color: var(--hb-border); }
+    .hb-set-nav button.is-active { color: #fff; background: var(--hb-accent); box-shadow: 0 0 12px var(--hb-glow); font-weight: 600; }
+    .hb-set-panel { flex: 1; min-width: 0; }
+    .hb-set-card { background: linear-gradient(170deg, var(--hb-card), var(--hb-card2)); border: 1px solid var(--hb-border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+    .hb-set-h { font-size: 15px; font-weight: 750; margin: 0 0 3px; font-family: var(--font-display); }
+    .hb-set-sub { color: var(--hb-muted); font-size: 12px; margin: 0 0 14px; line-height: 1.5; }
+    .hb-field { margin-bottom: 12px; max-width: 560px; }
+    .hb-field.wide { max-width: 760px; }
+    .hb-label { display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--hb-muted); margin-bottom: 4px; }
+    .hb-input, .hb-textarea, .hb-select {
+      width: 100%; background: var(--hb-card); border: 1px solid var(--hb-border); border-radius: 8px;
+      color: var(--hb-text); padding: 8px 11px; font-size: 13px; font-family: inherit; transition: border-color .14s ease, box-shadow .14s ease; }
+    .hb-input:focus, .hb-textarea:focus, .hb-select:focus { outline: none; border-color: var(--hb-accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+    .hb-textarea { resize: vertical; min-height: 88px; line-height: 1.55; font-family: var(--font-mono); }
+    .hb-textarea.code { min-height: 420px; font-size: 12.5px; }
+    .hb-help { color: var(--hb-faint); font-size: 11px; margin-top: 4px; line-height: 1.45; }
+    .hb-set-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+    .hb-badge { display: inline-block; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--hb-border); }
+    .hb-badge.ok { color: var(--hb-green); border-color: var(--hb-green); background: var(--green-bg); }
+    .hb-badge.env { color: var(--hb-teal); border-color: var(--hb-teal); }
+    .hb-badge.none { color: var(--hb-faint); }
+    .hb-keyrow { display: flex; gap: 8px; align-items: flex-end; }
+    .hb-keyrow .hb-field { flex: 1; margin-bottom: 0; }
+    .hb-set-rolelist { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .hb-rolechip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 11px; border-radius: 999px; background: var(--accent-bg); border: 1px solid var(--hb-accent); font-size: 12px; }
+    .hb-rolechip button { background: none; border: none; color: var(--hb-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+    .hb-rolechip button:hover { color: var(--hb-red); }
+    @media (max-width: 720px) { .hb-settings { flex-direction: column; } .hb-set-nav { flex-direction: row; flex-wrap: wrap; position: static; min-width: 0; } }
     @media (max-width: 640px) { .hb-kpi { min-width: 96px; } .hb-row .hb-co { min-width: 100px; } }
   </style>
 </head>
@@ -5199,8 +5249,7 @@ const HTML = /* html */ `<!DOCTYPE html>
   <div class="header-spacer"></div>
   <div class="header-actions">
     <span class="last-updated" id="last-updated">Loading…</span>
-    <div id="gmail-header-status"></div>
-    <button class="btn btn-ghost" id="profile-btn" onclick="openOnboard()" title="Update profile / drop resume (⌘ ,)">⊕ Profile</button>
+    <button class="btn btn-ghost" id="settings-btn" onclick="hbSwitchTab('settings')" title="Settings — profile, API keys, CV, scan config, Gmail">⚙ Settings</button>
     <button class="btn btn-apply-batch" onclick="openApplyModal()">⚡ Apply</button>
     <button class="btn btn-autopilot" id="autopilot-btn" onclick="toggleAutopilot()">🤖 Autopilot</button>
     <button class="btn btn-ghost" onclick="refresh()">↻ Refresh</button>
@@ -5421,6 +5470,11 @@ const HTML = /* html */ `<!DOCTYPE html>
     <!-- Create Role form (#create-role) -->
     <section class="hb-view" id="view-create" aria-label="Create role">
       <div id="create-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Settings — profile, API keys, CV, scan config, Gmail -->
+    <section class="hb-view" id="view-settings" aria-label="Settings">
+      <div id="settings-content"><span class="spinner"></span></div>
     </section>
   </main>
 </div>
@@ -5772,7 +5826,7 @@ const HTML = /* html */ `<!DOCTYPE html>
         sub = 'Try clearing the filter or switching to "All".';
       } else if (window.cvExists === false) {
         icon = '📄'; title = 'Drop your resume to begin';
-        sub = 'Tap ⊕ Profile (or ⌘ ,) to import your CV. Takes ~2 min.';
+        sub = 'Press ⌘ , to import your CV. Takes ~2 min.';
       } else {
         icon = '🚀'; title = 'Profile is set — ready to hunt';
         sub = 'Add a job URL to <code>data/pipeline.md</code> or run <code>/career-ops scan</code> to find offers.';
@@ -7792,7 +7846,7 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   function showShortcutsHelp() {
     showToast(
-      'Shortcuts:  ⌘, profile  ·  ⇧T theme  ·  Esc close  ·  Tab navigate  ·  Enter advance  ·  ? this help',
+      'Shortcuts:  ⌘, import CV  ·  ⇧T theme  ·  Esc close  ·  Tab navigate  ·  Enter advance  ·  ? this help',
       'info', 6000
     );
   }
@@ -7814,6 +7868,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     { id: 'inbox', label: 'Inbox' },
     { id: 'roles', label: 'All Roles' },
   ];
+  // Settings is reachable via the header ⚙ button (a routable view, not a tab pill).
   var hbActiveTab = 'overview';
   var hbData = { groups: null, queue: null, scanfeed: null, patterns: null, interviews: null };
   var hbOpenGroups = {};   // group key → expanded?
@@ -7841,7 +7896,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       }
     }
     const mTab = h.match(/^#tab\\/([a-z-]+)$/);
-    hbActiveTab = (mTab && HB_TABS.some(t => t.id === mTab[1])) ? mTab[1] : 'overview';
+    hbActiveTab = (mTab && (HB_TABS.some(t => t.id === mTab[1]) || mTab[1] === 'settings')) ? mTab[1] : 'overview';
     const view = document.getElementById('view-' + hbActiveTab);
     if (view) view.classList.add('is-active');
     hbRenderTabs();
@@ -7863,6 +7918,7 @@ const HTML = /* html */ `<!DOCTYPE html>
       inbox: g && g.inbox ? (g.inbox.live || []).length : null,
       // The union count — tracker rows + pool-only inventory.
       roles: allRoles.length || (lastStats ? lastStats.total : null),
+      settings: null,
     };
   }
 
@@ -7887,6 +7943,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     else if (hbActiveTab === 'scan') hbRenderScan();
     else if (hbActiveTab === 'patterns') hbRenderPatterns();
     else if (hbActiveTab === 'inbox') hbRenderInbox();
+    else if (hbActiveTab === 'settings') hbRenderSettings();
     // roles + role views render via refresh()/hbRenderRole directly
   }
 
@@ -8692,6 +8749,446 @@ const HTML = /* html */ `<!DOCTYPE html>
     } catch (e) { showToast('Create failed: ' + e.message, 'error'); }
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     Settings (Phase A1) — profile editor, BYO API keys, CV, Gmail.
+     Sectioned panel; each section fetches its own data on open.
+     ════════════════════════════════════════════════════════════════════ */
+  var hbSetSection = 'profile';
+  var HB_SET_SECTIONS = [['profile','Profile'],['keys','API Keys'],['cv','CV / Résumé'],['scan','Scan & Portals'],['gmail','Gmail'],['diagnostics','Diagnostics']];
+
+  function hbRenderSettings() {
+    const host = document.getElementById('settings-content');
+    if (!host) return;
+    host.innerHTML =
+      '<div style="margin-bottom:10px"><span class="hb-greet" style="font-size:20px">Settings</span>' +
+      '<div class="hb-meta">Your config lives in the open project folder — this UI and the CLI both read and write it.</div></div>' +
+      '<div class="hb-settings">' +
+        '<nav class="hb-set-nav" aria-label="Settings sections">' +
+          HB_SET_SECTIONS.map(s => '<button class="' + (s[0] === hbSetSection ? 'is-active' : '') + '" onclick="hbSetGo(\\'' + s[0] + '\\')">' + s[1] + '</button>').join('') +
+        '</nav>' +
+        '<div class="hb-set-panel" id="hb-set-panel"><span class="spinner"></span></div>' +
+      '</div>';
+    hbSetRenderSection();
+  }
+  function hbSetGo(id) { hbSetSection = id; hbRenderSettings(); }
+  function hbSetRenderSection() {
+    const p = document.getElementById('hb-set-panel');
+    if (!p) return;
+    p.innerHTML = '<span class="spinner"></span>';
+    if (hbSetSection === 'profile') hbSetProfile(p);
+    else if (hbSetSection === 'keys') hbSetKeys(p);
+    else if (hbSetSection === 'cv') hbSetCV(p);
+    else if (hbSetSection === 'scan') hbSetPortals(p);
+    else if (hbSetSection === 'gmail') hbSetGmail(p);
+    else if (hbSetSection === 'diagnostics') hbSetDiag(p);
+  }
+
+  /* ── API keys ─────────────────────────────────────────────────────── */
+  async function hbSetKeys(p) {
+    let d; try { d = await (await fetch('/api/settings/keys')).json(); } catch { d = null; }
+    if (!d || !d.ok) { p.innerHTML = '<div class="hb-empty">Could not load key settings.</div>'; return; }
+    window._hbKeys = d;
+    const badge = (prov) => prov.source === 'app'
+      ? '<span class="hb-badge ok">saved ' + esc(prov.masked) + '</span> <button class="hb-btn hb-btn-ghost" style="padding:1px 8px;font-size:10px" onclick="hbSetKeyClear(\\'' + esc(prov.env) + '\\')">clear</button>'
+      : prov.source === 'env'
+        ? '<span class="hb-badge env">from .env ' + esc(prov.masked) + '</span>'
+        : '<span class="hb-badge none">not set</span>';
+    const provRows = d.providers.map(prov =>
+      '<div class="hb-field wide">' +
+      '<label class="hb-label" for="key-' + prov.id + '">' + esc(prov.label) + ' &nbsp; ' + badge(prov) + '</label>' +
+      '<input class="hb-input" id="key-' + prov.id + '" type="password" autocomplete="off" placeholder="' + esc(prov.placeholder) + '" data-env="' + esc(prov.env) + '">' +
+      '<div class="hb-help">' + esc(prov.blurb) + (prov.source === 'env' ? ' Currently from .env — enter a value to manage it here instead.' : ' Leave blank to keep the saved value.') + '</div>' +
+      '</div>'
+    ).join('');
+    const extraRows = d.extras.map(ex =>
+      '<div class="hb-field">' +
+      '<label class="hb-label" for="ex-' + ex.env + '">' + esc(ex.label) + '</label>' +
+      '<input class="hb-input" id="ex-' + ex.env + '" type="text" value="' + esc(ex.value) + '" placeholder="' + esc(ex.placeholder) + '" data-env="' + esc(ex.env) + '">' +
+      '</div>'
+    ).join('');
+    const routingRows = d.tasks.map(t =>
+      '<div class="hb-field"><label class="hb-label" for="rt-' + t.id + '">' + esc(t.label) + '</label>' +
+      '<select class="hb-select" id="rt-' + t.id + '">' +
+        d.providers.map(pr => '<option value="' + pr.id + '"' + (d.routing[t.id] === pr.id ? ' selected' : '') + '>' + esc(pr.label) + '</option>').join('') +
+      '</select></div>'
+    ).join('');
+    p.innerHTML =
+      '<div class="hb-set-card"><h3 class="hb-set-h">API keys — bring your own</h3>' +
+        '<p class="hb-set-sub">Stored in <code>config/secrets.json</code> (gitignored, 0600) and injected into the engine at runtime — they never leave your machine. OS-keychain storage arrives when Hireloom is packaged as a desktop app.</p>' +
+        provRows +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Provider tuning</h3>' +
+        '<p class="hb-set-sub">Optional overrides for the NIM-hosted Kimi endpoint and model names.</p>' +
+        extraRows +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Model routing per task</h3>' +
+        '<p class="hb-set-sub">Which provider runs each job. Free-tier sweet spot: Gemini Flash scores, NIM-Kimi tailors, a premium key for deep evals. Takes effect once the LLM seam ships (A2).</p>' +
+        routingRows +
+      '</div>' +
+      '<div class="hb-set-actions"><button class="hb-btn hb-btn-respond" onclick="hbSetKeysSave()">Save keys</button></div>';
+  }
+  async function hbSetKeysSave() {
+    const values = {};
+    document.querySelectorAll('#hb-set-panel input[data-env]').forEach(el => {
+      const env = el.getAttribute('data-env');
+      if (el.type === 'password') { if (el.value) values[env] = el.value; } // blank = keep
+      else { values[env] = el.value; }
+    });
+    const routing = {};
+    (window._hbKeys && window._hbKeys.tasks || []).forEach(t => { const s = document.getElementById('rt-' + t.id); if (s) routing[t.id] = s.value; });
+    try {
+      const res = await fetch('/api/settings/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values, routing }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'save failed');
+      showToast('Keys saved', 'success');
+      hbSetRenderSection();
+    } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+  }
+  async function hbSetKeyClear(env) {
+    try {
+      const res = await fetch('/api/settings/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: { [env]: '' } }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'clear failed');
+      showToast('Cleared ' + env, 'info');
+      hbSetRenderSection();
+    } catch (e) { showToast('Clear failed: ' + e.message, 'error'); }
+  }
+
+  /* ── Profile editor (non-destructive) ─────────────────────────────── */
+  async function hbSetProfile(p) {
+    let d; try { d = await (await fetch('/api/profile/full')).json(); } catch { d = null; }
+    if (!d || !d.ok) { p.innerHTML = '<div class="hb-empty">Could not load profile.</div>'; return; }
+    if (!d.exists) {
+      p.innerHTML = '<div class="hb-set-card"><h3 class="hb-set-h">No profile yet</h3><p class="hb-set-sub">Run onboarding first to create config/profile.yml.</p><button class="hb-btn hb-btn-respond" onclick="openOnboard()">⊕ Open onboarding</button></div>';
+      return;
+    }
+    const f = d.fields;
+    window._hbProf = {
+      roles: (f.target_roles.primary || []).slice(),
+      supers: (f.narrative.superpowers || []).slice(),
+      langFluent: ((f.languages || {}).fluent || []).slice(),
+      langNone: ((f.languages || {}).none || []).slice(),
+    };
+    const inp = (id, label, value, ph) => '<div class="hb-field"><label class="hb-label" for="' + id + '">' + label + '</label><input class="hb-input" id="' + id + '" value="' + esc(value || '') + '" placeholder="' + (ph || '') + '"></div>';
+    const ta = (id, label, value, ph) => '<div class="hb-field wide"><label class="hb-label" for="' + id + '">' + label + '</label><textarea class="hb-textarea" id="' + id + '" placeholder="' + (ph || '') + '">' + esc(value || '') + '</textarea></div>';
+    const sel = (id, label, value, opts) => '<div class="hb-field"><label class="hb-label" for="' + id + '">' + label + '</label><select class="hb-select" id="' + id + '">' + opts.map(o => '<option' + (value === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></div>';
+    const chips = (listId, addId, kind, ph) =>
+      '<div class="hb-set-rolelist" id="' + listId + '"></div>' +
+      '<div class="hb-keyrow"><div class="hb-field" style="margin-bottom:0"><input class="hb-input" id="' + addId + '" placeholder="' + ph + '"></div>' +
+      '<button class="hb-btn" onclick="hbProfAdd(\\'' + kind + '\\',\\'' + addId + '\\')">＋ Add</button></div>';
+    p.innerHTML =
+      '<div class="hb-set-card"><h3 class="hb-set-h">Identity</h3>' +
+        inp('pf-name', 'Full name', f.candidate.full_name) +
+        inp('pf-email', 'Email', f.candidate.email) +
+        inp('pf-phone', 'Phone', f.candidate.phone) +
+        inp('pf-location', 'Location', f.candidate.location) +
+        inp('pf-linkedin', 'LinkedIn', f.candidate.linkedin) +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Target roles</h3>' +
+        '<p class="hb-set-sub">Titles the scanner and scoring weight toward.</p>' +
+        chips('pf-roles', 'pf-role-add', 'roles', 'Add a role…') +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Narrative</h3>' +
+        inp('pf-headline', 'Headline', f.narrative.headline) +
+        '<div class="hb-field wide"><label class="hb-label">Superpowers</label>' + chips('pf-supers', 'pf-super-add', 'supers', 'Add a superpower…') + '</div>' +
+        ta('pf-best', 'Best achievement', f.narrative.best_achievement) +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Compensation</h3>' +
+        inp('pf-comp-target', 'Target', f.compensation.target_range, '$100,000') +
+        inp('pf-comp-min', 'Minimum', f.compensation.minimum, '$65,000') +
+        sel('pf-comp-cur', 'Currency', f.compensation.currency, ['USD', 'CAD', 'EUR', 'GBP', 'CHF', 'AUD']) +
+        ta('pf-comp-loc', 'Location flexibility', f.compensation.location_flexibility) +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Work authorization</h3>' +
+        sel('pf-auth', 'Legally authorized to work', f.work_authorization.legally_authorized_to_work, ['', 'Yes', 'No']) +
+        sel('pf-spon', 'Require sponsorship', f.work_authorization.require_sponsorship, ['', 'No', 'Yes']) +
+        inp('pf-permit', 'Work permit / status', f.work_authorization.work_permit_type, 'Canadian Citizen') +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Application answers</h3>' +
+        '<p class="hb-set-sub">The logistics every form asks. Filling these means the autofiller never has to guess them.</p>' +
+        sel('pf-aa-over18', 'Over 18', (f.application_answers || {}).over_18, ['', 'Yes', 'No']) +
+        sel('pf-aa-relocate', 'Willing to relocate', (f.application_answers || {}).willing_to_relocate, ['', 'Yes', 'No']) +
+        inp('pf-aa-notice', 'Notice period', (f.application_answers || {}).notice_period, 'e.g. 2 weeks') +
+        inp('pf-aa-start', 'Earliest start date', (f.application_answers || {}).earliest_start_date, 'e.g. 2 weeks from offer') +
+        sel('pf-aa-criminal', 'Criminal record', (f.application_answers || {}).criminal_record, ['', 'No', 'Yes']) +
+        sel('pf-aa-bg', 'Background-check consent', (f.application_answers || {}).background_check_consent, ['', 'Yes', 'No']) +
+        inp('pf-aa-company', 'Current company', (f.application_answers || {}).current_company) +
+        sel('pf-aa-license', 'Drivers license', (f.application_answers || {}).drivers_license, ['', 'Yes', 'No']) +
+        sel('pf-aa-vehicle', 'Access to a vehicle', (f.application_answers || {}).own_vehicle, ['', 'Yes', 'No']) +
+        sel('pf-aa-transport', 'Reliable transportation', (f.application_answers || {}).reliable_transportation, ['', 'Yes', 'No']) +
+        inp('pf-aa-citizenship', 'Citizenship', (f.application_answers || {}).citizenship, 'e.g. Canadian citizen') +
+        inp('pf-aa-nationality', 'Nationality', (f.application_answers || {}).nationality) +
+        sel('pf-aa-sanctioned', 'Sanctioned-country national', (f.application_answers || {}).sanctioned_country_national, ['', 'No', 'Yes']) +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Voluntary self-ID <span class="hb-num">(EEO — all optional)</span></h3>' +
+        '<p class="hb-set-sub">EEO sections render these; "decline to self-identify" is always valid. Set only what you are comfortable with.</p>' +
+        inp('pf-eeo-gender', 'Gender', (f.eeo_voluntary || {}).gender, 'or Decline to self-identify') +
+        inp('pf-eeo-race', 'Race / ethnicity', (f.eeo_voluntary || {}).race_ethnicity) +
+        inp('pf-eeo-racefb', 'Race fallback (if first not offered)', (f.eeo_voluntary || {}).race_ethnicity_fallback) +
+        sel('pf-eeo-hispanic', 'Hispanic / Latino', (f.eeo_voluntary || {}).hispanic_latino, ['', 'No', 'Yes']) +
+        inp('pf-eeo-veteran', 'Veteran status', (f.eeo_voluntary || {}).veteran_status) +
+        inp('pf-eeo-disability', 'Disability status', (f.eeo_voluntary || {}).disability_status) +
+        inp('pf-eeo-orientation', 'Sexual orientation', (f.eeo_voluntary || {}).sexual_orientation) +
+        sel('pf-eeo-transgender', 'Transgender', (f.eeo_voluntary || {}).transgender, ['', 'No', 'Yes']) +
+        inp('pf-eeo-pronouns', 'Pronouns', (f.eeo_voluntary || {}).pronouns) +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Languages</h3>' +
+        '<div class="hb-field wide"><label class="hb-label">Fluent</label>' + chips('pf-langfluent', 'pf-langfluent-add', 'langFluent', 'Add a language…') + '</div>' +
+        '<div class="hb-field wide"><label class="hb-label">Not spoken (hard gate — down-ranks roles that require these)</label>' + chips('pf-langnone', 'pf-langnone-add', 'langNone', 'Add a language…') + '</div>' +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Additional context <span class="hb-num">(free-text — yours)</span></h3>' +
+        '<p class="hb-set-sub">Anything else about you, in your own words. Saved verbatim into your profile and never auto-edited — this is where you add answers the autofiller flagged as missing.</p>' +
+        '<div class="hb-field wide" style="max-width:100%"><textarea class="hb-textarea" id="pf-freetext" style="min-height:120px" placeholder="e.g. Open to contract-to-hire. Strong preference for async teams. Reachable for a 3pm ET call most days…">' + esc(f.additional_context || '') + '</textarea></div>' +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Custom answers <span class="hb-num">(question → answer)</span></h3>' +
+        '<p class="hb-set-sub">Specific questions you keep getting asked, with the exact answer you want given. The autofiller matches these first.</p>' +
+        '<div id="pf-customqa">' + (f.custom_answers || []).map(qa => qaRowHtml(qa.question, qa.answer)).join('') + '</div>' +
+        '<button class="hb-btn" onclick="hbProfAddQA()">＋ Add question</button>' +
+      '</div>' +
+      '<div class="hb-set-actions"><button class="hb-btn hb-btn-respond" onclick="hbSetProfileSave()">Save profile</button>' +
+      '<span class="hb-help">Surgical save — only the fields shown here change, in place. Comments and anything not shown stay exactly as they are.</span></div>';
+    hbProfRenderChips();
+  }
+  function qaRowHtml(q, a) {
+    return '<div class="pf-qa-row hb-keyrow" style="margin-bottom:8px">' +
+      '<div class="hb-field" style="margin-bottom:0;flex:1"><input class="hb-input pf-qa-q" placeholder="Question" value="' + esc(q || '') + '"></div>' +
+      '<div class="hb-field" style="margin-bottom:0;flex:1"><input class="hb-input pf-qa-a" placeholder="Answer to give" value="' + esc(a || '') + '"></div>' +
+      '<button class="hb-btn hb-btn-ghost" title="remove" onclick="this.closest(\\'.pf-qa-row\\').remove()">×</button></div>';
+  }
+  function hbProfAddQA() {
+    const host = document.getElementById('pf-customqa'); if (!host) return;
+    host.insertAdjacentHTML('beforeend', qaRowHtml('', ''));
+  }
+  function hbProfRenderChips() {
+    const render = (listId, kind) => {
+      const host = document.getElementById(listId); if (!host) return;
+      const arr = (window._hbProf && window._hbProf[kind]) || [];
+      host.innerHTML = arr.length
+        ? arr.map((v, i) => '<span class="hb-rolechip">' + esc(v) + '<button title="remove" onclick="hbProfRemove(\\'' + kind + '\\',' + i + ')">×</button></span>').join('')
+        : '<span class="hb-help">none yet</span>';
+    };
+    render('pf-roles', 'roles'); render('pf-supers', 'supers');
+    render('pf-langfluent', 'langFluent'); render('pf-langnone', 'langNone');
+  }
+  function hbProfAdd(kind, inputId) {
+    const el = document.getElementById(inputId); if (!el) return;
+    const v = (el.value || '').trim(); if (!v) return;
+    window._hbProf[kind].push(v); el.value = ''; hbProfRenderChips();
+  }
+  function hbProfRemove(kind, i) { window._hbProf[kind].splice(i, 1); hbProfRenderChips(); }
+  async function hbSetProfileSave() {
+    const v = (id) => (document.getElementById(id) && document.getElementById(id).value || '').trim();
+    const raw = (id) => (document.getElementById(id) && document.getElementById(id).value) || '';
+    const payload = {
+      candidate: { full_name: v('pf-name'), email: v('pf-email'), phone: v('pf-phone'), location: v('pf-location'), linkedin: v('pf-linkedin') },
+      target_roles: { primary: window._hbProf.roles },
+      narrative: { headline: v('pf-headline'), superpowers: window._hbProf.supers, best_achievement: raw('pf-best') },
+      compensation: { target_range: v('pf-comp-target'), minimum: v('pf-comp-min'), currency: v('pf-comp-cur'), location_flexibility: raw('pf-comp-loc') },
+      work_authorization: { legally_authorized_to_work: v('pf-auth'), require_sponsorship: v('pf-spon'), work_permit_type: v('pf-permit') },
+      application_answers: {
+        over_18: v('pf-aa-over18'), willing_to_relocate: v('pf-aa-relocate'), notice_period: v('pf-aa-notice'),
+        earliest_start_date: v('pf-aa-start'), criminal_record: v('pf-aa-criminal'), background_check_consent: v('pf-aa-bg'),
+        current_company: v('pf-aa-company'), drivers_license: v('pf-aa-license'), own_vehicle: v('pf-aa-vehicle'),
+        reliable_transportation: v('pf-aa-transport'), citizenship: v('pf-aa-citizenship'), nationality: v('pf-aa-nationality'),
+        sanctioned_country_national: v('pf-aa-sanctioned'),
+      },
+      eeo_voluntary: {
+        gender: v('pf-eeo-gender'), race_ethnicity: v('pf-eeo-race'), race_ethnicity_fallback: v('pf-eeo-racefb'),
+        hispanic_latino: v('pf-eeo-hispanic'), veteran_status: v('pf-eeo-veteran'), disability_status: v('pf-eeo-disability'),
+        sexual_orientation: v('pf-eeo-orientation'), transgender: v('pf-eeo-transgender'), pronouns: v('pf-eeo-pronouns'),
+      },
+      languages: { fluent: window._hbProf.langFluent, none: window._hbProf.langNone },
+      additional_context: raw('pf-freetext'),
+      custom_answers: [...document.querySelectorAll('#pf-customqa .pf-qa-row')].map(r => ({
+        question: (r.querySelector('.pf-qa-q') || {}).value || '',
+        answer: (r.querySelector('.pf-qa-a') || {}).value || '',
+      })).filter(qa => (qa.question || '').trim() || (qa.answer || '').trim()),
+    };
+    try {
+      const res = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'save failed');
+      showToast('Profile saved', 'success');
+    } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+  }
+
+  /* ── CV editor ────────────────────────────────────────────────────── */
+  async function hbSetCV(p) {
+    let d; try { d = await (await fetch('/api/cv')).json(); } catch { d = null; }
+    if (!d || !d.ok) { p.innerHTML = '<div class="hb-empty">Could not load cv.md.</div>'; return; }
+    p.innerHTML =
+      '<div class="hb-set-card"><h3 class="hb-set-h">CV / Résumé — cv.md</h3>' +
+      '<p class="hb-set-sub">The canonical markdown every tailored CV is built from. ' + (d.exists ? ('Currently ' + d.bytes + ' bytes.') : 'Not created yet.') + ' A timestamped backup is kept on every save. Saving the markdown does not re-render PDFs — regenerate from onboarding or the CLI when ready.</p>' +
+      '<div class="hb-field wide" style="max-width:100%"><textarea class="hb-textarea code" id="cv-edit">' + esc(d.content || '') + '</textarea></div>' +
+      '<div class="hb-set-actions"><button class="hb-btn hb-btn-respond" onclick="hbSetCVSave()">Save cv.md</button></div>' +
+      '</div>';
+  }
+  async function hbSetCVSave() {
+    const content = (document.getElementById('cv-edit') && document.getElementById('cv-edit').value) || '';
+    try {
+      const res = await fetch('/api/cv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'save failed');
+      showToast('Saved cv.md (' + data.bytes + ' bytes)', 'success');
+    } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+  }
+
+  /* ── Gmail ────────────────────────────────────────────────────────── */
+  async function hbSetGmail(p) {
+    let s; try { s = await (await fetch('/api/gmail/status')).json(); } catch { s = null; }
+    if (!s) { p.innerHTML = '<div class="hb-empty">Could not load Gmail status.</div>'; return; }
+    let body;
+    if (!s.configured) {
+      body = '<p class="hb-set-sub">Gmail OAuth credentials are not configured. Add ' + (s.missingEnv || []).map(e => '<code>' + esc(e) + '</code>').join(' and ') + ' to your <code>.env</code>, then restart. A connect-from-the-UI flow lands in a later step (A3).</p>';
+    } else if (!s.hasTokens || s.refreshFailed) {
+      body = '<p class="hb-set-sub">' + (s.refreshFailed ? 'Saved tokens expired (' + esc(s.refreshError || 'reauth needed') + '). ' : 'Credentials set, not yet authorized. ') + 'Authorize read-only access to auto-sort interview, rejection, and response emails.</p>' +
+        '<a class="hb-btn hb-btn-respond" href="/auth/gmail">🔗 Connect Gmail</a>';
+    } else {
+      body = '<p class="hb-set-sub"><span class="hb-badge ok">connected</span> &nbsp; Read-only inbox sync is active.</p>' +
+        '<div class="hb-statgrid" style="max-width:380px;margin-bottom:12px">' +
+        '<span class="k">Polling</span><span class="v">' + (s.polling ? 'on' : 'off') + (s.fastPolling ? ' (fast)' : '') + '</span>' +
+        '<span class="k">Last scan</span><span class="v">' + (s.lastScannedAt ? hbDT(s.lastScannedAt) : '—') + '</span>' +
+        '<span class="k">Cached signals</span><span class="v">' + (s.cachedSignalCount != null ? s.cachedSignalCount : '—') + '</span>' +
+        '<span class="k">Active signals</span><span class="v">' + (s.activeSignalCount != null ? s.activeSignalCount : '—') + '</span>' +
+        '</div>' +
+        '<div class="hb-set-actions"><a class="hb-btn" href="/auth/gmail">↻ Re-authorize</a>' +
+        '<button class="hb-btn hb-btn-ghost" onclick="hbSetGmailDisconnect()">Disconnect</button></div>';
+    }
+    p.innerHTML = '<div class="hb-set-card"><h3 class="hb-set-h">Gmail integration</h3>' + body + '</div>';
+  }
+  async function hbSetGmailDisconnect() {
+    if (!confirm('Disconnect Gmail? This removes the saved tokens.')) return;
+    try {
+      const res = await fetch('/api/gmail/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'disconnect failed');
+      showToast('Gmail disconnected', 'info');
+      hbSetRenderSection();
+    } catch (e) { showToast('Disconnect failed: ' + e.message, 'error'); }
+  }
+
+  /* ── Scan & Portals ───────────────────────────────────────────────── */
+  async function hbSetPortals(p) {
+    let d; try { d = await (await fetch('/api/portals')).json(); } catch { d = null; }
+    if (!d || !d.ok) { p.innerHTML = '<div class="hb-empty">Could not load portals.yml.</div>'; return; }
+    if (!d.exists) { p.innerHTML = '<div class="hb-set-card"><h3 class="hb-set-h">No portals.yml yet</h3><p class="hb-set-sub">Copy templates/portals.example.yml to portals.yml first (or ask the agent in chat).</p></div>'; return; }
+    const termCard = (group, kind, label) => {
+      const arr = (d[group] && d[group][kind]) || [];
+      return '<div class="hb-field wide"><label class="hb-label">' + label + '</label>' +
+        '<div class="hb-set-rolelist">' + (arr.length
+          ? arr.map(t => '<span class="hb-rolechip">' + esc(t) + '<button title="remove" data-term="' + esc(t) + '" onclick="hbPortRemoveTerm(\\'' + group + '\\',\\'' + kind + '\\',this)">×</button></span>').join('')
+          : '<span class="hb-help">none</span>') + '</div>' +
+        '<div class="hb-keyrow"><div class="hb-field" style="margin-bottom:0"><input class="hb-input" placeholder="Add term…"></div>' +
+        '<button class="hb-btn" onclick="hbPortAddTerm(\\'' + group + '\\',\\'' + kind + '\\',this)">＋ Add</button></div></div>';
+    };
+    const toggleRow = (list, item, sub) =>
+      '<div class="hb-row" data-name="' + esc(item.name) + '" style="justify-content:space-between">' +
+      '<div><span class="hb-co">' + esc(item.name) + '</span>' + (sub ? ' <span class="hb-num">' + esc(sub) + '</span>' : '') + '</div>' +
+      '<button class="hb-btn ' + (item.enabled ? 'hb-btn-respond' : 'hb-btn-ghost') + '" data-on="' + (item.enabled ? '1' : '0') + '" onclick="hbPortToggle(\\'' + list + '\\',this)">' + (item.enabled ? 'enabled' : 'disabled') + '</button></div>';
+    const queries = (d.search_queries || []).map(q => toggleRow('search_queries', q, q.query)).join('') || '<div class="hb-empty">none</div>';
+    const companies = (d.tracked_companies || []).map(c => toggleRow('tracked_companies', c, c.api_provider || '')).join('') || '<div class="hb-empty">none</div>';
+    p.innerHTML =
+      '<div class="hb-set-card"><h3 class="hb-set-h">Title filter</h3>' +
+        '<p class="hb-set-sub">Keywords the scanner matches role titles against. Your section comments in portals.yml are preserved.</p>' +
+        termCard('title_filter', 'positive', 'Positive (match these)') +
+        termCard('title_filter', 'negative', 'Negative (reject these)') +
+        termCard('title_filter', 'seniority_boost', 'Seniority boost') +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Location filter</h3>' +
+        termCard('location_filter', 'positive', 'Positive') +
+        termCard('location_filter', 'negative', 'Negative') +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Search queries <span class="hb-num">(' + (d.search_queries || []).length + ')</span></h3>' +
+        '<p class="hb-set-sub">Toggle a stream on/off, or add one.</p>' + queries +
+        '<div class="hb-keyrow" style="margin-top:10px"><div class="hb-field" style="margin-bottom:0"><input class="hb-input" id="port-q-name" placeholder="Query name"></div>' +
+        '<div class="hb-field" style="margin-bottom:0;flex:2"><input class="hb-input" id="port-q-query" placeholder="Query text, e.g. site:greenhouse.io Project Manager Canada"></div>' +
+        '<button class="hb-btn" onclick="hbPortAddQuery()">＋ Add query</button></div>' +
+      '</div>' +
+      '<div class="hb-set-card"><h3 class="hb-set-h">Tracked companies <span class="hb-num">(' + (d.tracked_companies || []).length + ')</span></h3>' +
+        '<p class="hb-set-sub">Toggle a company on/off, or add one. Greenhouse / Ashby / Lever / Workday providers scan for zero tokens.</p>' + companies +
+        '<div style="margin-top:10px">' +
+        '<div class="hb-keyrow"><div class="hb-field" style="margin-bottom:0"><input class="hb-input" id="port-c-name" placeholder="Company"></div>' +
+        '<div class="hb-field" style="margin-bottom:0;flex:2"><input class="hb-input" id="port-c-url" placeholder="Careers URL"></div></div>' +
+        '<div class="hb-keyrow"><div class="hb-field" style="margin-bottom:0"><input class="hb-input" id="port-c-provider" placeholder="api_provider (greenhouse / ashby / lever / workday)"></div>' +
+        '<div class="hb-field" style="margin-bottom:0;flex:2"><input class="hb-input" id="port-c-notes" placeholder="notes (optional)"></div>' +
+        '<button class="hb-btn" onclick="hbPortAddCompany()">＋ Add company</button></div></div>' +
+      '</div>';
+  }
+  async function hbPortPost(body, okMsg) {
+    try {
+      const res = await fetch('/api/portals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'update failed');
+      if (okMsg) showToast(okMsg, 'success');
+      hbSetRenderSection();
+    } catch (e) { showToast('Portals update failed: ' + e.message, 'error'); }
+  }
+  function hbPortToggle(list, btn) {
+    const name = btn.closest('[data-name]').dataset.name;
+    hbPortPost({ action: 'toggle', list, name, enabled: btn.getAttribute('data-on') !== '1' });
+  }
+  function hbPortAddTerm(group, kind, btn) {
+    const inp = btn.closest('.hb-keyrow').querySelector('input');
+    const v = (inp.value || '').trim(); if (!v) return;
+    hbPortPost({ action: 'add-term', group, kind, value: v });
+  }
+  function hbPortRemoveTerm(group, kind, btn) {
+    hbPortPost({ action: 'remove-term', group, kind, value: btn.dataset.term });
+  }
+  function hbPortAddQuery() {
+    const name = (document.getElementById('port-q-name').value || '').trim();
+    const query = (document.getElementById('port-q-query').value || '').trim();
+    if (!name || !query) { showToast('Query name + text required', 'error'); return; }
+    hbPortPost({ action: 'add-query', name, query }, 'Query added');
+  }
+  function hbPortAddCompany() {
+    const name = (document.getElementById('port-c-name').value || '').trim();
+    if (!name) { showToast('Company name required', 'error'); return; }
+    hbPortPost({ action: 'add-company', name,
+      careers_url: (document.getElementById('port-c-url').value || '').trim(),
+      api_provider: (document.getElementById('port-c-provider').value || '').trim(),
+      notes: (document.getElementById('port-c-notes').value || '').trim() }, 'Company added');
+  }
+
+  /* ── Diagnostics ──────────────────────────────────────────────────── */
+  function hbSetDiag(p) {
+    p.innerHTML =
+      '<div class="hb-set-card"><h3 class="hb-set-h">Diagnostics</h3>' +
+      '<p class="hb-set-sub">Checks your setup, pings your API key to confirm it actually answers, and finds gaps in your profile that would make the autofiller guess.</p>' +
+      '<div class="hb-set-actions"><button class="hb-btn hb-btn-respond" onclick="hbRunDiag()">▶ Run diagnostics</button>' +
+      '<a class="hb-btn" href="/api/diagnostics/export" download>⬇ Export for support</a></div>' +
+      '<div id="hb-diag-out" style="margin-top:14px"></div></div>';
+  }
+  async function hbRunDiag() {
+    const out = document.getElementById('hb-diag-out'); if (!out) return;
+    out.innerHTML = '<span class="spinner"></span> Running — probing your API key, this can take a few seconds…';
+    let d; try { d = await (await fetch('/api/diagnostics')).json(); } catch { d = null; }
+    if (!d || !d.ok) { out.innerHTML = '<div class="hb-empty">Diagnostics failed to run.</div>'; return; }
+    const ic = (ok, warn) => ok ? '<span style="color:var(--hb-green)">✓</span>' : warn ? '<span style="color:var(--hb-orange)">⚠</span>' : '<span style="color:var(--hb-red)">✗</span>';
+    const apiRows = d.api.map(a =>
+      '<div class="hb-line"><span class="hb-co">' + ic(a.status === 'ok', a.status === 'unset' || a.status === 'ratelimited') + ' ' + esc(a.label) + '</span>' +
+      '<span class="hb-num">' + esc(a.message || a.status) + '</span></div>').join('');
+    const c = d.profile.completeness;
+    const gapRows = d.profile.gaps.length
+      ? d.profile.gaps.map(g => {
+          const hi = g.severity === 'high';
+          return '<div class="hb-review-card"><div><span class="hb-badge ' + (hi ? 'none' : 'env') + '"' + (hi ? ' style="color:var(--hb-red);border-color:var(--hb-red)"' : '') + '>' + esc(g.severity) + '</span> <strong>' + esc(g.label) + '</strong></div>' +
+            '<div class="hb-review-snip">' + esc(g.why) + ' <span class="hb-link hb-clickable" onclick="hbSetGo(\\'profile\\')">→ ' + esc(g.fix) + '</span></div></div>';
+        }).join('')
+      : '<div class="hb-line"><span style="color:var(--hb-green)">✓ Every common application answer is filled.</span></div>';
+    const optNote = d.profile.optional.length
+      ? '<div class="hb-help" style="margin-top:6px">' + d.profile.optional.length + ' optional self-ID field(s) unset — fine to leave; "decline" is always valid.</div>' : '';
+    const setupRows = d.setup.map(s =>
+      '<div class="hb-line"><span class="hb-co">' + ic(s.status === 'pass', s.status === 'warn') + ' ' + esc(s.label) + '</span>' +
+      (s.status !== 'pass' && s.fix ? '<span class="hb-num">' + esc(s.fix) + '</span>' : '') + '</div>').join('');
+    out.innerHTML =
+      '<div class="hb-section-h">Your API key</div>' + apiRows +
+      '<div class="hb-section-h" style="margin-top:14px">Profile completeness — ' + c.filled + '/' + c.total + ' (' + c.pct + '%)</div>' +
+      '<div style="background:var(--hb-card2);border-radius:6px;overflow:hidden;margin-bottom:10px"><div class="hb-bar" style="width:' + c.pct + '%"></div></div>' +
+      gapRows + optNote +
+      '<div class="hb-section-h" style="margin-top:14px">Setup</div>' + setupRows;
+  }
+
   // Boot
   refresh().then(scheduleRefresh);
   checkSetupStatus();
@@ -8913,6 +9410,33 @@ const ERROR_COUNTERS = {
   uncaughtException:  0,
   routeError:         0,
 };
+
+// Snapshot → rotate (keep newest 10) → atomic write (temp + rename). Used by
+// the Settings editors so a bad save or an app+CLI race never clobbers a user
+// file (the PRODUCT-BUILD-PATH safety law). Backups are `<file>.bak.{stamp}`.
+async function atomicWriteWithBackup(filePath, content) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    const existing = await fs.readFile(filePath, 'utf8');
+    if (existing && existing.length > 0) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await fs.writeFile(`${filePath}.bak.${stamp}`, existing, 'utf8');
+      try {
+        const dir = path.dirname(filePath);
+        const base = path.basename(filePath) + '.bak.';
+        const baks = (await fs.readdir(dir)).filter(f => f.startsWith(base)).map(f => path.join(dir, f));
+        if (baks.length > 10) {
+          const stats = await Promise.all(baks.map(async f => ({ f, m: (await fs.stat(f)).mtimeMs })));
+          stats.sort((a, b) => b.m - a.m);
+          for (const { f } of stats.slice(10)) await fs.unlink(f).catch(() => {});
+        }
+      } catch { /* GC best-effort */ }
+    }
+  } catch { /* no existing file — first write */ }
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, content, 'utf8');
+  await fs.rename(tmp, filePath);
+}
 
 async function handleRequest(req, res) {
   applySecurityHeaders(req, res);
@@ -10382,6 +10906,175 @@ GMAIL_REDIRECT_URI=${redirect}</pre>
       else if (code === 'ENOSPC') msg = 'no disk space to write profile';
       sendJsonError(res, 500, msg, err);
     }
+    return;
+  }
+
+  // ── API: Settings — BYO API keys (status / save) ──
+  if (pathname === '/api/settings/keys' && req.method === 'GET') {
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, ...keyStatus(CONFIG_DIR) }));
+    } catch (err) { sendJsonError(res, 500, 'could not read key settings', err); }
+    return;
+  }
+  if (pathname === '/api/settings/keys' && req.method === 'POST') {
+    try {
+      const payload = await readJsonBody(req);
+      const errors = validateKeysPayload(payload);
+      if (errors.length) return sendJsonError(res, 400, errors[0]);
+      const status = applyKeysPayload(CONFIG_DIR, payload);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...status }));
+    } catch (err) { sendJsonError(res, 400, 'could not save keys', err); }
+    return;
+  }
+
+  // ── API: Settings — Profile (read managed surface / NON-DESTRUCTIVE save) ──
+  if (pathname === '/api/profile/full' && req.method === 'GET') {
+    try {
+      let text = '';
+      try { text = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8'); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, exists: !!text, fields: readProfileFields(text) }));
+    } catch (err) { sendJsonError(res, 500, 'could not read profile', err); }
+    return;
+  }
+  if (pathname === '/api/profile/update' && req.method === 'POST') {
+    try {
+      const payload = await readJsonBody(req);
+      const errors = validateProfileEdits(payload);
+      if (errors.length) return sendJsonError(res, 400, errors[0]);
+      const profilePath = path.join(CONFIG_DIR, 'profile.yml');
+      let text = '';
+      try { text = await fs.readFile(profilePath, 'utf8'); } catch {}
+      if (!text) return sendJsonError(res, 400, 'no profile.yml yet — run the onboarding wizard (⊕ Profile) first');
+      const updated = applyProfileEdits(text, payload);
+      await atomicWriteWithBackup(profilePath, updated);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, fields: readProfileFields(updated) }));
+    } catch (err) { sendJsonError(res, 500, 'could not save profile', err); }
+    return;
+  }
+
+  // ── API: Settings — Diagnostics (setup + live API probe + profile gaps) ──
+  if (pathname === '/api/diagnostics' && req.method === 'GET') {
+    try {
+      const setup = (await runDoctorChecks()).map(r => ({
+        label: r.label,
+        status: r.warn ? 'warn' : (r.pass ? 'pass' : 'fail'),
+        fix: Array.isArray(r.fix) ? r.fix.join(' ') : (r.fix || ''),
+      }));
+      let text = '';
+      try { text = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8'); } catch {}
+      const profile = analyzeProfile(readProfileFields(text));
+      // Live, token-free probe of each CONFIGURED provider (reads its real
+      // response so we can tell the user exactly what's wrong with their key).
+      const api = await Promise.all(PROVIDERS.map(async p => {
+        const key = process.env[p.env] || '';
+        if (!key) return { id: p.id, label: p.label, status: 'unset', message: 'No key set.' };
+        const baseUrl = p.id === 'nim' ? process.env.KIMI_BASE_URL : undefined;
+        const r = await probeProvider(p.id, key, { baseUrl, timeoutMs: 6000 });
+        return { id: p.id, label: p.label, ...r };
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, setup, profile, api }));
+    } catch (err) { sendJsonError(res, 500, 'diagnostics failed', err); }
+    return;
+  }
+
+  // ── API: Settings — Export diagnostics (sanitized bundle for support) ──
+  if (pathname === '/api/diagnostics/export' && req.method === 'GET') {
+    try {
+      const setup = (await runDoctorChecks()).map(r =>
+        `${r.warn ? 'WARN' : (r.pass ? 'PASS' : 'FAIL')}  ${r.label}` +
+        ((!r.pass || r.warn) && r.fix ? `  → ${Array.isArray(r.fix) ? r.fix.join(' ') : r.fix}` : ''));
+      let text = '';
+      try { text = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8'); } catch {}
+      const profile = analyzeProfile(readProfileFields(text));
+      let version = ''; try { version = (await fs.readFile(path.join(ROOT, 'VERSION'), 'utf8')).trim(); } catch {}
+      let errlog = 'none'; try { errlog = (await fs.readFile(path.join(DATA_DIR, 'errors.log'), 'utf8')).split('\n').filter(Boolean).slice(-40).join('\n') || 'none'; } catch {}
+      // Keys: configured/source ONLY — never values. Profile: gap STRUCTURE
+      // only — never the user's actual answers. No secrets, no PII values.
+      const keys = keyStatus(CONFIG_DIR).providers.map(p => `  ${p.label}: ${p.configured ? `set (${p.source})` : 'not set'}`).join('\n');
+      const bundle = [
+        'HIRELOOM DIAGNOSTICS EXPORT',
+        `generated:  ${new Date().toISOString()}`,
+        `version:    ${version || 'unknown'}`,
+        `node:       ${process.version}`,
+        `platform:   ${process.platform} ${process.arch}`,
+        '',
+        '--- SETUP CHECKS ---',
+        ...setup,
+        '',
+        '--- API KEYS (configured + source only; values never exported) ---',
+        keys,
+        '',
+        '--- PROFILE COMPLETENESS (structure only; your answers are NOT exported) ---',
+        `filled ${profile.completeness.filled}/${profile.completeness.total} (${profile.completeness.pct}%)`,
+        `required gaps: ${profile.gaps.map(g => g.id).join(', ') || 'none'}`,
+        `optional gaps: ${profile.optional.map(g => g.id).join(', ') || 'none'}`,
+        `custom answers: ${profile.customAnswerCount} · free-text notes: ${profile.hasFreeText ? 'yes' : 'no'}`,
+        '',
+        '--- RECENT ERRORS (last 40 log lines) ---',
+        errlog,
+        '',
+      ].join('\n');
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="hireloom-diagnostics.txt"',
+        'Cache-Control': 'no-store',
+      });
+      res.end(bundle);
+    } catch (err) { sendJsonError(res, 500, 'diagnostics export failed', err); }
+    return;
+  }
+
+  // ── API: Settings — CV (read / save cv.md) ──
+  if (pathname === '/api/cv' && req.method === 'GET') {
+    try {
+      let content = '';
+      try { content = await fs.readFile(path.join(ROOT, 'cv.md'), 'utf8'); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, exists: !!content, content, bytes: Buffer.byteLength(content) }));
+    } catch (err) { sendJsonError(res, 500, 'could not read cv.md', err); }
+    return;
+  }
+  if (pathname === '/api/cv' && req.method === 'POST') {
+    try {
+      const { content } = await readJsonBody(req);
+      if (typeof content !== 'string') return sendJsonError(res, 400, 'content required');
+      if (content.length > 400000) return sendJsonError(res, 400, 'cv.md too large (>400KB)');
+      await atomicWriteWithBackup(path.join(ROOT, 'cv.md'), content);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, bytes: Buffer.byteLength(content) }));
+    } catch (err) { sendJsonError(res, 500, 'could not save cv.md', err); }
+    return;
+  }
+
+  // ── API: Settings — Scan & Portals (read / surgical item-level edit) ──
+  if (pathname === '/api/portals' && req.method === 'GET') {
+    try {
+      let text = '';
+      try { text = await fs.readFile(path.join(ROOT, 'portals.yml'), 'utf8'); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, exists: !!text, ...readPortals(text) }));
+    } catch (err) { sendJsonError(res, 500, 'could not read portals.yml', err); }
+    return;
+  }
+  if (pathname === '/api/portals' && req.method === 'POST') {
+    try {
+      const payload = await readJsonBody(req);
+      const errors = validatePortalsAction(payload);
+      if (errors.length) return sendJsonError(res, 400, errors[0]);
+      const portalsPath = path.join(ROOT, 'portals.yml');
+      let text = '';
+      try { text = await fs.readFile(portalsPath, 'utf8'); } catch {}
+      if (!text) return sendJsonError(res, 400, 'no portals.yml yet — copy templates/portals.example.yml first');
+      const updated = applyPortalsAction(text, payload);
+      await atomicWriteWithBackup(portalsPath, updated);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, ...readPortals(updated) }));
+    } catch (err) { sendJsonError(res, 500, 'could not update portals.yml', err); }
     return;
   }
 

@@ -7,7 +7,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { load } from 'js-yaml';
 import { checkProfileDoc, SECOND_BRAIN_PREREQS } from './lib/profile-check.mjs';
 
@@ -204,11 +204,11 @@ function checkAutoDir(name) {
   }
 }
 
-async function main() {
-  console.log('\nHireloom doctor');
-  console.log('================\n');
-
-  const checks = [
+// Run every setup check and return the structured results. Shared by the CLI
+// (below) and the dashboard's "Run diagnostics" button so both stay in sync.
+// Each result: { pass, warn?, label, fix? }.
+export async function runDoctorChecks() {
+  return [
     checkNodeVersion(),
     checkDependencies(),
     await checkPlaywright(),
@@ -222,6 +222,13 @@ async function main() {
     checkAutoDir('reports'),
     checkSecondBrain(),
   ];
+}
+
+async function main() {
+  console.log('\nHireloom doctor');
+  console.log('================\n');
+
+  const checks = await runDoctorChecks();
 
   let failures = 0;
   let warnings = 0;
@@ -261,7 +268,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('doctor.mjs failed:', err.message);
-  process.exit(1);
-});
+// Only run as a CLI — not when imported by the dashboard for runDoctorChecks().
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main().catch((err) => {
+    console.error('doctor.mjs failed:', err.message);
+    process.exit(1);
+  });
+}
