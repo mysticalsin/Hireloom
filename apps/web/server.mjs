@@ -5850,7 +5850,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     if (searchQuery) {
       // Multi-term AND across every visible field — "kong rejected" or
       // "manager 4.2" find what a single-field substring search can't.
-      const terms = searchQuery.split(/\s+/).filter(Boolean);
+      const terms = searchQuery.split(/\\s+/).filter(Boolean);
       filtered = filtered.filter(a => {
         const hay = ((a.company||'') + ' ' + (a.role||'') + ' ' + (a.notes||'') + ' ' +
           (a.status||'') + ' ' + (a.num||'') + ' ' + (a.date||'') + ' ' +
@@ -6006,7 +6006,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     // The whole row is a doorway to the all-in-one role page. Tracker rows
     // pass a bare number; pool rows pass their full key ('p18').
     const s = String(numOrKey);
-    goRole(/^[tp]\d/.test(s) ? s : 't' + s);
+    goRole(/^[tp]\\d/.test(s) ? s : 't' + s);
   }
 
   /* ── Gmail ── */
