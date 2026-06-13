@@ -180,10 +180,20 @@ export function buildRoleIndex({ trackerContent = '', pool = null, links = null 
 
   // Manual merge links (user said "these two rows are the same application").
   // The absorbed role leaves the roles list but its key keeps resolving.
+  // Field rules (user-specified): FILE PATHS from the incoming role OVERWRITE
+  // the target's when present (one Show-in-Finder path, newest wins); every
+  // other field defers to the target when set — blanks fill from the
+  // absorbed role. Conflicting values stay visible via .absorbed.
   for (const m of (links?.merges || [])) {
     const fromRole = byKey[m.from], intoRole = byKey[m.into];
     if (!fromRole || !intoRole || fromRole === intoRole) continue;
     intoRole.absorbed = [...(intoRole.absorbed || []), fromRole];
+    for (const k of ['cvPath', 'coverPath', 'folder']) {
+      if (fromRole[k] != null) intoRole[k] = fromRole[k];
+    }
+    for (const k of ['url', 'rank', 'ats', 'loc', 'archetype', 'tier', 'reportLink', 'score', 'appliedOn']) {
+      if (intoRole[k] == null && fromRole[k] != null) intoRole[k] = fromRole[k];
+    }
     const i = roles.indexOf(fromRole);
     if (i !== -1) roles.splice(i, 1);
     for (const k of Object.keys(byKey)) if (byKey[k] === fromRole) byKey[k] = intoRole;

@@ -5222,6 +5222,16 @@ const HTML = /* html */ `<!DOCTYPE html>
     <section class="hb-view" id="view-role" aria-label="Role detail">
       <div id="role-content"><span class="spinner"></span></div>
     </section>
+
+    <!-- Attach picker (#attach/<key> or #attach/sig:<groupKey>) -->
+    <section class="hb-view" id="view-attach" aria-label="Attach to existing role">
+      <div id="attach-content"><span class="spinner"></span></div>
+    </section>
+
+    <!-- Create Role form (#create-role) -->
+    <section class="hb-view" id="view-create" aria-label="Create role">
+      <div id="create-content"><span class="spinner"></span></div>
+    </section>
   </main>
 </div>
 
@@ -7573,14 +7583,21 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   function hbRoute() {
     const h = location.hash || '';
-    const mRole = h.match(/^#role\\/(.+)$/);
     document.querySelectorAll('.hb-view').forEach(v => v.classList.remove('is-active'));
-    if (mRole) {
-      hbActiveTab = 'role';
-      const view = document.getElementById('view-role');
-      if (view) { view.classList.add('is-active'); hbRenderRole(decodeURIComponent(mRole[1])); }
-      hbRenderTabs();
-      return;
+    const special = [
+      [/^#role\\/(.+)$/, 'role', (m) => hbRenderRole(decodeURIComponent(m[1]))],
+      [/^#attach\\/(.+)$/, 'attach', (m) => hbRenderAttach(decodeURIComponent(m[1]))],
+      [/^#create-role(?:\\?(.*))?$/, 'create', (m) => hbRenderCreate(m[1] || '')],
+    ];
+    for (const [re, id, render] of special) {
+      const m = h.match(re);
+      if (m) {
+        hbActiveTab = id;
+        const view = document.getElementById('view-' + id);
+        if (view) { view.classList.add('is-active'); render(m); }
+        hbRenderTabs();
+        return;
+      }
     }
     const mTab = h.match(/^#tab\\/([a-z-]+)$/);
     hbActiveTab = (mTab && HB_TABS.some(t => t.id === mTab[1])) ? mTab[1] : 'overview';
@@ -7738,12 +7755,18 @@ const HTML = /* html */ `<!DOCTYPE html>
       (mode === 'radar' || mode === 'inbox'
         ? (gmailReplyAddr(latest.from) ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" title="Pre-filled Gmail draft — nothing sends until you hit Send" href="' + esc(gmailComposeUrl(composeSig)) + '">↩ Respond</a>' : '')
         : '');
+    const looseGroup = g.num == null && !g.roleKey;
     const classify = mode === 'review'
       ? '<div class="hb-classify">' +
         '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'interview-scheduled\\')">📅 Interview scheduled</button>' +
         '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'follow-up\\')">⚡ Requires follow-up</button>' +
         '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'rejection\\')">✗ Rejection</button>' +
         '<button class="hb-btn" onclick="hbClassify(\\'' + esc(g.key) + '\\',\\'confirmation\\')">✓ Confirmation</button>' +
+        (looseGroup
+          ? '</div><div class="hb-classify"><span class="hb-num" style="align-self:center">Role not in tracker:</span>' +
+            '<button class="hb-btn" onclick="hbCreateFromGroup(\\'' + esc(g.key) + '\\')">➕ Create new role</button>' +
+            '<button class="hb-btn" onclick="goAttach(\\'sig:' + esc(g.key) + '\\')">🔗 Attach to existing role</button>'
+          : '') +
         '</div>'
       : '';
     const dismiss = mode === 'inbox'
@@ -8127,6 +8150,161 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   function goAttach(key) { location.hash = '#attach/' + encodeURIComponent(key); }
+
+  function hbCreateFromGroup(key) {
+    const g = hbFindGroup(key);
+    if (!g) { showToast('Group not found — refresh and retry', 'error'); return; }
+    const q = 'company=' + encodeURIComponent(g.company || '') +
+      '&role=' + encodeURIComponent((g.roles && g.roles[0]) || '') +
+      '&ids=' + encodeURIComponent(g.emails.map(e => e.id).filter(Boolean).join(',')) +
+      '&groupKey=' + encodeURIComponent(key);
+    location.hash = '#create-role?' + q;
+  }
+
+  /* ── Attach picker (#attach/<key> or #attach/sig:<groupKey>) ─────────── */
+  var hbAllRoles = null;
+  async function hbLoadRoles() {
+    if (hbAllRoles) return hbAllRoles;
+    const res = await fetch('/api/roles');
+    hbAllRoles = (await res.json()).roles || [];
+    return hbAllRoles;
+  }
+
+  async function hbRenderAttach(param) {
+    const host = document.getElementById('attach-content');
+    if (!host) return;
+    host.innerHTML = '<span class="spinner"></span>';
+    const sigMode = param.indexOf('sig:') === 0;
+    const fromKey = sigMode ? null : param;
+    const groupKey = sigMode ? param.slice(4) : null;
+    let fromLabel = '';
+    if (sigMode) {
+      const g = hbFindGroup(groupKey);
+      if (!g) { host.innerHTML = '<div class="hb-empty">That email group is gone — refresh and retry.</div>'; return; }
+      fromLabel = '“' + esc(g.company) + (g.roles && g.roles[0] ? ' — ' + esc(g.roles[0]) : '') + '” (' + g.emails.length + ' email' + (g.emails.length === 1 ? '' : 's') + ')';
+    } else {
+      fromLabel = esc(param);
+      try {
+        const r = await (await fetch('/api/role?key=' + encodeURIComponent(fromKey))).json();
+        if (r && r.company) fromLabel = '“' + esc(r.company) + ' — ' + esc(r.role || '') + '” (' + esc(fromKey) + ')';
+      } catch {}
+    }
+    let roles;
+    try { roles = await hbLoadRoles(); } catch (e) { host.innerHTML = '<div class="hb-empty">Failed to load roles: ' + esc(e.message) + '</div>'; return; }
+    host.innerHTML =
+      '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px"><button class="hb-btn hb-btn-ghost" onclick="history.back()">← back</button>' +
+      '<span class="hb-greet" style="font-size:18px">Attach ' + (sigMode ? 'these emails' : 'this role') + ' to…</span></div>' +
+      '<div class="hb-meta">Attaching ' + fromLabel + '. Pick the existing record it belongs to — one confirm, then everything falls under the target' + (sigMode ? '.' : '; file paths from the incoming role overwrite, blanks keep the target\\'s values, conflicts stay visible on the role page.') + '</div>' +
+      '<div class="hb-ask" style="border-radius:10px"><input id="attach-search" placeholder="Search company, role, status, #…" oninput="hbAttachFilter()"></div>' +
+      '<div id="attach-list"></div>';
+    window._attachCtx = { sigMode, fromKey, groupKey };
+    hbAttachFilter();
+  }
+
+  function hbAttachFilter() {
+    const list = document.getElementById('attach-list');
+    if (!list || !hbAllRoles) return;
+    const q = (document.getElementById('attach-search')?.value || '').toLowerCase().trim();
+    const terms = q.split(/\\s+/).filter(Boolean);
+    const ctx = window._attachCtx || {};
+    let rows = hbAllRoles.filter(r => r.key !== ctx.fromKey);
+    if (terms.length) rows = rows.filter(r => {
+      const hay = ((r.company||'') + ' ' + (r.role||'') + ' ' + (r.status||'') + ' ' + (r.num||'') + ' ' + (r.notes||'')).toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
+    list.innerHTML = rows.slice(0, 60).map(r =>
+      '<div class="hb-row hb-clickable" onclick="hbAttachPick(\\'' + esc(r.key) + '\\')">' +
+      '<span class="hb-num" style="min-width:42px">' + (r.num != null ? '#' + r.num : 'pool') + '</span>' +
+      '<span class="hb-co">' + esc(r.company) + '</span><span>' + esc(r.role) + '</span>' +
+      '<span class="hb-chip">' + esc(r.status || '') + '</span>' +
+      '<span class="hb-num" style="margin-left:auto">' + esc(r.date || '') + '</span></div>'
+    ).join('') + (rows.length > 60 ? '<div class="hb-num" style="padding:6px">' + (rows.length - 60) + ' more — refine the search</div>' : '') ||
+      '<div class="hb-empty">No roles match.</div>';
+  }
+
+  async function hbAttachPick(targetKey) {
+    const ctx = window._attachCtx || {};
+    const target = (hbAllRoles || []).find(r => r.key === targetKey);
+    const label = target ? target.company + ' — ' + target.role : targetKey;
+    if (!confirm('Attach to “' + label + '”? Everything from the source will fall under this record.')) return;
+    try {
+      if (ctx.sigMode) {
+        const g = hbFindGroup(ctx.groupKey);
+        if (!g) throw new Error('email group vanished');
+        const res = await fetch('/api/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: g.emails.map(e => e.id).filter(Boolean), key: targetKey }) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'assign failed');
+        showToast('Emails attached to #' + data.num, 'success');
+        await refresh(); await refreshBrain();
+        location.hash = '#role/t' + data.num;
+      } else {
+        const res = await fetch('/api/attach', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: ctx.fromKey, into: targetKey }) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'attach failed');
+        hbAllRoles = null; // index changed — reload next time
+        showToast('Attached — duplicates collapsed' + (data.moved ? ', ' + data.moved + ' email(s) moved' : ''), 'success');
+        await refresh(); await refreshBrain();
+        location.hash = '#role/' + encodeURIComponent(targetKey);
+      }
+    } catch (e) { showToast('Attach failed: ' + e.message, 'error'); }
+  }
+
+  /* ── Create Role form (#create-role?company=…&role=…&ids=a,b) ────────── */
+  function hbRenderCreate(query) {
+    const host = document.getElementById('create-content');
+    if (!host) return;
+    const params = {};
+    (query || '').split('&').forEach(kv => {
+      const i = kv.indexOf('=');
+      if (i > 0) params[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+    const val = (v) => esc(v || '');
+    const field = (id, label, placeholder, value, type) =>
+      '<div style="margin-bottom:10px"><label class="hb-kpi-l" for="' + id + '" style="display:block;margin-bottom:3px">' + label + '</label>' +
+      '<input id="' + id + '" type="' + (type || 'text') + '" value="' + val(value) + '" placeholder="' + (placeholder || '') + '" aria-label="' + label + '"' +
+      ' style="width:100%;max-width:480px;background:var(--hb-card);border:1px solid var(--hb-border);border-radius:8px;color:var(--hb-text);padding:8px 11px;font-size:13px"></div>';
+    host.innerHTML =
+      '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px"><button class="hb-btn hb-btn-ghost" onclick="history.back()">← back</button>' +
+      '<span class="hb-greet" style="font-size:18px">Create a role</span></div>' +
+      '<div class="hb-meta">Mints a tracker row (same numbering + dedup guarantees as the batch path). Tip: if the info lives in an email or a posting URL, paste what you have — or just tell the agent in chat and it will fill everything in for you.</div>' +
+      field('cr-company', 'Company *', 'Acme Corp', params.company) +
+      field('cr-role', 'Role title *', 'Senior Project Manager', params.role) +
+      '<div style="margin-bottom:10px"><label class="hb-kpi-l" for="cr-status" style="display:block;margin-bottom:3px">Status</label>' +
+      '<select id="cr-status" aria-label="Status" style="background:var(--hb-card);border:1px solid var(--hb-border);border-radius:8px;color:var(--hb-text);padding:8px 11px;font-size:13px">' +
+      ['Applied', 'Evaluated', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'].map(s => '<option' + (params.status === s ? ' selected' : '') + '>' + s + '</option>').join('') +
+      '</select></div>' +
+      field('cr-date', 'Date applied', new Date().toISOString().slice(0, 10), params.date, 'date') +
+      field('cr-url', 'Posting URL', 'https://…', params.url, 'url') +
+      field('cr-interview', 'Interview date + time (if scheduled)', 'YYYY-MM-DD HH:MM', params.interviewAt) +
+      field('cr-notes', 'Notes', 'anything worth remembering', params.notes) +
+      (params.ids ? '<div class="hb-num" style="margin-bottom:8px">✉ ' + params.ids.split(',').length + ' email(s) will be attached to the new row.</div>' : '') +
+      '<div class="hb-mail-actions">' +
+      '<button class="hb-btn hb-btn-respond" onclick="hbCreateSubmit(\\'' + val(params.ids) + '\\')">Create role</button>' +
+      '<button class="hb-btn hb-btn-ghost" onclick="goAttach(\\'sig:\\' + (window._createGroupKey||\\'\\'))" ' + (params.ids ? '' : 'style="display:none"') + '>…or attach these emails to an existing role</button>' +
+      '</div>';
+    window._createGroupKey = params.groupKey || '';
+  }
+
+  async function hbCreateSubmit(idsCsv) {
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    const company = v('cr-company'), role = v('cr-role');
+    if (!company || !role) { showToast('Company and role are required', 'error'); return; }
+    let interviewAt = v('cr-interview').replace(' ', 'T');
+    if (interviewAt && !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(interviewAt)) interviewAt = null;
+    try {
+      const res = await fetch('/api/role/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company, role, status: v('cr-status'), date: v('cr-date'), url: v('cr-url'),
+          notes: v('cr-notes'), interviewAt, ids: idsCsv ? idsCsv.split(',').filter(Boolean) : [] }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'create failed');
+      hbAllRoles = null;
+      showToast('Created #' + data.num, 'success');
+      await refresh(); await refreshBrain();
+      location.hash = '#role/t' + data.num;
+    } catch (e) { showToast('Create failed: ' + e.message, 'error'); }
+  }
 
   // Boot
   refresh().then(scheduleRefresh);
@@ -8743,6 +8921,125 @@ async function handleRequest(req, res) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch (err) { sendJsonError(res, 400, 'reveal failed', err); }
+    return;
+  }
+
+  // ── API: All roles (the attach picker + All Roles surfaces) ──
+  if (pathname === '/api/roles') {
+    try {
+      const index = await getRoleIndex();
+      const hist = loadHistory(HISTORY_FILE);
+      const roles = (index.roles || []).map(r => ({
+        key: r.key, num: r.num ?? null, company: r.company, role: r.role,
+        status: r.status, date: r.date || r.appliedOn || null,
+        lastEdited: r.num != null ? (() => { const e = hist.filter(h => String(h.num) === String(r.num)).pop(); return e ? String(e.ts).slice(0, 10) : (r.date || null); })() : (r.appliedOn || null),
+        notes: (r.notes || r.note || '').slice(0, 160),
+        source: r.source, rank: r.rank ?? null,
+      }));
+      // Tracker rows first (the usual attach targets), then pool, newest first.
+      roles.sort((a, b) => ((a.num != null ? 0 : 1) - (b.num != null ? 0 : 1)) || String(b.date || '').localeCompare(String(a.date || '')));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ count: roles.length, roles }));
+    } catch (err) { sendJsonError(res, 500, 'roles failed', err); }
+    return;
+  }
+
+  // ── API: Attach (merge) one role into another ──
+  // Writes data/role-links.json; the role index applies the user's merge
+  // rules (incoming file paths overwrite, blanks defer, conflicts stay
+  // visible via the absorbed list on the role page).
+  if (pathname === '/api/attach' && req.method === 'POST') {
+    try {
+      const { from, into } = await readJsonBody(req);
+      if (!/^[tp]\d{1,5}$/.test(String(from || '')) || !/^[tp]\d{1,5}$/.test(String(into || ''))) {
+        return sendJsonError(res, 400, 'invalid keys');
+      }
+      const index = await getRoleIndex(true);
+      const f = index.byKey[from], t = index.byKey[into];
+      if (!f || !t) return sendJsonError(res, 404, 'role not found');
+      if (f === t) {
+        // Already one record — either previously attached or pool-joined.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, already: true }));
+        return;
+      }
+      let links = { merges: [] };
+      try { links = JSON.parse(await fs.readFile(LINKS_FILE, 'utf8')); } catch {}
+      if (!Array.isArray(links.merges)) links.merges = [];
+      if (links.merges.some(m => m.from === from && m.into === into)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, already: true }));
+        return;
+      }
+      links.merges.push({ from, into, at: new Date().toISOString().slice(0, 16) });
+      await fs.writeFile(LINKS_FILE, JSON.stringify(links, null, 2), 'utf8');
+      invalidateRoleIndex();
+      // Signals carried by the absorbed role follow it.
+      let moved = 0;
+      const intoNum = t.num != null ? String(t.num) : null;
+      for (const s of (gmailCache.signals || [])) {
+        if ((s.poolKey && s.poolKey === from) || (f.num != null && String(s.num) === String(f.num))) {
+          if (intoNum) s.num = intoNum;
+          moved++;
+        }
+      }
+      if (moved) await saveGmailCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, into, moved }));
+    } catch (err) { sendJsonError(res, 400, 'attach failed', err); }
+    return;
+  }
+
+  // ── API: Create a tracker row by hand (the Create Role form) ──
+  if (pathname === '/api/role/create' && req.method === 'POST') {
+    try {
+      const { company, role, status, date, url, notes, ids, poolKey, interviewAt } = await readJsonBody(req);
+      const noteBits = [];
+      if (notes) noteBits.push(String(notes).slice(0, 300));
+      if (url) noteBits.push('URL: ' + String(url).slice(0, 200));
+      const num = await createTrackerRowFor({
+        poolKey: poolKey || null, company, role,
+        date: date && /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? date : null,
+        note: noteBits.join(' · ') || null,
+      });
+      const allowed = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+      if (status && allowed.includes(String(status)) && status !== 'Applied') {
+        await updateApplicationStatus(num, String(status), 'create-form');
+      }
+      if (interviewAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(interviewAt))) {
+        try { setInterviewDate(HISTORY_FILE, { ts: new Date().toISOString().slice(0, 16), num, company: company || '', role: role || '', neu: String(interviewAt).slice(0, 16), source: 'create-form' }); } catch {}
+      }
+      if (Array.isArray(ids) && ids.length && ids.length <= 100) {
+        for (const s of (gmailCache.signals || [])) {
+          if (ids.includes(s.id)) { s.num = num; s.unmatched = false; }
+        }
+        await saveGmailCache();
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, num }));
+    } catch (err) { sendJsonError(res, 400, 'create failed', err); }
+    return;
+  }
+
+  // ── API: Assign loose emails to a role (the review-desk attach path) ──
+  if (pathname === '/api/assign' && req.method === 'POST') {
+    try {
+      const { ids, key } = await readJsonBody(req);
+      if (!Array.isArray(ids) || !ids.length || ids.length > 100) return sendJsonError(res, 400, 'ids required');
+      if (!/^[tp]\d{1,5}$/.test(String(key || ''))) return sendJsonError(res, 400, 'invalid key');
+      const index = await getRoleIndex();
+      const role = index.byKey ? index.byKey[key] : null;
+      if (!role) return sendJsonError(res, 404, 'role not found');
+      // Pool-only target: the assignment is what makes it real — mint the row.
+      const num = role.num != null ? String(role.num) : await createTrackerRowFor({ poolKey: role.key });
+      let n = 0;
+      for (const s of (gmailCache.signals || [])) {
+        if (ids.includes(s.id)) { s.num = num; s.unmatched = false; n++; }
+      }
+      await saveGmailCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, num, assigned: n }));
+    } catch (err) { sendJsonError(res, 400, 'assign failed', err); }
     return;
   }
 

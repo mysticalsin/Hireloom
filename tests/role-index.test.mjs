@@ -368,3 +368,25 @@ test('two-pass join: exact-title pool twin wins over an earlier fuzzy sibling (K
   });
   assert.equal(matched.num, 120, 'email resolves to the tracker row, not the pool double');
 });
+
+test('attach merge: incoming file paths overwrite, blanks defer to target (the user merge rules)', () => {
+  const idx = buildRoleIndex({
+    trackerContent: [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 5 | 2026-05-20 | Acme | PM | 4.0/5 | Applied | ✅ | [005](reports/005-acme.md) | target |',
+    ].join('\n'),
+    pool: { rows: [
+      { rank: 9, n: 33, title: 'Project Mgr', company: 'Acme Corp Industries', url: 'https://pool-url', ats: 'lever',
+        cv: 'output/p33/cv.pdf', cover: 'output/p33/cover.pdf', folder: 'output/p33', status: 'applied', appliedDate: '2026-05-21' },
+    ] },
+    links: { merges: [{ from: 'p33', into: 't5', at: '2026-06-12' }] },
+  });
+  const r = idx.byKey['t5'];
+  assert.equal(idx.byKey['p33'], r, 'absorbed key aliases to target');
+  assert.equal(r.cvPath, 'output/p33/cv.pdf', 'incoming file path overwrites');
+  assert.equal(r.url, 'https://pool-url', 'blank target field fills from absorbed');
+  assert.equal(r.score, '4.0/5', 'set target field is kept');
+  assert.equal(r.absorbed.length, 1);
+  assert.ok(!idx.roles.some(x => x.key === 'p33'), 'absorbed role leaves the list');
+});
