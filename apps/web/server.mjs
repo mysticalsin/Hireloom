@@ -29,8 +29,9 @@ import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
-import { buildRoleIndex, matchEmailToRole } from './lib/role-index.mjs';
-import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview } from './lib/email-groups.mjs';
+import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar } from './lib/role-index.mjs';
+import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview, signalPendingReview, NO_REVIEW_STATUSES } from './lib/email-groups.mjs';
+import { autoFitScore, explainFit } from './lib/fit-score.mjs';
 import { appendHistory, loadHistory, latestStatusDate, interviewDateFor, setInterviewDate, extractInterviewDateFromText } from './lib/status-history.mjs';
 import { makeErrorLogger } from './lib/error-log.mjs';
 import { createResolver, extractFieldsInPage } from '../../engine/apply/autoapply-core.mjs';
@@ -372,6 +373,85 @@ async function getCompForReport(reportLink, company) {
   }
 }
 
+// ── Local JD + lane resolution (role pages) ──────────────────────────────────
+
+// Roles whose Gmail signals still need the user's eyes. Per the user's rule
+// (2026-06-13) such a role shows "pending your review" everywhere INSTEAD of
+// a real status — nothing is written until he classifies.
+function pendingReviewKeys() {
+  const keys = new Set();
+  for (const s of (gmailCache.signals || [])) {
+    if (!signalPendingReview(s)) continue;
+    if (s.num != null && s.num !== '') keys.add('t' + s.num);
+    if (s.poolKey) keys.add(s.poolKey);
+  }
+  return keys;
+}
+
+// Indeed lane (the OLD 50-role pipeline): tracker rows whose report column
+// says "Indeed" keep their real posting link + JD + salary string in
+// output/indeed-apply-order.json + output/indeed-jds/{n}.json.
+let indeedLaneCache = null;
+async function loadIndeedLane() {
+  if (indeedLaneCache) return indeedLaneCache;
+  try {
+    const j = JSON.parse(await fs.readFile(path.join(ROOT, 'output', 'indeed-apply-order.json'), 'utf8'));
+    indeedLaneCache = j.rows || [];
+  } catch { indeedLaneCache = []; }
+  return indeedLaneCache;
+}
+async function findIndeedLaneRow(company, role) {
+  if (!company) return null;
+  const rows = (await loadIndeedLane()).filter(r => companiesMatch(r.company, company));
+  // Title first; a company-only fallback is safe only when unambiguous.
+  return rows.find(r => titlesSimilar(r.title, role)) || (rows.length === 1 ? rows[0] : null);
+}
+
+// Every JD we applied to is saved locally — pool lane keyed by RANK
+// (output/pool-jds/047.json = rank 47), Indeed lane keyed by row n. The
+// company on the file is verified before serving so a re-rank can never
+// show the wrong JD. Returns { text, source, url, salary } or null.
+async function readJdForRole(role) {
+  const rank = role.rank ?? (role.pool && role.pool.rank);
+  if (rank != null) {
+    try {
+      const name = String(rank).padStart(3, '0') + '.json';
+      const j = JSON.parse(await fs.readFile(path.join(ROOT, 'output', 'pool-jds', name), 'utf8'));
+      if (j.jd && companiesMatch(j.company, role.company)) {
+        return { text: j.jd, source: 'output/pool-jds/' + name, url: j.url || null, salary: null };
+      }
+    } catch { /* fall through to the Indeed lane */ }
+  }
+  const laneRow = await findIndeedLaneRow(role.company, role.role);
+  if (laneRow && laneRow.n != null) {
+    try {
+      const j = JSON.parse(await fs.readFile(path.join(ROOT, 'output', 'indeed-jds', String(laneRow.n) + '.json'), 'utf8'));
+      if (j.jd) return { text: j.jd, source: 'output/indeed-jds/' + laneRow.n + '.json', url: j.url || null, salary: j.salary || null };
+    } catch { /* no saved JD for this lane row */ }
+  }
+  return null;
+}
+
+// Comp suggestion of last resort: the user's own target from
+// config/profile.yml, clearly labeled — never passed off as listed comp.
+let profileCompCache;
+async function profileCompSuggestion() {
+  if (profileCompCache !== undefined) return profileCompCache;
+  try {
+    const text = await fs.readFile(path.join(CONFIG_DIR, 'profile.yml'), 'utf8');
+    const block = text.match(/^compensation:\s*\n([\s\S]*?)(?=\n\S|$)/m);
+    const get = (k) => {
+      const m = (block ? block[1] : '').match(new RegExp('^\\s*' + k + ':\\s*"?([^"\n]+?)"?\\s*$', 'm'));
+      return m ? m[1].trim() : null;
+    };
+    const target = get('target_range'), min = get('minimum'), cur = get('currency');
+    profileCompCache = target
+      ? { display: target + (cur ? ' ' + cur : '') + (min ? ' · floor ' + min : ''), kind: 'suggested ask (your profile target)' }
+      : null;
+  } catch { profileCompCache = null; }
+  return profileCompCache;
+}
+
 // "High-paying" qualifier: >= $200K base OR >= $300K TC/OTE OR premium company
 function isHighPaying(comp) {
   if (!comp) return false;
@@ -524,6 +604,30 @@ async function loadData() {
       if (a.status === 'interview') a.interviewAt = interviewDateFor(hist, a.num);
     }
   } catch { /* history optional */ }
+
+  // Score every row: the eval-report score where one exists, the pool/auto
+  // heuristic everywhere else ('4.2/5*' — the * marks an auto-fit estimate;
+  // user rule 2026-06-13: no scoreless rows). Pool rank rides along, and
+  // rows with unresolved review emails surface as "pending your review".
+  try {
+    const index = await getRoleIndex();
+    const reviewKeys = pendingReviewKeys();
+    for (const a of applications) {
+      const r = index.byKey ? index.byKey['t' + a.num] : null;
+      a.rank = r ? (r.rank ?? (r.pool && r.pool.rank) ?? null) : null;
+      if (!a.score || a.score === 'N/A' || a.score === '—') {
+        a.score = autoFitScore({
+          title: a.role,
+          tier: r ? (r.tier ?? (r.pool && r.pool.tier) ?? null) : null,
+          archetype: r ? (r.archetype || (r.pool && r.pool.archetype) || null) : null,
+          ats: r ? r.ats : null,
+        }).display;
+      }
+      a.pendingReview = !NO_REVIEW_STATUSES.has(String(a.status || '').toLowerCase()) && (
+        reviewKeys.has('t' + a.num) ||
+        Boolean(r && r.pool && reviewKeys.has(r.pool.key)));
+    }
+  } catch { /* scoring is display-sugar; the table works without it */ }
 
   // First name for the hero greeting (profile is user-layer; absent = no name).
   let firstName = null;
@@ -870,7 +974,16 @@ async function createTrackerRowFor({ poolKey, company, role, date, note } = {}) 
   const d = (pool && pool.appliedOn) || date || new Date().toISOString().slice(0, 10);
   const clean = (s) => String(s).replace(/[|\n]/g, '/');
   const noteText = clean(note || (pool ? 'Pool-applied (rank ' + pool.rank + '); tracker row created from email classification' : 'Tracker row created from email classification'));
-  const row = '| ' + num + ' | ' + d + ' | ' + clean(co) + ' | ' + clean(ro) + ' | N/A | Applied | ' + (pool && pool.cvPath ? '✅' : '❌') + ' | ' + (pool ? 'Pool' : 'Email') + ' | ' + noteText + ' |';
+  // Score on the spot (user rule 2026-06-13: new rows never land scoreless) —
+  // pool rows score from their tier/archetype, hand-created ones from the
+  // title heuristic. The trailing * marks an auto-fit, not an eval report.
+  const fit = autoFitScore({
+    title: ro,
+    tier: pool ? (pool.tier ?? (pool.pool && pool.pool.tier) ?? null) : null,
+    archetype: pool ? (pool.archetype || (pool.pool && pool.pool.archetype) || null) : null,
+    ats: pool ? pool.ats : null,
+  });
+  const row = '| ' + num + ' | ' + d + ' | ' + clean(co) + ' | ' + clean(ro) + ' | ' + fit.display + ' | Applied | ' + (pool && pool.cvPath ? '✅' : '❌') + ' | ' + (pool ? 'Pool' : 'Email') + ' | ' + noteText + ' |';
   const lines = content.split('\n');
   const sepIdx = lines.findIndex(l => /^\|[\s|:-]+\|$/.test(l.trim()) && l.includes('-'));
   if (sepIdx >= 0) lines.splice(sepIdx + 1, 0, row); else lines.push(row);
@@ -4949,6 +5062,12 @@ const HTML = /* html */ `<!DOCTYPE html>
     .hb-review-card { background: var(--hb-card); border: 1px solid var(--hb-border); border-radius: 10px; padding: 9px 12px; margin: 7px 0; }
     .hb-review-subj { font-weight: 650; margin: 5px 0 2px; font-size: 12.5px; }
     .hb-review-snip { color: var(--hb-muted); font-size: 11.5px; line-height: 1.45; }
+    /* All Roles — compact enough for a half-sized window (user ask 06-13):
+       tighter cells, no avatars, identity columns ellipsize instead of wrap. */
+    #view-roles table { font-size: 12px; }
+    #view-roles th, #view-roles td { padding: 5px 8px; white-space: nowrap; }
+    #view-roles .company-avatar { display: none; }
+    #view-roles .td-company, #view-roles .td-role { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
     .hb-mail-actions { display: flex; gap: 7px; margin-top: 7px; align-items: center; flex-wrap: wrap; }
     .hb-row .hb-mail-actions { margin-top: 0; margin-left: auto; }
     @keyframes hb-pulse { 0%,100% { box-shadow: 0 0 5px var(--orange-bg); } 50% { box-shadow: 0 0 13px var(--orange-bg); } }
@@ -5203,16 +5322,15 @@ const HTML = /* html */ `<!DOCTYPE html>
               <th onclick="sortBy('num')">#<span class="sort-arrow" id="sort-num"></span></th>
               <th onclick="sortBy('company')">Company<span class="sort-arrow" id="sort-company"></span></th>
               <th>Role</th>
-              <th onclick="sortBy('status')">Status<span class="sort-arrow" id="sort-status"></span></th>
-              <th onclick="sortBy('score')">Score<span class="sort-arrow" id="sort-score"></span></th>
-              <th onclick="sortBy('comp')" title="Sort by compensation (highest first)">Comp<span class="sort-arrow" id="sort-comp"></span></th>
               <th onclick="sortBy('date')">Date<span class="sort-arrow" id="sort-date">↓</span></th>
               <th>Age</th>
-              <th>Notes</th>
+              <th onclick="sortBy('score')" title="Eval-report score, or auto-fit estimate (marked *)">Score<span class="sort-arrow" id="sort-score"></span></th>
+              <th onclick="sortBy('comp')" title="Sort by compensation (highest first)">Comp<span class="sort-arrow" id="sort-comp"></span></th>
+              <th onclick="sortBy('status')">Status<span class="sort-arrow" id="sort-status"></span></th>
             </tr>
           </thead>
           <tbody id="apps-tbody">
-            <tr class="loading-row"><td colspan="9"><span class="spinner"></span></td></tr>
+            <tr class="loading-row"><td colspan="8"><span class="spinner"></span></td></tr>
           </tbody>
         </table>
       </div>
@@ -5587,7 +5705,7 @@ const HTML = /* html */ `<!DOCTYPE html>
         icon = '🚀'; title = 'Profile is set — ready to hunt';
         sub = 'Add a job URL to <code>data/pipeline.md</code> or run <code>/career-ops scan</code> to find offers.';
       }
-      tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">' + icon + '</div>' +
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><div class="empty-icon">' + icon + '</div>' +
         '<div class="empty-title">' + title + '</div>' +
         '<div class="empty-sub">' + sub + '</div></div></td></tr>';
       return;
@@ -5605,16 +5723,23 @@ const HTML = /* html */ `<!DOCTYPE html>
       const applyBtn = a.status === 'evaluated'
         ? '<button class="btn-row-apply" onclick="event.stopPropagation();applyOne(\\'' + esc(a.num) + '\\')" aria-label="Apply to ' + esc(a.company || a.num) + ' and mark applied" title="Open job URL and mark Applied">Apply →</button>'
         : '';
-      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.num) + '\\')" title="Open role page">' +
+      // Pending-review rows show NO real status until the user classifies
+      // (the review-desk rule) — the tracker's value rides in the tooltip.
+      const statusBadge = a.pendingReview
+        ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a)" onclick="event.stopPropagation();hbSwitchTab(\\'review\\')" title="Emails awaiting your classification (tracker: ' + esc(a.status||'—') + ') — click to open Needs Review">pending review</span>'
+        : '<span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>';
+      // Column order is the user's scan order: identity + dates first,
+      // verdict columns (score · comp · status) pinned at the right edge.
+      // Notes column dropped — it lives in the row tooltip + role page.
+      return '<tr' + cls + ' onclick="rowClick(event,\\'' + esc(a.num) + '\\')" title="' + esc(a.notes || 'Open role page') + '">' +
         '<td class="td-num">' + esc(a.num) + '</td>' +
         '<td><div class="td-company"><div class="company-avatar">' + avatarLetter(a.company) + '</div>' + reportBtn + esc(a.company) + '</div></td>' +
         '<td class="td-role">' + esc(a.role) + '</td>' +
-        '<td><span class="status-badge ' + statusClass(a.status) + '" onclick="event.stopPropagation();openDropdown(\\'' + esc(a.num) + '\\',this)" data-num="' + esc(a.num) + '">' + esc(a.status||'—') + '</span>' + fuTag + applyBtn + '</td>' +
-        '<td>' + scorePill(a.score) + '</td>' +
-        compCell(a) +
         '<td class="td-date">' + esc(a.date||'—') + '</td>' +
         '<td>' + ageLabel(a.age, a.needsFollowUp) + '</td>' +
-        '<td class="td-notes">' + esc(a.notes) + '</td>' +
+        '<td>' + scorePill(a.score) + '</td>' +
+        compCell(a) +
+        '<td>' + statusBadge + fuTag + applyBtn + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -7711,7 +7836,16 @@ const HTML = /* html */ `<!DOCTYPE html>
   }
 
   /* ── Group cards (Inbox / Review / Radar) ───────────────────────────── */
-  function hbStatusContext(g) {
+  function hbStatusContext(g, mode) {
+    // Review-desk rule (user, 2026-06-13): a role under review has NO status
+    // until HE classifies — show "pending your review"; the tracker's value
+    // is context only, never presented as the status.
+    if (mode === 'review') {
+      let txt = 'status: <b style="color:var(--orange)">pending your review</b>';
+      if (g.status) txt += ' <span style="opacity:.75">(tracker: ' + esc(g.status) + (g.statusDate ? ' since ' + esc(g.statusDate) : '') + ')</span>';
+      txt += ' · email: ' + esc(hbDate(g.latestDate));
+      return '<div class="hb-num" style="margin-top:2px">' + txt + '</div>';
+    }
     // The stale-email reasoning aid: current status + when it got it vs the
     // email's date — "this predates my rejection call → dismiss".
     if (!g.status) return '';
@@ -7726,8 +7860,13 @@ const HTML = /* html */ `<!DOCTYPE html>
 
   function hbGroupHeader(g, mode) {
     const late = g.respondBy && !g.handled && g.respondBy < new Date().toISOString().slice(0, 10);
+    // In review mode the chip never shows the classifier's guess as if it
+    // were a status ("interview" on a confirmation email read as a status
+    // flip) — the guess lives on the per-email chips inside the card.
     const kindChip = g.handled
       ? '<span class="hb-chip">✓ ' + (g.handledBy === 'touch' ? 'handled (touch logged)' : 'you replied') + '</span>'
+      : mode === 'review'
+        ? '<span class="hb-chip' + (late ? ' hb-hot' : ' hb-warm') + '">pending your review</span>'
       : g.num == null && !g.roleKey
         ? '<span class="hb-chip hb-warm">not in tracker</span>'
         : '<span class="hb-chip' + (late ? ' hb-hot' : ' hb-warm') + '">' + esc((g.kinds || []).join(' · ') || 'response') + '</span>';
@@ -7785,7 +7924,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     ).join('');
     return '<div class="hb-group' + open + '" id="' + gid + '">' +
       '<div class="hb-group-h" onclick="hbToggleGroup(\\'' + esc(g.key) + '\\')">' + hbGroupHeader(g, mode) + '</div>' +
-      '<div style="padding:0 12px 9px">' + hbStatusContext(g) +
+      '<div style="padding:0 12px 9px">' + hbStatusContext(g, mode) +
       '<div class="hb-mail-actions">' + mail + dismiss + '</div>' + classify + '</div>' +
       '<div class="hb-group-body">' + body + '</div>' +
     '</div>';
@@ -7854,8 +7993,9 @@ const HTML = /* html */ `<!DOCTYPE html>
       '<div class="hb-ccard-h"><span class="hb-cdot"></span><span>' + title + '</span><span class="hb-jump">→</span></div>' + inner + '</div>';
     const line = (co, right) => '<div class="hb-line"><span class="hb-co">' + esc(co) + '</span><span class="hb-num" style="margin-left:auto">' + right + '</span></div>';
     let html = '';
-    // 🔥 Needs you now
-    const radar = (g && g.radar && g.radar.entries) || [];
+    // 🔥 Needs you now — actionable only; 'waiting' conversations live on
+    // the Radar tab with their countdowns, they don't need him NOW.
+    const radar = ((g && g.radar && g.radar.entries) || []).filter(e => e.urgency !== 'waiting');
     html += card('orange', '🔥 Needs you now', 'radar', radar.length
       ? '<div class="hb-big">' + ((g.radar.metadata && g.radar.metadata.pending) || radar.length) + '</div><div class="hb-big-sub">follow-ups pending</div>' +
         radar.slice(0, 5).map(e => line(e.company, e.nextStepEmail ? '✉ next step?' : e.urgency === 'respond-pending' ? 'respond by ' + esc(e.respondBy || '') : esc(e.urgency))).join('')
@@ -7912,18 +8052,42 @@ const HTML = /* html */ `<!DOCTYPE html>
     }).join('');
   }
 
+  var hbQueuePage = 0;
+  function hbQueueGo(p) { hbQueuePage = p; hbRenderQueue(); }
+  function hbPager(page, pages, fn) {
+    if (pages <= 1) return '';
+    const btn = (label, p, on) => '<button class="hb-btn hb-btn-ghost"' + (on ? ' onclick="' + fn + '(' + p + ')"' : ' disabled style="opacity:.35"') + '>' + label + '</button>';
+    return '<div class="hb-mail-actions" style="margin:8px 0;align-items:center">' +
+      btn('◀ prev', page - 1, page > 0) +
+      '<span class="hb-num">page ' + (page + 1) + ' / ' + pages + '</span>' +
+      btn('next ▶', page + 1, page < pages - 1) + '</div>';
+  }
+  function hbQueueStatusChip(s) {
+    if (s === 'pending') return '<span class="hb-chip hb-warm">pending</span>';
+    if (s === 'applied') return '<span class="hb-chip">applied</span>';
+    return '<span class="hb-chip hb-hot">' + esc(s) + '</span>';
+  }
   function hbRenderQueue() {
     const host = document.getElementById('queue-content');
     if (!host) return;
     const q = hbData.queue;
-    if (!q || !q.head || !q.head.length) { host.innerHTML = '<div class="hb-empty">No ranked pool — run the batch pipeline or paste URLs into data/pipeline.md</div>'; return; }
+    const rows = (q && (q.rows && q.rows.length ? q.rows : q.head)) || [];
+    if (!rows.length) { host.innerHTML = '<div class="hb-empty">No ranked pool — run the batch pipeline or paste URLs into data/pipeline.md</div>'; return; }
+    const PER = 50;
+    const pages = Math.max(1, Math.ceil(rows.length / PER));
+    if (hbQueuePage >= pages) hbQueuePage = pages - 1;
+    const slice = rows.slice(hbQueuePage * PER, hbQueuePage * PER + PER);
+    const nav = hbPager(hbQueuePage, pages, 'hbQueueGo');
     host.innerHTML = '<div class="hb-meta">' + q.pendingCount + ' pending of ' + q.total + ' ranked · next rank ' + esc(String(q.nextRank)) + ' · source: output/pool-apply-order.json</div>' +
-      q.head.map(r =>
+      nav +
+      slice.map(r =>
         '<div class="hb-row"><span class="hb-num">#' + r.rank + '</span>' +
         '<a class="hb-link hb-co" href="#role/' + encodeURIComponent(r.key) + '">' + esc(r.company) + '</a>' +
         '<span>' + esc(r.title) + '</span><span class="hb-chip">' + esc(r.ats || '') + '</span>' +
+        hbQueueStatusChip(r.status || 'pending') +
+        (r.appliedOn ? '<span class="hb-num">' + esc(r.appliedOn) + '</span>' : '') +
         (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>'
-      ).join('');
+      ).join('') + nav;
   }
 
   function hbRenderRadar() {
@@ -7944,11 +8108,21 @@ const HTML = /* html */ `<!DOCTYPE html>
           ? { from: grp.emails[0].from, subject: grp.emails[0].subject, role: e.role, company: e.company }
           : { from: e.inboundFrom || (e.contacts && e.contacts[0] && e.contacts[0].email) || '', subject: e.role + ' — ' + e.company, role: e.role, company: e.company };
         const chipTxt = e.nextStepEmail ? 'next step?' : e.urgency === 'respond-pending' ? 'respond' : e.urgency;
-        const detail = e.nextStepEmail
-          ? '✉ “' + esc((e.nextStepEmail.subject || '').slice(0, 60)) + '” — check the email'
-          : e.awaitingReply
-            ? 'they wrote ' + esc(e.inboundDate || '') + ' · respond by ' + esc(e.respondBy || '')
-            : esc(String(e.daysSinceApplication)) + 'd since apply · follow-ups: ' + e.followupCount + (e.nextFollowupDate ? ' · next ' + esc(e.nextFollowupDate) : '');
+        // Both sides of the conversation clock + a countdown to the next
+        // nudge (user ask, 2026-06-13): when they last wrote, when YOU last
+        // answered (sent-mail reply or logged touch, whichever is newer),
+        // and how long until the cadence says nudge again.
+        const inDays = (s) => { const t = Date.parse((s || '') + 'T12:00'); return isFinite(t) ? Math.round((t - Date.now()) / 86400000) : null; };
+        const cd = (s) => { const d = inDays(s); return d == null ? '' : d > 0 ? 'in ' + d + 'd' : d === 0 ? 'today' : Math.abs(d) + 'd overdue'; };
+        const youReplied = [e.respondedAt, e.lastTouchDate].filter(Boolean).sort().pop() || null;
+        const bits = [];
+        if (e.nextStepEmail) bits.push('✉ “' + esc((e.nextStepEmail.subject || '').slice(0, 60)) + '” — check the email');
+        if (e.inboundDate) bits.push('they wrote ' + esc(hbDate(e.inboundDate)));
+        else bits.push('no email from them · applied ' + esc(String(e.daysSinceApplication)) + 'd ago');
+        bits.push(youReplied ? 'you replied ' + esc(hbDate(youReplied)) : 'no reply from you yet');
+        if (e.awaitingReply && e.respondBy) bits.push('<b>respond by ' + esc(e.respondBy) + ' (' + cd(e.respondBy) + ')</b>');
+        else if (e.nextFollowupDate) bits.push('<b>next nudge ' + cd(e.nextFollowupDate) + ' (' + esc(e.nextFollowupDate) + ')</b>');
+        const detail = bits.join(' · ');
         const mail = '<span class="hb-mail-actions">' +
           ((grp && grp.emails && grp.emails[0] && grp.emails[0].id) ? '<a class="hb-btn hb-btn-ghost" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(grp.emails[0].id) + '">✉ open</a>' : '') +
           (gmailReplyAddr(composeSig.from) ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" title="Pre-filled Gmail draft — nothing sends until you hit Send" href="' + esc(gmailComposeUrl(composeSig)) + '">↩ Respond</a>' : '') +
@@ -8002,18 +8176,36 @@ const HTML = /* html */ `<!DOCTYPE html>
       ).join('');
   }
 
+  var hbScanPage = 0;
+  function hbScanGo(p) { hbScanPage = p; hbRenderScan(); }
   function hbRenderScan() {
     const host = document.getElementById('scan-content');
     if (!host) return;
     const sc = hbData.scanfeed;
     if (!sc) { host.innerHTML = '<span class="spinner"></span>'; return; }
     if (!sc.total) { host.innerHTML = '<div class="hb-empty">Scanner hasn’t run — node engine/scan/scan.mjs</div>'; return; }
-    host.innerHTML = '<div class="hb-meta">' + sc.total + ' discoveries all-time · newest ' + esc(sc.lastSeen || '') + ' · source: data/scan-history.tsv</div>' +
-      (sc.recent || []).map(r =>
-        '<div class="hb-row"><span class="hb-num">' + esc(r.first_seen || '') + '</span><span class="hb-co">' + esc(r.company || '') + '</span>' +
-        '<span>' + esc(r.title || '') + '</span><span class="hb-chip">' + esc(r.portal || '') + '</span>' +
-        (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>'
-      ).join('');
+    const rows = sc.recent || [];
+    const PER = 50;
+    const pages = Math.max(1, Math.ceil(rows.length / PER));
+    if (hbScanPage >= pages) hbScanPage = pages - 1;
+    const slice = rows.slice(hbScanPage * PER, hbScanPage * PER + PER);
+    const nav = hbPager(hbScanPage, pages, 'hbScanGo');
+    host.innerHTML = '<div class="hb-meta">' + sc.total + ' discoveries all-time · newest ' + esc(sc.lastSeen || '') + ' · rows click through to the role page · source: data/scan-history.tsv</div>' +
+      nav +
+      slice.map(r => {
+        // The columns ARE the doorway: matched discoveries click through to
+        // the all-in-one role page; Open stays the raw listing.
+        const co = '<span class="hb-co">' + esc(r.company || '') + '</span><span>' + esc(r.title || '') + '</span>';
+        const body = r.roleKey
+          ? '<a class="hb-link" style="display:contents" href="#role/' + encodeURIComponent(r.roleKey) + '">' + co + '</a>'
+          : co;
+        const st = r.roleKey
+          ? '<span class="hb-chip' + (/rejected|discarded|skip|expired/.test(r.roleStatus || '') ? ' hb-hot' : '') + '">' + esc(r.roleStatus || 'tracked') + '</span>'
+          : '<span class="hb-chip hb-warm">not picked up</span>';
+        return '<div class="hb-row"><span class="hb-num">' + esc(r.first_seen || '') + '</span>' + body +
+          '<span class="hb-chip">' + esc(r.portal || '') + '</span>' + st +
+          (r.url ? '<a class="hb-link hb-num" style="margin-left:auto" target="_blank" rel="noopener" href="' + esc(r.url) + '">open ↗</a>' : '') + '</div>';
+      }).join('') + nav;
   }
 
   function hbRenderPatterns() {
@@ -8074,10 +8266,13 @@ const HTML = /* html */ `<!DOCTYPE html>
       '</div>' +
       '<div style="font-size:14px;color:var(--text-sec);margin-bottom:8px">' + esc(r.role || '') + '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
-        (r.num
+        (r.pendingReview
+          // Review-desk rule: no real status until the user classifies.
+          ? '<span class="status-badge" style="background:rgba(255,159,10,.16);color:var(--orange,#ff9f0a);cursor:pointer" onclick="hbSwitchTab(\\'review\\')" title="Emails awaiting your classification' + (r.status ? ' (tracker: ' + esc(r.status) + ')' : '') + ' — click to open Needs Review">pending your review</span>'
+          : r.num
           ? '<span class="status-badge ' + statusClass(r.status) + '" style="cursor:pointer" onclick="openDropdown(\\'' + esc(r.num) + '\\',this)" data-num="' + esc(r.num) + '">' + esc(r.status || '—') + '</span>'
           : chip(esc(r.status || 'pending'))) +
-        (r.statusDate ? chip('since ' + esc(r.statusDate)) : '') +
+        (r.statusDate && !r.pendingReview ? chip('since ' + esc(r.statusDate)) : '') +
         (r.date ? chip('applied ' + esc(r.date)) : '') +
         (r.interviewAt ? chip('📅 interview ' + esc(hbDT(r.interviewAt)), ' hb-warm') : '') +
         (r.score && r.score !== 'N/A' ? chip('score ' + esc(r.score)) : '') +
@@ -8097,13 +8292,25 @@ const HTML = /* html */ `<!DOCTYPE html>
       '</div>';
 
     const sect = (title, inner) => inner ? '<div class="hb-section-h">' + title + '</div>' + inner : '';
+    // Eval-report rationale when one exists; the pool-heuristic explanation
+    // otherwise — every queue role WAS ranked 1–350, so "no eval report" was
+    // a lie of omission (user catch, 06-13).
     const why = r.report && (r.report.rationale || r.report.verdict)
       ? '<div class="hb-review-card"><div class="hb-review-snip" style="font-size:12.5px;color:var(--text)">' + esc(r.report.rationale || r.report.verdict) + '</div>' +
         (r.report.legitimacy ? '<div class="hb-num" style="margin-top:4px">legitimacy: ' + esc(r.report.legitimacy) + '</div>' : '') + '</div>'
+      : r.poolRationale
+      ? '<div class="hb-review-card"><div class="hb-review-snip" style="font-size:12.5px;color:var(--text)">' + esc(r.poolRationale) + '</div></div>'
       : (r.num ? '<div class="hb-num">No evaluation report — applied via the ' + (r.rank != null ? 'pool' : 'direct') + ' lane without scoring.</div>' : '');
     const compLine = r.comp && r.comp.display
       ? '<div class="hb-review-card"><b>' + esc(r.comp.display) + '</b> <span class="hb-num">(' + esc(r.comp.kind || 'listed') + ', informational)</span></div>'
+      : r.compSuggested && r.compSuggested.display
+      ? '<div class="hb-review-card"><span class="hb-num">Not listed in the posting — suggested ask:</span> <b>' + esc(r.compSuggested.display) + '</b> <span class="hb-num">(' + esc(r.compSuggested.kind || 'suggested') + ')</span>' +
+        (r.pkg && r.pkg.salary ? '<div class="hb-num" style="margin-top:4px">our answer on file: “' + esc(r.pkg.salary.slice(0, 140)) + '”</div>' : '') + '</div>'
       : '<div class="hb-num">Not listed' + (r.pkg && r.pkg.salary ? ' — our ask on file: “' + esc(r.pkg.salary.slice(0, 140)) + '”' : '') + '</div>';
+    const jdPanel = r.jd && r.jd.text
+      ? '<details class="hb-review-card"><summary style="cursor:pointer;font-weight:650;font-size:12.5px">📜 Job description <span class="hb-num">(saved locally — ' + esc(r.jd.source) + ')</span></summary>' +
+        '<div class="hb-review-snip" style="white-space:pre-wrap;max-height:420px;overflow:auto;margin-top:8px;font-size:12px;color:var(--text)">' + esc(r.jd.text) + '</div></details>'
+      : '';
     const pkg = r.pkg && (r.pkg.why || r.pkg.salary)
       ? '<div class="hb-review-card">' +
         (r.pkg.why ? '<div class="hb-review-snip"><b>Why-us answer:</b> ' + esc(r.pkg.why) + '</div>' : '') +
@@ -8133,6 +8340,7 @@ const HTML = /* html */ `<!DOCTYPE html>
     host.innerHTML = head + actions +
       sect('Why we ranked it', why) +
       sect('Compensation', compLine) +
+      (jdPanel ? sect('Job description', jdPanel) : '') +
       (pkg ? sect('Application answers on file', pkg) : '') +
       sect('Emails (' + (r.emails || []).length + ')', emails) +
       sect('Timeline', timeline) +
@@ -8629,7 +8837,13 @@ async function handleRequest(req, res) {
         scannedAt: gmailCache.scanned_at || null,
         inbox, review,
         radar: radar && radar.entries
-          ? { metadata: radar.metadata || {}, entries: radar.entries.filter(e => e.urgency && e.urgency !== 'waiting').slice(0, 60) }
+          // Actionable rows always; 'waiting' rows only for LIVE
+          // conversations (responded/interview) so their nudge countdown is
+          // visible — plain Applied stays out (no-cadence policy, PR #16).
+          ? { metadata: radar.metadata || {}, entries: radar.entries.filter(e =>
+              (e.urgency && e.urgency !== 'waiting') ||
+              (e.urgency === 'waiting' && ['responded', 'interview'].includes(e.status))
+            ).slice(0, 60) }
           : { metadata: {}, entries: [] },
       }));
     } catch (err) { sendJsonError(res, 500, 'groups failed', err); }
@@ -8702,23 +8916,29 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // ── API: Apply-queue head (pool) ──
+  // ── API: Apply queue (pool) — full ranked list, head for the overview ──
   if (pathname === '/api/queue') {
     try {
       let pool = null;
       try { pool = JSON.parse(await fs.readFile(POOL_FILE, 'utf8')); } catch {}
       const rows = (pool && pool.rows) || [];
+      const shape = (r) => ({
+        key: 'p' + r.n, rank: r.rank, n: r.n, company: r.company, title: (r.title || '').trim(),
+        ats: r.ats, loc: r.loc, tier: r.tier,
+        url: r.ats === 'indeed' ? (r.indeed || r.url) : r.url,
+        // 'Discarded'/'discarded' case drift exists in the wild — normalize.
+        status: (r.status || '').toLowerCase() || 'pending',
+        appliedOn: (r.appliedAt || '').slice(0, 10) || r.appliedDate || null,
+      });
       const pending = rows.filter(r => !r.status && !r.applied && !r.skipped);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         nextRank: pool ? pool.nextRank ?? null : null,
         total: rows.length,
         pendingCount: pending.length,
-        head: pending.slice(0, 25).map(r => ({
-          key: 'p' + r.n, rank: r.rank, n: r.n, company: r.company, title: (r.title || '').trim(),
-          ats: r.ats, loc: r.loc, tier: r.tier,
-          url: r.ats === 'indeed' ? (r.indeed || r.url) : r.url,
-        })),
+        head: pending.slice(0, 25).map(shape),
+        // The WHOLE ranked queue, rank order — the tab paginates through it.
+        rows: rows.map(shape),
       }));
     } catch (err) { sendJsonError(res, 500, 'queue failed', err); }
     return;
@@ -8740,8 +8960,17 @@ async function handleRequest(req, res) {
         return Object.fromEntries(header.map((h, i) => [h, c[i] ?? '']));
       });
       rows.sort((a, b) => (b.first_seen || '').localeCompare(a.first_seen || ''));
+      // Join each discovery to the role index so the feed shows where it
+      // WENT (status) and rows click through to the role page.
+      const index = await getRoleIndex();
+      for (const r of rows) {
+        const hit = (index.roles || []).find(x =>
+          companiesMatch(x.company, r.company) && titlesSimilar(x.role, r.title));
+        r.roleKey = hit ? hit.key : null;
+        r.roleStatus = hit ? hit.status : null;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ total: rows.length, lastSeen: rows[0]?.first_seen ?? null, recent: rows.slice(0, 40) }));
+      res.end(JSON.stringify({ total: rows.length, lastSeen: rows[0]?.first_seen ?? null, recent: rows }));
     } catch (err) { sendJsonError(res, 500, 'scanfeed failed', err); }
     return;
   }
@@ -8810,6 +9039,48 @@ async function handleRequest(req, res) {
         try { comp = await getCompForReport(role.reportLink, role.company); } catch {}
       }
 
+      // Local JD (we saved every JD we applied to — pool lane by rank,
+      // Indeed lane by row n). Feeds the JD panel, the real Indeed posting
+      // link, and a comp read when the report has none.
+      let jd = null;
+      try { jd = await readJdForRole(role); } catch { /* JD optional */ }
+      if (jd && jd.url && (!postingUrl || /google\.com\/search/.test(postingUrl))) postingUrl = jd.url;
+      if ((!comp || !comp.display || comp.display === '—') && jd) {
+        try {
+          const fromJd = extractCompFromReport(jd.text, role.company);
+          if (fromJd && fromJd.display) comp = { ...fromJd, kind: (fromJd.kind === 'unknown' ? '' : fromJd.kind + ', ') + 'from the saved JD' };
+          // Indeed's salary field is often junk ("Permanent", "Temporary +1")
+          // — only trust it when it actually prices something.
+          else if (jd.salary && /[$€£]\s*\d/.test(jd.salary)) comp = { display: jd.salary, kind: 'listed on Indeed' };
+        } catch { /* comp stays unset */ }
+      }
+      // Nothing listed anywhere → suggest his own target, clearly labeled.
+      let compSuggested = null;
+      if (!comp || !comp.display || comp.display === '—') compSuggested = await profileCompSuggestion();
+
+      // No evaluation report → explain the ranking we DID do (the pool
+      // heuristic ran over every queue role) instead of "no eval report".
+      const fitInput = {
+        title: role.role,
+        tier: role.tier ?? (role.pool && role.pool.tier) ?? null,
+        archetype: role.archetype || (role.pool && role.pool.archetype) || null,
+        ats: role.ats || null,
+      };
+      const poolRationale = (!report || (!report.rationale && !report.verdict))
+        ? explainFit({ ...fitInput, rank: role.rank ?? (role.pool && role.pool.rank) ?? null })
+        : null;
+      const autoFit = autoFitScore(fitInput);
+
+      // Pending-review roles show NO real status until the user classifies.
+      // Known/closed statuses are exempt (same rule as the review desk) —
+      // otherwise a Discarded role with stale chatter would show "pending"
+      // forever with no card anywhere to resolve it.
+      const reviewKeys = pendingReviewKeys();
+      const pendingReview = !NO_REVIEW_STATUSES.has(String(role.status || '').toLowerCase()) && (
+        reviewKeys.has(role.key) ||
+        (num != null && reviewKeys.has('t' + num)) ||
+        Boolean(role.pool && reviewKeys.has(role.pool.key)));
+
       // Auto-apply package (the ready-to-paste salary + why answers).
       let pkg = null;
       if (num) {
@@ -8870,13 +9141,15 @@ async function handleRequest(req, res) {
         status: role.status, date: role.date || (role.pool && role.pool.appliedOn) || role.appliedOn || null,
         statusDate: num ? (() => { const ts = latestStatusDate(hist, num, role.status); return ts ? String(ts).slice(0, 10) : null; })() : null,
         interviewAt: num ? (interviewDateFor(hist, num) || extractInterviewDateFromText(role.notes || '', { referenceDate: new Date().toISOString().slice(0, 10) })) : null,
-        score: role.score || (report && report.score) || null,
+        score: (role.score && role.score !== 'N/A' ? role.score : null) || (report && report.score) || autoFit.display,
         notes: role.notes || role.note || (role.pool && role.pool.note) || null,
         postingUrl, ats: role.ats || null, loc: role.loc || (role.pool && role.pool.loc) || null,
         rank: role.rank ?? (role.pool && role.pool.rank) ?? null,
         archetype: role.archetype || (role.pool && role.pool.archetype) || null,
         tier: role.tier ?? (role.pool && role.pool.tier) ?? null,
         report, comp: comp ? { display: comp.display, kind: comp.kind } : null,
+        compSuggested, poolRationale, pendingReview,
+        jd: jd ? { text: String(jd.text).slice(0, 20000), source: jd.source } : null,
         pkg, files: fileSlots, emails, touches, timeline,
         absorbed: (role.absorbed || []).map(a => ({ key: a.key, company: a.company, role: a.role })),
       }));

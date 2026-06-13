@@ -293,3 +293,65 @@ test('groups are sorted newest-first and carry latest tracker status seen', () =
   assert.equal(groups[0].status, 'interview');
   assert.equal(groups[0].latestDate, new Date('Wed, 10 Jun 2026 09:00:00 +0000').toISOString());
 });
+
+// ── review scoping: known-status roles never get review cards ───────────────
+// User rule (2026-06-13): "Amaris is in needs review even though you know the
+// status of it — don't do that." Ambiguous chatter on a live conversation
+// (responded/interview/offer) or a deliberately-closed row needs no
+// classification; review is for UNRESOLVED roles only.
+
+import { NO_REVIEW_STATUSES, signalPendingReview } from '../apps/web/lib/email-groups.mjs';
+
+test('unknown chatter on an Interview-status role is NOT a review card (the Amaris fix)', () => {
+  const groups = groupSignals({ signals: [
+    sig({ id: 'am1', num: '85', company: 'Amaris Consulting', signal: 'unknown',
+      subject: 'Prep', currentStatus: 'interview', from: 'r@amaris.com', date: 'Fri, 12 Jun 2026 09:00:00 +0000' }),
+  ] });
+  // The integrator overwrites g.status with the live tracker status.
+  groups[0].status = 'interview';
+  assert.equal(groupsForReview(groups).length, 0);
+});
+
+test('every known/closed status suppresses review; applied/evaluated do not', () => {
+  for (const status of NO_REVIEW_STATUSES) {
+    const groups = groupSignals({ signals: [
+      sig({ id: 'k1', num: '9', company: 'Known Co', signal: 'unknown', from: 'a@knownco.com', date: 'Wed, 10 Jun 2026 09:00:00 +0000' }),
+    ] });
+    groups[0].status = status;
+    assert.equal(groupsForReview(groups).length, 0, status + ' must not surface for review');
+  }
+  for (const status of ['applied', 'evaluated', null]) {
+    const groups = groupSignals({ signals: [
+      sig({ id: 'k2', num: '9', company: 'Known Co', signal: 'unknown', from: 'a@knownco.com', date: 'Wed, 10 Jun 2026 09:00:00 +0000' }),
+    ] });
+    groups[0].status = status;
+    assert.equal(groupsForReview(groups).length, 1, String(status) + ' must still surface for review');
+  }
+});
+
+test('pool-only groups (no tracker row) still surface — the Samsara case', () => {
+  const groups = groupSignals({ signals: [
+    sig({ id: 'sa1', num: null, poolKey: 'p18', company: 'Samsara', signal: 'interview',
+      currentStatus: 'applied', from: 'no-reply@samsara.com', date: 'Fri, 12 Jun 2026 09:00:00 +0000' }),
+  ] });
+  groups[0].status = 'applied'; // pool status — not a NO_REVIEW status
+  const review = groupsForReview(groups);
+  assert.equal(review.length, 1);
+  assert.equal(review[0].reviewReason, 'unmatched'); // no tracker num yet — minting is the user's click
+});
+
+// ── signalPendingReview: the "pending your review" display rule ─────────────
+
+test('signalPendingReview: pool-only and unknown signals pend; resolved/auto-written do not', () => {
+  // Pool-only (num null): everything unresolved pends, even confident kinds.
+  assert.equal(signalPendingReview(sig({ id: 'p1', num: null, poolKey: 'p18', signal: 'interview' })), true);
+  // Matched unknown pends until classified.
+  assert.equal(signalPendingReview(sig({ id: 'p2', num: '9', signal: 'unknown' })), true);
+  // Classification and dismissal are terminal.
+  assert.equal(signalPendingReview(sig({ id: 'p3', num: '9', signal: 'unknown', classified: 'confirmation' })), false);
+  assert.equal(signalPendingReview(sig({ id: 'p4', num: null, poolKey: 'p18', signal: 'interview', dismissed: true })), false);
+  // Auto-written confident signals never pend (they were never reviewable).
+  assert.equal(signalPendingReview(sig({ id: 'p5', num: '9', signal: 'interview', autoApplied: 'Interview' })), false);
+  // Plain matched interview flag (unconfident) pends — it sits in review.
+  assert.equal(signalPendingReview(sig({ id: 'p6', num: '9', signal: 'interview' })), true);
+});

@@ -343,6 +343,11 @@ function analyze() {
       respondedByUser: !!(inb && inb.userResponded),
       respondBy: inboundInfo && inboundInfo.awaitingReply ? addDays(parseDate(inb.inboundDate), CADENCE.conversation_silence) : null,
       inboundFrom: inb ? inb.from : null,
+      // The user's side of the conversation clock (the radar shows both
+      // dates plus a countdown to the next nudge): last logged touch from
+      // data/follow-ups.md, and the sent-mail reply date when Gmail saw one.
+      lastTouchDate: lastFollowupDate || null,
+      respondedAt: inb && inb.respondedAt ? String(inb.respondedAt).slice(0, 10) : null,
     });
   }
 
