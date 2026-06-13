@@ -75,6 +75,38 @@ AI-powered job search automation built on Claude Code: pipeline tracking, offer 
 | `engine/doctor.mjs` | Setup validation — JSON output for CI/scripts |
 | `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
 
+### Unified Role Directory — ONE registry, no orphan queues (CRITICAL)
+
+Every role the user has ever touched — applied, evaluated, ranked, or merely
+scanned — lives in **one** unified directory, built by
+`apps/web/lib/role-index.mjs` and surfaced as **All Roles** in the dashboard
+(a gapless `1→N` catalog where every row clicks through to an all-in-one role
+page). The registry ingests **six lanes** and de-duplicates across them by
+normalized company + title (key prefix in parens):
+
+- **tracker** (`t`) — `data/applications.md`
+- **pool** (`p`) — `output/pool-apply-order.json` (the ranked 350)
+- **aviation** (`v`) — `output/applications-aviation/`
+- **aecom** (`a`) — `output/aecom/applications/`
+- **indeed** (`i`) — `output/indeed-apply-order.json` (the old 50)
+- **loose** (`x`) — any other `output/applications/*` folder
+
+`loadLanes(rootDir)` reads them; `buildRoleIndex(...)` joins duplicates (a role
+in two pipelines collapses to one entry, every original key still resolves).
+User edits live in `data/role-overrides.json` (applied last; tracker status
+stays canonical in `applications.md`).
+
+**THE RULE (going forward, for every user):** never spin up a new parallel
+queue/folder convention that the directory can't see. When you add a role —
+from a pasted URL, a pasted JD, a scan, an apply run, or the dashboard's
+**Create Role** form — it MUST end up in one of the six lanes above so it
+appears in the one directory, deduped, JD-paired, with a complete role page.
+If a genuinely new pipeline shape is unavoidable, **register it as a lane in
+`loadLanes` (and add its key prefix to `ROLE_KEY_RE`)** in the same change — do
+not let it become an orphan the directory misses. Gather everything a complete
+role page needs at add-time: company, role, status, the local JD, comp, and the
+application folder/CV/cover paths.
+
 ### Other CLIs (OpenCode, Codex, Gemini, Qwen)
 
 `AGENTS.md` is the canonical cross-CLI rulebook, and the career-ops skill ships in the open agent skill standard format (`.agents/skills/`, `.qwen/skills/`, mirroring `.claude/skills/`). The `modes/*` files are shared by every platform — on any CLI, invoke a mode by asking for it by name (`scan`, `oferta`, `pdf`, `apply`, …).
