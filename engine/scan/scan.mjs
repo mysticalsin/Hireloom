@@ -13,6 +13,14 @@
  *   node engine/scan/scan.mjs                  # scan all enabled companies
  *   node engine/scan/scan.mjs --dry-run        # preview without writing files
  *   node engine/scan/scan.mjs --company Cohere # scan a single company
+ *   node engine/scan/scan.mjs --max-age 21     # only roles posted in the last 21 days
+ *   node engine/scan/scan.mjs --since 2026-06-01  # only roles posted on/after a date
+ *   node engine/scan/scan.mjs --max-age 21 --strict-age  # also drop unknown-date roles
+ *
+ * Freshness: --max-age/--since filter to newly-posted roles using each ATS's own
+ * posting date (Greenhouse first_published, Ashby publishedAt, Lever createdAt,
+ * Workday startDate/"Posted N Days Ago"). Roles with no detectable date are KEPT
+ * and flagged "date unknown" unless --strict-age is set. Results sort newest-first.
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
@@ -94,6 +102,7 @@ function parseGreenhouse(json, companyName) {
     url: j.absolute_url || '',
     company: companyName,
     location: j.location?.name || '',
+    posted: j.first_published || j.updated_at || null,
   }));
 }
 
@@ -104,6 +113,7 @@ function parseAshby(json, companyName) {
     url: j.jobUrl || '',
     company: companyName,
     location: j.location || '',
+    posted: j.publishedAt || null,
   }));
 }
 
@@ -114,10 +124,42 @@ function parseLever(json, companyName) {
     url: j.hostedUrl || '',
     company: companyName,
     location: j.categories?.location || '',
+    posted: j.createdAt ? new Date(j.createdAt).toISOString() : null,
   }));
 }
 
 const PARSERS = { greenhouse: parseGreenhouse, ashby: parseAshby, lever: parseLever };
+
+// ── Posting-date helpers (freshness) ────────────────────────────────
+
+// Workday gives either an ISO startDate or relative text ("Posted Today",
+// "Posted 5 Days Ago", "Posted 30+ Days Ago"). Return an ISO date or null.
+function parseWorkdayPosted(j) {
+  if (j.startDate) return j.startDate;
+  const t = (j.postedOn || '').toLowerCase();
+  if (!t) return null;
+  const d = new Date();
+  if (t.includes('today')) return d.toISOString();
+  if (t.includes('yesterday')) { d.setDate(d.getDate() - 1); return d.toISOString(); }
+  const day = t.match(/(\d+)\+?\s*day/);
+  if (day) { d.setDate(d.getDate() - parseInt(day[1], 10)); return d.toISOString(); }
+  const mon = t.match(/(\d+)\+?\s*month/);
+  if (mon) { d.setMonth(d.getMonth() - parseInt(mon[1], 10)); return d.toISOString(); }
+  return null;
+}
+
+function daysSince(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+
+function fmtPosted(iso) {
+  if (!iso) return 'date unknown';
+  const d = daysSince(iso);
+  return d === null ? iso.slice(0, 10) : `${iso.slice(0, 10)} (${d}d ago)`;
+}
 
 // ── Fetch with timeout ──────────────────────────────────────────────
 
@@ -175,6 +217,7 @@ async function fetchWorkdayJobs(api, companyName) {
         url: `https://${host}/${site}${j.externalPath || ''}`,
         company: companyName,
         location: j.locationsText || '',
+        posted: parseWorkdayPosted(j),
       });
     }
     offset += WORKDAY_PAGE;
@@ -281,7 +324,7 @@ function appendToPipeline(offers) {
     const procIdx = text.indexOf('## Procesadas');
     const insertAt = procIdx === -1 ? text.length : procIdx;
     const block = `\n${marker}\n\n` + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
+      `- [ ] ${o.url} | ${o.company} | ${o.title} | posted ${o.posted ? o.posted.slice(0, 10) : '?'}`
     ).join('\n') + '\n\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   } else {
@@ -291,7 +334,7 @@ function appendToPipeline(offers) {
     const insertAt = nextSection === -1 ? text.length : nextSection;
 
     const block = '\n' + offers.map(o =>
-      `- [ ] ${o.url} | ${o.company} | ${o.title}`
+      `- [ ] ${o.url} | ${o.company} | ${o.title} | posted ${o.posted ? o.posted.slice(0, 10) : '?'}`
     ).join('\n') + '\n';
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   }
@@ -338,6 +381,16 @@ async function main() {
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
 
+  // Freshness filter: --max-age <days> or --since <YYYY-MM-DD>. null = no age filter.
+  const maxAgeFlag = args.indexOf('--max-age');
+  const maxAge = maxAgeFlag !== -1 ? parseInt(args[maxAgeFlag + 1], 10) : null;
+  const sinceFlag = args.indexOf('--since');
+  const since = sinceFlag !== -1 ? args[sinceFlag + 1] : null;
+  const strictAge = args.includes('--strict-age');
+  let ageCutoff = null;
+  if (since && !Number.isNaN(Date.parse(since))) ageCutoff = Date.parse(since);
+  else if (maxAge != null && !Number.isNaN(maxAge)) ageCutoff = Date.now() - maxAge * 86400000;
+
   // 1. Read portals.yml
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first.');
@@ -372,6 +425,7 @@ async function main() {
   let totalFiltered = 0;
   let totalLocationFiltered = 0;
   let totalDupes = 0;
+  let totalStale = 0;
   const newOffers = [];
   const errors = [];
 
@@ -405,6 +459,17 @@ async function main() {
           totalDupes++;
           continue;
         }
+        // Freshness: drop roles posted before the cutoff. Unknown-date roles are
+        // kept (and flagged later) unless --strict-age is set.
+        if (ageCutoff != null) {
+          const postedMs = job.posted ? Date.parse(job.posted) : NaN;
+          if (Number.isNaN(postedMs)) {
+            if (strictAge) { totalStale++; continue; }
+          } else if (postedMs < ageCutoff) {
+            totalStale++;
+            continue;
+          }
+        }
         // Mark as seen to avoid intra-scan dupes
         seenUrls.add(job.url);
         seenCompanyRoles.add(key);
@@ -416,6 +481,13 @@ async function main() {
   });
 
   await parallelFetch(tasks, CONCURRENCY);
+
+  // Sort newest-first; unknown-date roles sink to the bottom.
+  newOffers.sort((a, b) => {
+    const ta = a.posted ? Date.parse(a.posted) : -Infinity;
+    const tb = b.posted ? Date.parse(b.posted) : -Infinity;
+    return (Number.isNaN(tb) ? -Infinity : tb) - (Number.isNaN(ta) ? -Infinity : ta);
+  });
 
   // 5. Write results
   if (!dryRun && newOffers.length > 0) {
@@ -434,6 +506,10 @@ async function main() {
     console.log(`Filtered by location:  ${totalLocationFiltered} removed`);
   }
   console.log(`Duplicates:            ${totalDupes} skipped`);
+  if (ageCutoff != null) {
+    const label = since ? `before ${since}` : `older than ${maxAge}d`;
+    console.log(`Filtered by age:       ${totalStale} removed (${label}${strictAge ? ', + unknown-date' : ''})`);
+  }
   console.log(`New offers added:      ${newOffers.length}`);
 
   if (errors.length > 0) {
@@ -446,7 +522,7 @@ async function main() {
   if (newOffers.length > 0) {
     console.log('\nNew offers:');
     for (const o of newOffers) {
-      console.log(`  + ${o.company} | ${o.title} | ${o.location || 'N/A'}`);
+      console.log(`  + ${o.company} | ${o.title} | ${o.location || 'N/A'} | ${fmtPosted(o.posted)}`);
     }
     if (dryRun) {
       console.log('\n(dry run — run without --dry-run to save results)');
