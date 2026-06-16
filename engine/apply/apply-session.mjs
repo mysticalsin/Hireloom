@@ -736,11 +736,14 @@ function readCmd() {
 }
 
 // Portals where a SAVED LOGIN matters → use the persistent .apply-profile
-// window. Everything else (Greenhouse/Lever/Ashby/Workday/company sites) gets a
-// FRESH ephemeral window per goto: same-window ATS state was carrying the
-// PREVIOUS role's resume into the next form (Greenhouse "reuse last resume",
-// 2026-06-11), so direct-ATS applications must start cold every time.
-const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
+// window so the candidate stays signed in across roles. Everything else
+// (Greenhouse/Lever/Ashby/company sites) gets a FRESH ephemeral window per goto:
+// same-window ATS state was carrying the PREVIOUS role's resume into the next
+// form (Greenhouse "reuse last resume", 2026-06-11), so those start cold every
+// time. Workday is a per-company candidate ACCOUNT (one login → many roles in the
+// same tenant), so it belongs with the persistent set — a fresh window per role
+// would force a re-login on every application (2026-06-16).
+const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\.|workday/i;
 
 (async () => {
   mkdirSync(SDIR, { recursive: true });
