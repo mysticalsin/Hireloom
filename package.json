@@ -27,6 +27,7 @@
     "update": "node engine/update-system.mjs apply",
     "rollback": "node engine/update-system.mjs rollback",
     "scan": "node engine/scan/scan.mjs",
+    "apply:session": "bash engine/apply/launch-apply.sh",
     "liveness": "node engine/scan/check-liveness.mjs",
     "patterns": "node engine/tracker/analyze-patterns.mjs",
     "followup": "node engine/tracker/followup-cadence.mjs",
