@@ -34,4 +34,16 @@ if [ -z "${PW_CHROMIUM_PATH:-}" ]; then
 fi
 echo "apply-session: chromium $([ -n "${PW_CHROMIUM_PATH:-}" ] && echo "ok" || echo "NOT FOUND (will try Playwright default)")"
 
+# Dock the window to the right half of the main display (so it sits beside your
+# editor instead of going fullscreen). Override by exporting APPLY_WINDOW="x,y,w,h".
+if [ -z "${APPLY_WINDOW:-}" ]; then
+  BOUNDS="$(osascript -e 'tell application "Finder" to get bounds of window of desktop' 2>/dev/null || true)"
+  SW="$(printf '%s' "$BOUNDS" | awk -F', ' '{print $3}')"
+  SH="$(printf '%s' "$BOUNDS" | awk -F', ' '{print $4}')"
+  if [ -n "$SW" ] && [ -n "$SH" ]; then
+    export APPLY_WINDOW="$((SW/2)),24,$((SW/2)),$((SH-24))"
+    echo "apply-session: window docked right ($APPLY_WINDOW)"
+  fi
+fi
+
 exec node engine/apply/apply-session.mjs

@@ -48,6 +48,13 @@ const MODEL = process.env.KIMI_MODEL || 'moonshotai/kimi-k2.6';
 const EXE   = process.env.PW_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '';
 if (!KEY) { console.error('KIMI_API_KEY not set in .env'); process.exit(1); }
 
+// Window geometry: APPLY_WINDOW="x,y,w,h" docks the window (e.g. right half of the
+// screen) instead of fullscreen. Unset → maximized (previous default).
+const _win = (process.env.APPLY_WINDOW || '').split(',').map(n => parseInt(n, 10));
+const WIN_ARGS = (_win.length === 4 && _win.every(Number.isFinite))
+  ? [`--window-position=${_win[0]},${_win[1]}`, `--window-size=${_win[2]},${_win[3]}`]
+  : ['--start-maximized'];
+
 const log = (...a) => console.log(...a);
 const R = createResolver({ projectDir: PROJECT_DIR });
 const CAND = R.candidate;
@@ -352,7 +359,7 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
   const ctx = await chromium.launchPersistentContext('.apply-profile', {
     headless: false, ...(EXE ? { executablePath: EXE } : {}),
     viewport: null,
-    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--start-maximized'],
+    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', ...WIN_ARGS],
   });
   let ppage = ctx.pages()[0] || await ctx.newPage();
   await ppage.goto('about:blank').catch(() => {});
@@ -366,7 +373,7 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
     if (eph) await eph.close().catch(() => {});
     eph = await chromium.launch({
       headless: false, ...(EXE ? { executablePath: EXE } : {}),
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--start-maximized'],
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', ...WIN_ARGS],
     });
     const ectx = await eph.newContext({ viewport: null });
     page = await ectx.newPage();
