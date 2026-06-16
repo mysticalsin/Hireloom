@@ -55,6 +55,36 @@ export function bestOption(desired, options) {
   return bestScore > 0 ? best : null;
 }
 
+// Decide whether to TICK one demographic checkbox, using ONLY the saved EEO self-ID
+// (`self` = the eeo_voluntary block). Truthful, never guessed — the Samsara-safe path:
+// returns true only for an option the candidate genuinely affirms. "None of the above",
+// "Prefer not to say", and any unrecognised option are always false (left for the user).
+export function checkboxSelfId(self, question, optionLabel) {
+  self = self || {};
+  const q = norm(question), o = norm(optionLabel);
+  if (!o || /prefer not|decline|wish not|do not wish/.test(o)) return false;
+  const yes = (v) => /^(yes|true|y)\b/i.test(String(v || '').trim());
+  // Race / ethnicity multi-select → only the affirmative race option (MENA synonyms).
+  if (/race|ethnic/.test(q)) {
+    if (/none of the above/.test(o)) return false;
+    const wants = [self.race_ethnicity, 'middle east', 'middle eastern', 'north african', 'mena']
+      .filter(Boolean).map(norm);
+    return wants.some(w => w && (o.includes(w) || w.includes(o)));
+  }
+  // "Which communities/groups do you belong to / identify with?" → only true self-ID.
+  if (/communit|belong to|identif|affinity|groups do you/.test(q)) {
+    if (/none of the above/.test(o)) return false;          // he affirms Parent → never "none"
+    if (/parent|guardian|caregiver/.test(o))   return yes(self.parent);
+    if (/neurodiver/.test(o))                  return yes(self.neurodiverse);
+    if (/refugee|immigrant|newcomer/.test(o))  return yes(self.immigrant_or_refugee);
+    if (/disab/.test(o))                       return false;   // disability_status = "No, ..."
+    if (/veteran/.test(o))                     return false;
+    if (/lgbt|2slgbt|queer|trans|gender diverse|two.?spirit/.test(o)) return false;
+    return false;                                            // unknown community → never auto-tick
+  }
+  return false;                                             // not a self-ID checkbox group we model
+}
+
 export function detectAts(url) {
   if (!url) return 'unknown';
   if (/greenhouse\.io/i.test(url))           return 'greenhouse';

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createResolver } from '../engine/apply/autoapply-core.mjs';
+import { createResolver, checkboxSelfId } from '../engine/apply/autoapply-core.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'hl-choice-'));
 writeFileSync(join(dir, 'profile.yml'), `candidate:
@@ -56,4 +56,37 @@ test('citizenship desired matches the offered "Canadian Citizen" option via best
   const c = R.classifyField({ label: 'What is your current status in Canada?', type: 'radio' });
   const opt = R.bestOption(c.desired, ['Canadian Citizen', 'Permanent Resident', 'Open Work Permit', 'Closed Work Permit', 'Would need sponsorship']);
   assert.equal(opt, 'Canadian Citizen');
+});
+
+// ── Demographic checkbox self-ID (the Samsara-safe path) ──────────────────────
+const SELF = {
+  race_ethnicity: 'Middle Eastern',
+  parent: 'Yes',
+  neurodiverse: 'No',
+  immigrant_or_refugee: 'No',
+  disability_status: 'No, I do not have a disability',
+};
+const RACE_Q = 'What ethnicity(ies) do you identify with? Please select all that apply.';
+const COMM_Q = 'Which of the following communities do you belong to? Please select all that apply.';
+
+test('race checkbox: ticks Middle East Asian, nothing else', () => {
+  assert.equal(checkboxSelfId(SELF, RACE_Q, 'Middle East Asian'), true);
+  for (const o of ['Black', 'White', 'East Asian', 'South Asian', 'Hispanic or Latino', 'Indigenous', 'Other', 'Prefer not to say']) {
+    assert.equal(checkboxSelfId(SELF, RACE_Q, o), false, `should NOT tick ${o}`);
+  }
+});
+
+test('communities checkbox: ticks ONLY Parent (his true self-ID)', () => {
+  assert.equal(checkboxSelfId(SELF, COMM_Q, 'Parent'), true);
+  for (const o of ['Person with disability', 'Neurodiverse', 'Refugee or immigrant', 'None of the above', 'Other', 'Prefer not to say']) {
+    assert.equal(checkboxSelfId(SELF, COMM_Q, o), false, `should NOT tick ${o}`);
+  }
+});
+
+test('checkboxSelfId never ticks a non-self-ID group', () => {
+  assert.equal(checkboxSelfId(SELF, 'Which tools have you used?', 'Power BI'), false);
+});
+
+test('checkboxSelfId respects an affirmed flag flipping to Yes', () => {
+  assert.equal(checkboxSelfId({ ...SELF, neurodiverse: 'Yes' }, COMM_Q, 'Neurodiverse'), true);
 });

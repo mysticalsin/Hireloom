@@ -23,7 +23,7 @@
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { chromium } from 'playwright';
-import { createResolver, extractFieldsInPage, isDecline, preferTechnical, norm } from './autoapply-core.mjs';
+import { createResolver, extractFieldsInPage, isDecline, preferTechnical, norm, checkboxSelfId } from './autoapply-core.mjs';
 
 const PROJECT_DIR = process.cwd();
 const SDIR = '.apply-session';
@@ -58,6 +58,7 @@ const WIN_ARGS = (_win.length === 4 && _win.every(Number.isFinite))
 const log = (...a) => console.log(...a);
 const R = createResolver({ projectDir: PROJECT_DIR });
 const CAND = R.candidate;
+const SELF = (CAND && CAND.eeo) || {};   // saved EEO self-ID for demographic checkbox groups
 const CAND_NAME = `${CAND.firstName} ${CAND.lastName}`.trim() || 'the candidate';
 const CV_MD = (() => { try { return readFileSync('cv.md', 'utf8').slice(0, 6000); } catch { return ''; } })();
 
@@ -377,6 +378,73 @@ async function selectChoiceGroups(frame) {
   }
 }
 
+// Demographic CHECKBOX groups (multi-select), e.g. Ashby's "What ethnicity(ies) do you
+// identify with?" / "Which communities do you belong to?". Same fieldset clustering as
+// radios; ticks ONLY the boxes the saved self-ID affirms (Middle East Asian; Parent).
+// High-stakes (the Samsara class) → strictly truthful, conservative, and still verified
+// visually before submit.
+async function selectCheckboxGroups(frame) {
+  let groups = [];
+  try {
+    groups = await frame.evaluate(() => {
+      const lblOf = (inp) => {
+        if (inp.id) {
+          const sel = (window.CSS && CSS.escape) ? CSS.escape(inp.id) : inp.id;
+          const l = document.querySelector(`label[for="${sel}"]`);
+          if (l) return l.textContent.replace(/\s+/g, ' ').trim();
+        }
+        const w = inp.closest('label');
+        if (w) return w.textContent.replace(/\s+/g, ' ').trim();
+        const p = inp.parentElement;
+        return p ? p.textContent.replace(/\s+/g, ' ').trim() : '';
+      };
+      const byKey = new Map();
+      for (const c of document.querySelectorAll('input[type="checkbox"]')) {
+        const fs = c.closest('fieldset,[role="group"],[role="radiogroup"]');
+        const key = fs || c;
+        if (!byKey.has(key)) byKey.set(key, { fs, inputs: [] });
+        byKey.get(key).inputs.push(c);
+      }
+      const out = [];
+      for (const g of byKey.values()) {
+        if (g.inputs.length < 2) continue;          // skip lone checkboxes (consent/agree toggles)
+        const options = g.inputs.map(lblOf);
+        const gid = `hlcb${out.length}`;
+        g.inputs.forEach((c, i) => { try { c.setAttribute('data-hl-cb', `${gid}:${i}`); } catch {} });
+        let q = '';
+        if (g.fs) {
+          q = (g.fs.textContent || '').replace(/\s+/g, ' ').trim();
+          for (const o of options) if (o) q = q.split(o).join(' ');
+          q = q.replace(/\s+/g, ' ').trim();
+        }
+        out.push({ gid, question: q, options, checked: g.inputs.map(c => c.checked) });
+      }
+      return out;
+    });
+  } catch { return; }
+
+  for (const g of groups) {
+    if (!g.question) continue;
+    for (let i = 0; i < g.options.length; i++) {
+      if (g.checked[i]) continue;
+      if (!checkboxSelfId(SELF, g.question, g.options[i])) continue;
+      const ok = await frame.evaluate(({ sel }) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        if (!el.checked) {
+          el.click();
+          if (!el.checked) {
+            const lab = (el.id && document.querySelector(`label[for="${(window.CSS && CSS.escape) ? CSS.escape(el.id) : el.id}"]`)) || el.closest('label') || el.parentElement;
+            if (lab) lab.click();
+          }
+        }
+        return !!el.checked;
+      }, { sel: `[data-hl-cb="${g.gid}:${i}"]` }).catch(() => false);
+      log(`  ${ok ? '☑' : '☐'} "${g.question.slice(0, 40)}" → ${g.options[i]}${ok ? '' : ' (did not register — verify)'}`);
+    }
+  }
+}
+
 // One frame's fill: extract → (LLM page-fill if useKimi) → deterministic resolve →
 // write text/select/radio → comboboxes. Returns the field-id list it saw. Called
 // twice per page: pass 1 with the LLM, then a deterministic-only pass 2 (after files
@@ -507,6 +575,7 @@ async function fillFrame(frame, useKimi) {
   }
   await selectComboboxes(frame, fields, answers, altMap, demoIds).catch(() => {});
   await selectChoiceGroups(frame).catch(() => {});
+  await selectCheckboxGroups(frame).catch(() => {});
 
   return fields.map(f => f.id || f.name || '');
 }
