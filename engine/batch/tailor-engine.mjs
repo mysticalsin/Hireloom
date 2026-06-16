@@ -70,6 +70,51 @@ export async function kimiTailor(cvText, jd, roleTitle, company) {
   return parsed;
 }
 
+// ---- Claude tailorer (Anthropic Messages API): SAME prompt + output shape as
+// kimiTailor, but the content is authored by Claude, not Kimi. Per Ramy's rule
+// (2026-06-15): Claude writes the words; the renderer below supplies the Kimi
+// STYLE. No sampling params (Opus 4.8 / 4.7 reject temperature/top_p/top_k);
+// no `thinking` field = runs without thinking, which is right for this bounded
+// reshaping task. Model defaults to Opus 4.8; set CLAUDE_MODEL to override. ----
+const CLAUDE_KEY = process.env.ANTHROPIC_API_KEY || '';
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-8';
+export async function claudeTailor(cvText, jd, roleTitle, company) {
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 4000,
+    system: SYSTEM,
+    messages: [
+      { role: 'user', content: `JOB TITLE: ${roleTitle}\nCOMPANY: ${company}\n\n=== JOB DESCRIPTION ===\n${jd}\n\n=== CANDIDATE CV (source of truth) ===\n${cvText}\n\nReturn the tailored JSON now.` },
+    ],
+  };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 180_000);
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': CLAUDE_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+  } finally { clearTimeout(timer); }
+  if (res.status === 429) { const e = new Error('rate-or-usage-limit'); e.code = 429; e.retryAfter = res.headers.get('retry-after'); throw e; }
+  if (!res.ok) throw new Error(`claude ${res.status}: ${await res.text().catch(() => '')}`);
+  const j = await res.json();
+  let txt = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  txt = txt.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
+  if (s < 0 || e < 0) throw new Error('claude returned no JSON');
+  const parsed = JSON.parse(txt.slice(s, e + 1));
+  if (!parsed.summary || !Array.isArray(parsed.experience) || parsed.experience.length === 0 ||
+      parsed.experience.some(x => !x.title || !Array.isArray(x.bullets) || x.bullets.length === 0))
+    throw new Error('claude returned malformed structure');
+  parsed.title = parsed.title || roleTitle;
+  parsed.competencies = parsed.competencies || '';
+  parsed.tools = parsed.tools || '';
+  return parsed;
+}
+
 // ---- Normalizer: fix common Kimi quirks before rendering ----
 // • period field should be dates only (Kimi sometimes appends the location)
 // • dedupe a doubled location ("X · X" / "X, X" → "X")
