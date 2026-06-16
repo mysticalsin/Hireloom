@@ -166,7 +166,64 @@ async function fieldLoc(frame, f) {
   return null;
 }
 
-async function selectComboboxes(frame, fields, answers, altMap = {}) {
+// Read option texts from the listbox THIS combobox controls — scoped so a
+// DIFFERENT open dropdown's options can't bleed in. The bleed is what selected
+// a phone country-code ("Lebanon+961") for Disability Status on Greenhouse forms.
+// Returns { opts, count, scoped }. scoped=false means we fell back to a global
+// option scan (only safe for non-demographic fields).
+async function scopedOptions(frame, loc) {
+  const OPT = '[role="option"], .select__option, [class*="-option"], [class*="option__"]';
+  const sel = await loc.evaluate(el => {
+    document.querySelectorAll('[data-hl-lb]').forEach(n => n.removeAttribute('data-hl-lb'));
+    const tag = (n) => { if (!n) return null; n.setAttribute('data-hl-lb', '1'); return '[data-hl-lb="1"]'; };
+    const ctrl = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    if (ctrl) { const lb = document.getElementById(ctrl); if (lb) return tag(lb); }
+    // react-select: the open menu lives inside this select's own container
+    const cont = el.closest('[class*="select-shell"], [class*="select__container"]')
+              || (el.closest('[class*="select__control"]') || {}).parentElement;
+    const menu = cont && cont.querySelector('[class*="select__menu"], [class*="menu-list"], [role="listbox"]');
+    if (menu && menu.offsetParent !== null) return tag(menu);
+    // exactly one visible listbox in the whole frame → unambiguous, safe to use
+    const open = Array.from(document.querySelectorAll('[role="listbox"], [class*="select__menu"]')).filter(n => n.offsetParent !== null);
+    if (open.length === 1) return tag(open[0]);
+    return null; // ambiguous → caller decides (strict demographic = blank)
+  }).catch(() => null);
+
+  if (sel) { const opts = frame.locator(`${sel} ${OPT}`); return { opts, count: await opts.count().catch(() => 0), scoped: true }; }
+  const opts = frame.locator(OPT);
+  return { opts, count: await opts.count().catch(() => 0), scoped: false };
+}
+
+// STRICT matcher for demographic / yes-no fields: exact, or same yes/no polarity,
+// or ALL desired tokens present as WHOLE words. No loose token-overlap and no
+// substring — so gender "Male" never matches "Female" and "No, I do not have a
+// disability" never flips to the "Yes" option. Returns -1 → leave BLANK + flag.
+function pickOptionStrict(wants, texts) {
+  const N = texts.map(norm);
+  for (const raw of wants) {
+    const wl = norm(String(raw || '')); if (!wl) continue;
+    let i = N.findIndex(t => t === wl); if (i >= 0) return i;                 // exact
+    const w0 = wl.split(' ')[0];
+    if (w0 === 'yes' || w0 === 'no') {                                        // yes/no polarity
+      const same = N.map((t, j) => ({ t, j })).filter(o => o.t.split(' ')[0] === w0);
+      if (same.length === 1) return same[0].j;
+      const keys = new Set(wl.split(' ').filter(x => x.length > 3 && !['have', 'will', 'future', 'your'].includes(x)));
+      const scored = same.map(o => ({ j: o.j, s: o.t.split(' ').filter(x => keys.has(x)).length })).sort((a, b) => b.s - a.s);
+      if (scored.length && scored[0].s > 0 && (scored.length < 2 || scored[0].s > scored[1].s)) return scored[0].j;
+      return -1;                                                             // ambiguous yes/no → blank
+    }
+    const dt = wl.split(' ').filter(Boolean);                                // categorical: whole-word containment
+    let best = -1, bestExtra = Infinity;
+    N.forEach((t, j) => {
+      const ot = new Set(t.split(' ').filter(Boolean));
+      if (dt.every(x => ot.has(x))) { const extra = ot.size - dt.length; if (extra < bestExtra) { bestExtra = extra; best = j; } }
+    });
+    if (best >= 0) return best;
+  }
+  return -1;
+}
+
+async function selectComboboxes(frame, fields, answers, altMap = {}, demoIds = new Set()) {
   for (const f of fields) {
     if (f.type === 'select' || f.type === 'radio' || f.type === 'checkbox' ||
         f.type === 'file' || f.type === 'textarea') continue;
@@ -189,33 +246,54 @@ async function selectComboboxes(frame, fields, answers, altMap = {}) {
     }).catch(() => false);
     if (!isCombo) continue;
 
-    const optSel = '[role="option"], .select__option, [class*="-option"], [class*="option__"]';
-    await loc.click({ timeout: 3000 }).catch(() => {});
-    await frame.waitForTimeout(250);
+    const strict = demoIds.has(f.id); // demographic → strict matching + scope required
 
-    let opts = frame.locator(optSel);
-    let oc = await opts.count().catch(() => 0);
-    if (oc === 0) {
-      // Type to filter. Use the city / first comma-segment so places-style
-      // autocompletes (Ashby + Greenhouse location) return matchable options.
+    // Skip a combobox that already holds a value — re-running in the top-up pass
+    // was ADDING a second wrong chip to multi-selects (race → White + Hispanic).
+    const filled = await loc.evaluate(el => {
+      const cont = el.closest('[class*="select-shell"], [class*="select__container"]')
+                || (el.closest('[class*="select__control"]') || {}).parentElement;
+      if (cont && cont.querySelector('[class*="multi-value"], [class*="single-value"], [class*="multiValue"], [class*="singleValue"]')) return true;
+      return !!(el.value && String(el.value).trim());
+    }).catch(() => false);
+    if (filled) continue;
+
+    await loc.click({ timeout: 3000 }).catch(() => {});
+    await frame.waitForTimeout(300);
+    let { opts, count, scoped } = await scopedOptions(frame, loc);
+    if (count === 0 && strict) {
+      // Demographic menus are static but can render slowly — wait + re-read.
+      // NEVER type to filter a demographic: typing "Middle Eastern" over-filters
+      // the race multi-select to zero and hides the MENA-inclusive "White /
+      // Caucasian (…the Middle East…)" option before the "White" fallback is tried.
+      await frame.waitForTimeout(500);
+      ({ opts, count, scoped } = await scopedOptions(frame, loc));
+    } else if (count === 0) {
+      // Type to filter (places-style autocompletes: Ashby/Greenhouse location).
       const typeStr = want0.includes(',') ? want0.split(',')[0].trim() : want0;
       await loc.fill('').catch(() => {});
       await loc.pressSequentially(typeStr.slice(0, 40), { delay: 15 }).catch(() => {});
       await frame.waitForTimeout(600);
-      opts = frame.locator(optSel);
-      oc = await opts.count().catch(() => 0);
+      ({ opts, count, scoped } = await scopedOptions(frame, loc));
     }
-    if (oc === 0) { await loc.press('Escape').catch(() => {}); continue; }
+    // For a demographic field we MUST read this field's own listbox. If we can't
+    // isolate it, refuse to match against a global option soup — that bleed is
+    // exactly what put a phone code in Disability Status. Blank + flag instead.
+    if (count === 0 || (strict && !scoped)) {
+      await loc.press('Escape').catch(() => {});
+      if (strict) log(`  ▾ "${(f.label || f.id).slice(0, 32)}" → ⚠ couldn't isolate options — LEFT BLANK (no demographic guessing)`);
+      continue;
+    }
 
     const texts = [];
-    for (let i = 0; i < oc; i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
-    const idx = pickOption(wants.map(String), texts);
+    for (let i = 0; i < count; i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
+    const idx = strict ? pickOptionStrict(wants.map(String), texts) : pickOption(wants.map(String), texts);
     if (idx >= 0) {
       await opts.nth(idx).click({ timeout: 2500 }).catch(() => {});
-      log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → clicked "${(texts[idx] || '').slice(0, 30)}"`);
+      log(`  ▾ "${(f.label || f.id).slice(0, 32)}" → "${(texts[idx] || '').slice(0, 28)}"${strict ? ' [strict]' : ''}`);
     } else {
       await loc.press('Escape').catch(() => {});
-      log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ⚠ no option matched "${want0.slice(0, 30)}" — LEFT BLANK, fill by hand`);
+      log(`  ▾ "${(f.label || f.id).slice(0, 32)}" → ⚠ no${strict ? ' safe' : ''} match for [${wants.join(' / ').slice(0, 50)}] — saw {${texts.slice(0, 8).map(t => norm(t).slice(0, 16)).join(' | ')}} — LEFT BLANK`);
     }
     await frame.waitForTimeout(200);
   }
@@ -318,14 +396,16 @@ async function fillFrame(frame, useKimi) {
   // races → White) so the picker can try alternates against the LIVE option list
   // when the primary isn't offered (US-EEO forms have no MENA row).
   const altMap = {};
+  const demoIds = new Set(); // demographic fields → strict, scope-required matching
   for (const f of fields) {
     const cls = R.classifyField(f);
+    if (cls && cls.kind === 'demographic') demoIds.add(f.id);
     if (cls && Array.isArray(cls.fallbacks) && cls.fallbacks.length) {
       const primary = answers[f.id] ?? answers[f.name] ?? cls.desired;
       altMap[f.id] = [primary, ...cls.fallbacks].filter(Boolean);
     }
   }
-  await selectComboboxes(frame, fields, answers, altMap).catch(() => {});
+  await selectComboboxes(frame, fields, answers, altMap, demoIds).catch(() => {});
 
   return fields.map(f => f.id || f.name || '');
 }
@@ -586,6 +666,61 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
           } catch {}
           await sleep(500);
           writeJsonAtomic(OUT, { id: c.id, ok: true, msg: `scrolled ${dy}` });
+        } else if (c.cmd === 'probe') {
+          // Diagnostic: open each combobox (optionally filtered by label substring
+          // in c.q) and dump its SCOPED options, so we can see exactly what the
+          // form offers (and why a match failed) instead of guessing.
+          const q = (c.q || '').toLowerCase();
+          const out = [];
+          for (const frame of page.frames()) {
+            let fields = [];
+            try { fields = await frame.evaluate(extractFieldsInPage); } catch { continue; }
+            for (const f of fields) {
+              if (['select', 'radio', 'checkbox', 'file', 'textarea'].includes(f.type)) continue;
+              if (q && !`${f.label} ${f.id}`.toLowerCase().includes(q)) continue;
+              const loc = await fieldLoc(frame, f);
+              if (!loc) continue;
+              const isCombo = await loc.evaluate(el => el.tagName !== 'SELECT' && (
+                el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list' ||
+                el.getAttribute('aria-haspopup') === 'listbox' ||
+                !!el.closest('.select__control,[class*="select__control"],[class*="select-shell"],[class*="combobox"],[role="combobox"]')
+              )).catch(() => false);
+              if (!isCombo) continue;
+              await loc.click({ timeout: 2500 }).catch(() => {});
+              await frame.waitForTimeout(350);
+              const { opts, count, scoped } = await scopedOptions(frame, loc);
+              const texts = [];
+              for (let i = 0; i < Math.min(count, 30); i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
+              await loc.press('Escape').catch(() => {});
+              out.push({ label: (f.label || '').slice(0, 70), id: f.id, scoped, count, options: texts });
+            }
+          }
+          writeJsonAtomic(OUT, { id: c.id, ok: true, msg: JSON.stringify(out, null, 2) });
+        } else if (c.cmd === 'submit') {
+          // Click the verified submit button. SEPARATE from fill (which ALWAYS
+          // hard-stops): only the controller calls this, AFTER screenshot-verifying
+          // the filled form against the user's standard. Returns the post-click URL
+          // + page text so the controller can confirm the application landed.
+          const before = safeUrl();
+          const btns = page.locator('button, input[type="submit"], input[type="button"], a[role="button"]');
+          const n = await btns.count().catch(() => 0);
+          let clicked = false, label = '';
+          for (let i = 0; i < n; i++) {
+            const b = btns.nth(i);
+            if (!(await b.isVisible().catch(() => false))) continue;
+            const t = ((await b.textContent().catch(() => '')) || (await b.getAttribute('value').catch(() => '')) || '').trim();
+            if (!t) continue;
+            if (SUBMIT_RE.test(t) || SUBMIT_ALSO_RE.test(t)) { label = t; await b.click({ timeout: 10_000 }).catch(() => {}); clicked = true; break; }
+          }
+          if (!clicked) {
+            writeJsonAtomic(OUT, { id: c.id, ok: false, msg: 'no submit button found — submit by hand' });
+          } else {
+            await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+            await sleep(1500);
+            let txt = ''; try { txt = (await page.evaluate(() => document.body ? document.body.innerText : '')).replace(/\n{2,}/g, '\n').trim().slice(0, 500); } catch {}
+            writeJsonAtomic(OUT, { id: c.id, ok: true, msg: `clicked "${label}" — now at ${safeUrl()} (was ${before})\n--- page ---\n${txt}` });
+            setStatus('submitted', `submitted via "${label}"`);
+          }
         } else if (c.cmd === 'read') {
           // Extract the rendered page text — lets the controller read JS-walled
           // portals (JDs, confirmations) that WebFetch can't see.

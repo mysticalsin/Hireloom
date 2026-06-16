@@ -147,7 +147,7 @@ export function loadCandidateIdentity(profileFile) {
     const out = {};
     for (const raw of m[1].split('\n')) {
       const line = raw.replace(/\s+#.*$/, '');
-      const kv = line.match(/^\s+([a-z_]+):\s*"?([^"\n]*?)"?\s*$/i);
+      const kv = line.match(/^\s+([a-z0-9_]+):\s*"?([^"\n]*?)"?\s*$/i);
       if (kv && kv[2]) out[kv[1]] = kv[2].trim();
     }
     return out;
@@ -220,14 +220,24 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     const t = norm(`${field.label} ${field.id} ${field.name}`);
     const e = CANDIDATE.eeo, w = CANDIDATE.workAuth, a = CANDIDATE.appAnswers, ed = CANDIDATE.education;
     if (/sponsor/.test(t))                                        return { kind: 'demographic', desired: w.require_sponsorship };
-    if (/authoriz|legally|eligible to work|right to work|work permit/.test(t)) return { kind: 'demographic', desired: w.legally_authorized_to_work };
+    if (/authoriz|legally|eligible to work|right to work|work permit/.test(t)) {
+      // US-specific work-authorization question → NOT authorized (Canadian citizen,
+      // no US status). Canada/generic question → Yes. Never claim US work authorization.
+      if (/\bus\b|united states|\bamerica/.test(t) && !/canada/.test(t)) return { kind: 'demographic', desired: w.authorized_us || 'No' };
+      return { kind: 'demographic', desired: w.legally_authorized_to_work };
+    }
     if (/hispanic|latino|latinx/.test(t))                         return { kind: 'demographic', desired: e.hispanic_latino };
     if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity, fallbacks: [e.race_ethnicity_fallback, e.race_ethnicity_fallback2].filter(Boolean) };
     if (/transgender/.test(t))                                    return { kind: 'demographic', desired: e.transgender };
     if (/orientation/.test(t))                                    return { kind: 'demographic', desired: e.sexual_orientation };
     if (/pronoun/.test(t))                                        return { kind: 'demographic', desired: e.pronouns };
-    if (/gender|\bsex\b/.test(t))                                 return { kind: 'demographic', desired: e.gender };
-    if (/veteran/.test(t))                                        return { kind: 'demographic', desired: e.veteran_status };
+    if (/gender|\bsex\b/.test(t)) {
+      // Modern Greenhouse/Ashby gender lists use "Man"/"Woman", not "Male"/"Female".
+      const g = norm(e.gender);
+      const syn = g === 'male' ? ['Man'] : g === 'female' ? ['Woman'] : [];
+      return { kind: 'demographic', desired: e.gender, fallbacks: syn };
+    }
+    if (/veteran/.test(t))                                        return { kind: 'demographic', desired: e.veteran_status, fallbacks: ['No', 'I am not a veteran', 'Not a veteran'] };
     if (/disab/.test(t))                                          return { kind: 'demographic', desired: e.disability_status };
     if (/18 years|over 18|at least 18|are you 18|\bage\b/.test(t))return { kind: 'logistics', desired: a.over_18 };
     if (/relocat/.test(t))                                        return { kind: 'logistics', desired: a.willing_to_relocate };
