@@ -227,7 +227,7 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
       return { kind: 'demographic', desired: w.legally_authorized_to_work };
     }
     if (/hispanic|latino|latinx/.test(t))                         return { kind: 'demographic', desired: e.hispanic_latino };
-    if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity, fallbacks: [e.race_ethnicity_fallback, e.race_ethnicity_fallback2].filter(Boolean) };
+    if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity, fallbacks: ['Middle East', 'North African', e.race_ethnicity_fallback, e.race_ethnicity_fallback2].filter(Boolean) };
     if (/transgender/.test(t))                                    return { kind: 'demographic', desired: e.transgender };
     if (/orientation/.test(t))                                    return { kind: 'demographic', desired: e.sexual_orientation };
     if (/pronoun/.test(t))                                        return { kind: 'demographic', desired: e.pronouns };

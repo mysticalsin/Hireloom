@@ -367,9 +367,17 @@ async function fillFrame(frame, useKimi) {
   await frame.evaluate(({ items }) => {
     const setNative = (el, val) => {
       const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      // React 16+ tracks input value via a hidden _valueTracker. Setting .value
+      // directly leaves the tracker stale, so React keeps its OLD (empty) state and
+      // validation reports "required field missing" even though the DOM shows the
+      // value (the Ashby name/phone bug — fixed by hand-retyping a char). Resetting
+      // the tracker to '' makes React detect the change on the input event and sync
+      // its state, so submit-validation passes without a manual retype.
+      try { if (el._valueTracker) el._valueTracker.setValue(''); } catch {}
       Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
     };
     for (const it of items) {
       if (it.combo) continue; // combobox → handled by selectComboboxes (open→click), never type
