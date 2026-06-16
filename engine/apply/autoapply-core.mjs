@@ -226,6 +226,14 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
       if (/\bus\b|united states|\bamerica/.test(t) && !/canada/.test(t)) return { kind: 'demographic', desired: w.authorized_us || 'No' };
       return { kind: 'demographic', desired: w.legally_authorized_to_work };
     }
+    // Citizenship / immigration-status questions — e.g. Ashby's "What is your current
+    // status in Canada?" radio (Canadian Citizen / PR / Open|Closed Work Permit / Would
+    // need sponsorship), or a plain "Citizenship" / "Nationality" field. The truthful
+    // answer comes from work_permit_type ("Canadian Citizen"); bestOption picks the
+    // offered option that matches. On a US-only status form there is no Canadian-Citizen
+    // option → no match → left blank (never claims a US status he does not hold).
+    if (/status in canada|immigration status|citizenship status|residenc[ey] status|\bcitizenship\b|\bnationality\b|are you (a |an )?(canadian )?citizen/.test(t))
+      return { kind: 'demographic', desired: w.work_permit_type || a.citizenship, fallbacks: [a.citizenship, a.nationality, 'Canadian'].filter(Boolean) };
     if (/hispanic|latino|latinx/.test(t))                         return { kind: 'demographic', desired: e.hispanic_latino };
     if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity, fallbacks: ['Middle East', 'North African', e.race_ethnicity_fallback, e.race_ethnicity_fallback2].filter(Boolean) };
     if (/transgender/.test(t))                                    return { kind: 'demographic', desired: e.transgender };

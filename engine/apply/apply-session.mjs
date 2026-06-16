@@ -299,6 +299,84 @@ async function selectComboboxes(frame, fields, answers, altMap = {}, demoIds = n
   }
 }
 
+// Radio GROUPS (single-select), e.g. Ashby's "What is your current status in
+// Canada?" → Canadian Citizen / PR / Open|Closed Work Permit / Would need sponsorship.
+// Ashby renders each option as its OWN <input type=radio> with value="on", wrapped in
+// a <fieldset> whose text is the real question (no <legend>). The generic extractor
+// therefore saw N disconnected radios, never the question, and these BASICS (work-auth,
+// citizenship) were left blank. This pass clusters radios by their fieldset/radiogroup,
+// reconstructs the question + option LABELS, classifies the question, and clicks the
+// truthful option BY LABEL (the value="on" attribute is unmatchable). Demographic groups
+// (gender) use strict matching so nothing is ever guessed. Runs after comboboxes; the
+// already-checked guard makes it idempotent across the two fill passes.
+async function selectChoiceGroups(frame) {
+  let groups = [];
+  try {
+    groups = await frame.evaluate(() => {
+      const lblOf = (inp) => {
+        if (inp.id) {
+          const sel = (window.CSS && CSS.escape) ? CSS.escape(inp.id) : inp.id;
+          const l = document.querySelector(`label[for="${sel}"]`);
+          if (l) return l.textContent.replace(/\s+/g, ' ').trim();
+        }
+        const w = inp.closest('label');
+        if (w) return w.textContent.replace(/\s+/g, ' ').trim();
+        const p = inp.parentElement;
+        return p ? p.textContent.replace(/\s+/g, ' ').trim() : (inp.value || '');
+      };
+      const byKey = new Map();
+      for (const r of document.querySelectorAll('input[type="radio"]')) {
+        const fs = r.closest('fieldset,[role="radiogroup"],[role="group"]');
+        const key = fs || r;                       // fieldset element, else lone radio
+        if (!byKey.has(key)) byKey.set(key, { fs, inputs: [] });
+        byKey.get(key).inputs.push(r);
+      }
+      const out = [];
+      for (const g of byKey.values()) {
+        if (g.inputs.length < 2) continue;          // a real choice group has ≥2 options
+        const options = g.inputs.map(lblOf);
+        const gid = `hlcg${out.length}`;
+        g.inputs.forEach((r, i) => { try { r.setAttribute('data-hl-cg', `${gid}:${i}`); } catch {} });
+        let q = '';
+        if (g.fs) {
+          q = (g.fs.textContent || '').replace(/\s+/g, ' ').trim();
+          for (const o of options) if (o) q = q.split(o).join(' ');   // strip option labels → leaves the question
+          q = q.replace(/\s+/g, ' ').trim();
+        }
+        out.push({ gid, question: q, options, checked: g.inputs.findIndex(r => r.checked) });
+      }
+      return out;
+    });
+  } catch { return; }
+
+  for (const g of groups) {
+    if (g.checked >= 0) continue;                   // already answered (idempotent)
+    const opts = (g.options || []).filter(Boolean);
+    if (!g.question || opts.length < 2) continue;
+    const cls = R.classifyField({ label: g.question, id: '', name: '', type: 'radio', options: opts });
+    if (!cls || !cls.desired) continue;             // unclassified → leave for the user
+    const wants = [cls.desired, ...(cls.fallbacks || [])].filter(Boolean).map(String);
+    const strict = cls.kind === 'demographic';      // demographics never guessed
+    const idx = strict ? pickOptionStrict(wants, opts) : pickOption(wants, opts);
+    if (idx < 0) {
+      log(`  ◯ "${g.question.slice(0, 44)}" → ⚠ no${strict ? ' safe' : ''} match for [${wants.join('/').slice(0, 32)}] — LEFT BLANK`);
+      continue;
+    }
+    // In-page click (not a Playwright actionability click): Ashby radios are visually
+    // hidden behind a styled span, so click the input, then its label as a fallback.
+    const ok = await frame.evaluate(({ sel }) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.click();
+      if (el.checked) return true;
+      const lab = (el.id && document.querySelector(`label[for="${(window.CSS && CSS.escape) ? CSS.escape(el.id) : el.id}"]`)) || el.closest('label') || el.parentElement;
+      if (lab) lab.click();
+      return !!el.checked;
+    }, { sel: `[data-hl-cg="${g.gid}:${idx}"]` }).catch(() => false);
+    log(`  ${ok ? '◉' : '◯'} "${g.question.slice(0, 44)}" → ${opts[idx]}${ok ? '' : ' (click did not register — verify)'}`);
+  }
+}
+
 // One frame's fill: extract → (LLM page-fill if useKimi) → deterministic resolve →
 // write text/select/radio → comboboxes. Returns the field-id list it saw. Called
 // twice per page: pass 1 with the LLM, then a deterministic-only pass 2 (after files
@@ -390,11 +468,25 @@ async function fillFrame(frame, useKimi) {
                     Array.from(el.options).find(o => o.text.trim().toLowerCase() === String(it.value).toLowerCase());
         if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', { bubbles: true })); }
       } else if (it.type === 'radio') {
+        // Real radio GROUPS are handled by selectChoiceGroups (click-by-label). Here we
+        // only match by the value attribute, so skip value="on"/empty (Ashby's) — matching
+        // those would click the FIRST radio in the group regardless of the intended option.
+        const wantV = String(it.value).toLowerCase();
+        if (!wantV || wantV === 'on') continue;
         const radios = Array.from(document.querySelectorAll(`[name="${it.name}"]`));
-        const r = radios.find(x => (x.value || '').toLowerCase() === String(it.value).toLowerCase());
+        const r = radios.find(x => (x.value || '').toLowerCase() === wantV);
         if (r && !r.checked) r.click();
       } else if (!el.value) {
-        setNative(el, String(it.value));
+        let v = String(it.value);
+        // A <input type=number> (e.g. Ashby "salary expectations") silently rejects a
+        // non-numeric value like "$100,000 CAD" and stays blank. Coerce to digits; if
+        // there are none, skip rather than fill garbage.
+        if (el.type === 'number' || el.inputMode === 'numeric') {
+          const d = v.replace(/[^\d.]/g, '');
+          if (!d) continue;
+          v = d;
+        }
+        setNative(el, v);
       }
     }
   }, { items: fields.filter(f => (answers[f.id] ?? answers[f.name]) !== undefined)
@@ -414,6 +506,7 @@ async function fillFrame(frame, useKimi) {
     }
   }
   await selectComboboxes(frame, fields, answers, altMap, demoIds).catch(() => {});
+  await selectChoiceGroups(frame).catch(() => {});
 
   return fields.map(f => f.id || f.name || '');
 }
