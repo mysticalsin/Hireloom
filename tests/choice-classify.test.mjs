@@ -61,6 +61,7 @@ test('citizenship desired matches the offered "Canadian Citizen" option via best
 // ── Demographic checkbox self-ID (the Samsara-safe path) ──────────────────────
 const SELF = {
   race_ethnicity: 'Middle Eastern',
+  gender: 'Male',
   parent: 'Yes',
   neurodiverse: 'No',
   immigrant_or_refugee: 'No',
@@ -89,4 +90,46 @@ test('checkboxSelfId never ticks a non-self-ID group', () => {
 
 test('checkboxSelfId respects an affirmed flag flipping to Yes', () => {
   assert.equal(checkboxSelfId({ ...SELF, neurodiverse: 'Yes' }, COMM_Q, 'Neurodiverse'), true);
+});
+
+// ── Gender-identity checkbox self-ID (engine fix 2026-06-16) ──────────────────
+const GENDER_Q = 'How do you describe your gender identity? Select all that apply.';
+test('gender checkbox: ticks "Man" (exact), never spills into other options', () => {
+  assert.equal(checkboxSelfId(SELF, GENDER_Q, 'Man'), true);
+  for (const o of ['Woman', 'Non-binary', 'Masculine-of-centre', 'Genderfluid', 'Genderqueer', 'Another gender identity not listed above', 'Prefer not to answer']) {
+    assert.equal(checkboxSelfId(SELF, GENDER_Q, o), false, `should NOT tick ${o}`);
+  }
+});
+test('gender checkbox: no saved gender → ticks nothing', () => {
+  assert.equal(checkboxSelfId({ ...SELF, gender: undefined }, GENDER_Q, 'Man'), false);
+});
+
+// ── "Which work status best applies?" radio → Canadian Citizen (engine fix) ───
+test('"Which work status best applies to you?" → Canadian Citizen', () => {
+  const c = R.classifyField({ label: 'Which work status best applies to you?', type: 'radio', options: [] });
+  assert.equal(c.desired, 'Canadian Citizen');
+});
+
+// ── Referral-name field is NEVER auto-filled with the candidate's own name ────
+// (Wave's "name of the person who referred you" was wrongly getting "Ramy Sherif".)
+test('a "who referred you" field is left blank, not filled with the candidate name', () => {
+  const answers = {};
+  R.mergeIdentity(answers, [{ id: 'ref1', name: 'ref1', type: 'text',
+    label: 'If you were referred by a Wave employee, please provide the name of the person who referred you here.' }]);
+  assert.equal(answers['ref1'], undefined);
+});
+test('a "Referral name" field is left blank', () => {
+  const answers = {};
+  R.mergeIdentity(answers, [{ id: 'r2', name: 'r2', type: 'text', label: 'Referral name' }]);
+  assert.equal(answers['r2'], undefined);
+});
+test('a real "Full name" field IS still filled', () => {
+  const answers = {};
+  R.mergeIdentity(answers, [{ id: 'n1', name: 'n1', type: 'text', label: 'Full name' }]);
+  assert.equal(answers['n1'], 'Ramy Sherif');
+});
+test('"Preferred Name" is NOT excluded by the referral guard (\\brefer ≠ preferred)', () => {
+  const answers = {};
+  R.mergeIdentity(answers, [{ id: 'p1', name: 'p1', type: 'text', label: 'Preferred Name' }]);
+  assert.equal(answers['p1'], 'Ramy Sherif');
 });

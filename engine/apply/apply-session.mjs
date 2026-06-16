@@ -908,9 +908,12 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
               for (const el of document.querySelectorAll('input[type=radio],input[type=checkbox]')) {
                 const optLabel = nm(labelOf(el));
                 if (!wantVal || !(optLabel === wantVal || optLabel.includes(wantVal))) continue;
-                const fs = el.closest('fieldset,[role=radiogroup],[role=group]');
-                const q = nm(fs ? fs.textContent : '');
-                if (want && q && !q.includes(want) && !optLabel.includes(want)) continue;
+                const grp = el.closest('fieldset,[role=radiogroup],[role=group],[class*="application-question"],[class*="question"],[class*="field"]');
+                const q = nm(grp ? grp.textContent : '');
+                // When a group question (want) is given, REQUIRE the option's own label or its
+                // group context to contain it — never fall through to a blind first-match
+                // (that mis-set the 2nd yes/no group from the 1st when no fieldset wrapped them).
+                if (want && !optLabel.includes(want) && !q.includes(want)) continue;
                 if (!el.checked) { el.click(); if (!el.checked) { const lab = (el.id && document.querySelector(`label[for="${esc(el.id)}"]`)) || el.closest('label') || el.parentElement; if (lab) lab.click(); } }
                 return { ok: true, kind: el.type, label: optLabel.slice(0, 60), checked: el.checked };
               }
