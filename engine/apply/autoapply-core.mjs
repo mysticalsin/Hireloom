@@ -113,6 +113,20 @@ export function extractFieldsInPage() {
       const lbl = parent.querySelector('label, legend');
       if (lbl) return lbl.textContent.replace(/\s+/g, ' ').trim();
     }
+    // Lever / some Greenhouse forms put the question text in a <div> (not a <label>),
+    // a SIBLING of the field wrapper inside the OUTER question container — so the checks
+    // above return "" and the field never classifies (work-auth/sponsorship then get
+    // LLM-guessed, e.g. sponsorship → "Yes"). Climb to that container and read the first
+    // label/title-classed node that doesn't contain the field. Only runs as a last resort,
+    // so it can only ADD a label where there was none.
+    const qc = el.closest('li, fieldset, [class*="question"], [class*="field-row"]');
+    if (qc) {
+      const hint = qc.querySelector('label, legend, [class*="label"], [class*="title"]');
+      if (hint && !hint.contains(el)) {
+        const t = hint.textContent.replace(/\s+/g, ' ').trim();
+        if (t) return t;
+      }
+    }
     return el.placeholder || el.getAttribute('aria-label') || '';
   };
   const elements = document.querySelectorAll(

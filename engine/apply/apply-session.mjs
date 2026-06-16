@@ -866,6 +866,60 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
             }
           }
           writeJsonAtomic(OUT, { id: c.id, ok: true, msg: JSON.stringify(out, null, 2) });
+        } else if (c.cmd === 'set') {
+          // No-LLM targeted edit: set ONE field (matched by a label/question substring)
+          // to a value. Lets the controller correct any field with ZERO API calls — its
+          // own judgment + the real record — covering text/number/select/radio/checkbox.
+          const sel = String(c.sel || ''), val = String(c.val ?? '');
+          let result = { ok: false, msg: 'no field matched' };
+          for (const frame of page.frames()) {
+            const r = await frame.evaluate(({ sel, val }) => {
+              const nm = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+              const want = nm(sel), wantVal = nm(val);
+              const esc = (id) => (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+              const setNative = (el, v) => {
+                const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                try { if (el._valueTracker) el._valueTracker.setValue(''); } catch {}
+                Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+              };
+              const labelOf = (el) => {
+                if (el.id) { const l = document.querySelector(`label[for="${esc(el.id)}"]`); if (l) return l.textContent; }
+                const w = el.closest('label'); if (w) return w.textContent;
+                const c = el.closest('fieldset,[class*="field"],[class*="question"],li'); return c ? c.textContent : '';
+              };
+              // 1) text / number / select inputs (matched by their own label)
+              for (const el of document.querySelectorAll('input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([type=file]):not([type=submit]):not([type=button]),textarea,select')) {
+                if (!nm(labelOf(el)).includes(want)) continue;
+                if (el.tagName === 'SELECT') {
+                  const o = Array.from(el.options).find(x => nm(x.text) === wantVal)
+                         || Array.from(el.options).find(x => wantVal && (nm(x.text).includes(wantVal) || wantVal.includes(nm(x.text))));
+                  if (o) { el.value = o.value; el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, kind: 'select', label: nm(labelOf(el)).slice(0, 60), set: o.text.trim() }; }
+                  return { ok: false, msg: `select matched but no option ~ "${val}"; has: ${Array.from(el.options).map(x => x.text.trim()).join(' | ').slice(0, 160)}` };
+                }
+                let v = val; if (el.type === 'number' || el.inputMode === 'numeric') { const d = v.replace(/[^\d.]/g, ''); if (d) v = d; }
+                setNative(el, v);
+                return { ok: true, kind: 'text', label: nm(labelOf(el)).slice(0, 60), set: v };
+              }
+              // 2) radio / checkbox: click the option whose OWN label matches val, scoped
+              //    by the group question (want) when one is given.
+              for (const el of document.querySelectorAll('input[type=radio],input[type=checkbox]')) {
+                const optLabel = nm(labelOf(el));
+                if (!wantVal || !(optLabel === wantVal || optLabel.includes(wantVal))) continue;
+                const fs = el.closest('fieldset,[role=radiogroup],[role=group]');
+                const q = nm(fs ? fs.textContent : '');
+                if (want && q && !q.includes(want) && !optLabel.includes(want)) continue;
+                if (!el.checked) { el.click(); if (!el.checked) { const lab = (el.id && document.querySelector(`label[for="${esc(el.id)}"]`)) || el.closest('label') || el.parentElement; if (lab) lab.click(); } }
+                return { ok: true, kind: el.type, label: optLabel.slice(0, 60), checked: el.checked };
+              }
+              return null;   // no match in this frame
+            }, { sel, val }).catch(() => null);
+            if (r) { result = r; break; }
+          }
+          writeJsonAtomic(OUT, { id: c.id, ok: !!result.ok, msg: JSON.stringify(result) });
+          if (result.ok) log(`  ✎[set] "${sel.slice(0, 30)}" → ${val.slice(0, 40)}`);
         } else if (c.cmd === 'submit') {
           // Click the verified submit button. SEPARATE from fill (which ALWAYS
           // hard-stops): only the controller calls this, AFTER screenshot-verifying

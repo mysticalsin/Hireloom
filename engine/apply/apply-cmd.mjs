@@ -39,6 +39,7 @@ const payload = { id, cmd };
 if (cmd === 'goto') payload.url = a[1];
 if (cmd === 'scroll') payload.dy = a[1];
 if (cmd === 'probe') payload.q = a[1] || '';
+if (cmd === 'set') { payload.sel = a[1]; payload.val = a[2]; }   // no-LLM targeted field edit
 if (cmd === 'fill') {
   payload.cv = flag('--cv'); payload.cover = flag('--cover');
   payload.jd = flag('--jd'); payload.companyRole = flag('--role');
