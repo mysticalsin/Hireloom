@@ -23,7 +23,7 @@
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { chromium } from 'playwright';
-import { createResolver, extractFieldsInPage, isDecline, preferTechnical } from './autoapply-core.mjs';
+import { createResolver, extractFieldsInPage, isDecline, preferTechnical, norm } from './autoapply-core.mjs';
 
 const PROJECT_DIR = process.cwd();
 const SDIR = '.apply-session';
@@ -126,18 +126,59 @@ const NEXT_RE   = /^(next|continue|save (and|&) continue|proceed|review)\b/i;
 const SUBMIT_ALSO_RE = /^(apply now|apply)\b/i; // treat as submit-grade: never auto-click
 const SUBMIT_RE = /^(submit|submit application|send application|finish|complete application)\b/i;
 
-async function selectComboboxes(frame, fields, answers) {
+// Pick the index of the live option that best matches ANY desired value (primary
+// first, then fallbacks): exact → city/first-segment → substring → token-overlap.
+// Returns -1 when nothing plausibly matches, so we LEAVE THE FIELD BLANK rather
+// than guess (the Samsara "Agender" lesson — never select an unverified option).
+function pickOption(wants, texts) {
+  const N = texts.map(norm);
+  for (const raw of wants) {
+    const want = String(raw || '').trim();
+    const wl = norm(want);
+    if (!wl) continue;
+    let i = N.findIndex(t => t === wl);                       // exact
+    if (i >= 0) return i;
+    const seg = norm(want.split(',')[0]);                    // city from "Ajax, ON, Canada"
+    if (seg && seg !== wl) { i = N.findIndex(t => t === seg); if (i >= 0) return i; }
+    i = N.findIndex(t => t && (t.includes(wl) || wl.includes(t)));  // substring either way
+    if (i >= 0) return i;
+    if (seg) { i = N.findIndex(t => t.includes(seg)); if (i >= 0) return i; } // option contains city
+    const dt = new Set(wl.split(' ').filter(Boolean));       // token overlap
+    let best = -1, bestScore = 0;
+    N.forEach((t, j) => { const ov = t.split(' ').filter(x => dt.has(x)).length; if (ov > bestScore) { bestScore = ov; best = j; } });
+    if (best >= 0 && bestScore >= 1) return best;
+  }
+  return -1;
+}
+
+const ESC = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+// Locate a field robustly: prefer the data-hl-fid stamp (works for id-less React
+// comboboxes like Ashby's location typeahead), then fall back to id / name.
+async function fieldLoc(frame, f) {
+  const sels = [];
+  if (f.hlfid) sels.push(`[data-hl-fid="${ESC(f.hlfid)}"]`);
+  if (f.id)    sels.push(`[id="${ESC(f.id)}"]`);
+  if (f.name)  sels.push(`[name="${ESC(f.name)}"]`);
+  for (const s of sels) {
+    const l = frame.locator(s).first();
+    if (await l.count().catch(() => 0) > 0) return l;
+  }
+  return null;
+}
+
+async function selectComboboxes(frame, fields, answers, altMap = {}) {
   for (const f of fields) {
     if (f.type === 'select' || f.type === 'radio' || f.type === 'checkbox' ||
         f.type === 'file' || f.type === 'textarea') continue;
-    const raw = answers[f.id] ?? answers[f.name];
-    if (raw == null || raw === '') continue;
-    const want = String(raw).trim();
-    if (!want) continue;
+    const primary = answers[f.id] ?? answers[f.name];
+    const wants = (altMap[f.id] && altMap[f.id].length) ? altMap[f.id]
+                : (primary != null && primary !== '' ? [primary] : []);
+    if (!wants.length) continue;
+    const want0 = String(wants[0]).trim();
+    if (!want0) continue;
 
-    const sel = `[id="${String(f.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
-    const loc = frame.locator(sel).first();
-    if (await loc.count().catch(() => 0) === 0) continue;
+    const loc = await fieldLoc(frame, f);
+    if (!loc) continue;
 
     const isCombo = await loc.evaluate(el => {
       if (el.tagName === 'SELECT') return false;
@@ -153,30 +194,214 @@ async function selectComboboxes(frame, fields, answers) {
     await frame.waitForTimeout(250);
 
     let opts = frame.locator(optSel);
-    if (await opts.count().catch(() => 0) === 0) {
+    let oc = await opts.count().catch(() => 0);
+    if (oc === 0) {
+      // Type to filter. Use the city / first comma-segment so places-style
+      // autocompletes (Ashby + Greenhouse location) return matchable options.
+      const typeStr = want0.includes(',') ? want0.split(',')[0].trim() : want0;
       await loc.fill('').catch(() => {});
-      await loc.pressSequentially(want.slice(0, 40), { delay: 15 }).catch(() => {});
-      await frame.waitForTimeout(450);
+      await loc.pressSequentially(typeStr.slice(0, 40), { delay: 15 }).catch(() => {});
+      await frame.waitForTimeout(600);
       opts = frame.locator(optSel);
+      oc = await opts.count().catch(() => 0);
     }
-    const oc = await opts.count().catch(() => 0);
     if (oc === 0) { await loc.press('Escape').catch(() => {}); continue; }
 
-    const wl = want.toLowerCase();
-    let clicked = false;
     const texts = [];
     for (let i = 0; i < oc; i++) texts.push(((await opts.nth(i).textContent().catch(() => '')) || '').trim());
-    let idx = texts.findIndex(t => t.toLowerCase() === wl);
-    if (idx < 0) idx = texts.findIndex(t => t && (t.toLowerCase().includes(wl) || wl.includes(t.toLowerCase())));
-    // No matching option → close the dropdown and LEAVE IT BLANK for the user.
-    // (Old behavior pressed Enter on whatever was highlighted — that selected
-    // "Agender" for gender=Male on Samsara. Never select an unverified option.)
-    if (idx >= 0) { await opts.nth(idx).click({ timeout: 2500 }).catch(() => {}); clicked = true; }
-    else { await loc.press('Escape').catch(() => {}); }
-
+    const idx = pickOption(wants.map(String), texts);
+    if (idx >= 0) {
+      await opts.nth(idx).click({ timeout: 2500 }).catch(() => {});
+      log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → clicked "${(texts[idx] || '').slice(0, 30)}"`);
+    } else {
+      await loc.press('Escape').catch(() => {});
+      log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ⚠ no option matched "${want0.slice(0, 30)}" — LEFT BLANK, fill by hand`);
+    }
     await frame.waitForTimeout(200);
-    log(`  ▾ dropdown "${(f.label || f.id).slice(0, 35)}" → ${clicked ? `clicked "${want.slice(0, 30)}"` : `⚠ no option matched "${want.slice(0, 30)}" — LEFT BLANK, fill by hand`}`);
   }
+}
+
+// One frame's fill: extract → (LLM page-fill if useKimi) → deterministic resolve →
+// write text/select/radio → comboboxes. Returns the field-id list it saw. Called
+// twice per page: pass 1 with the LLM, then a deterministic-only pass 2 (after files
+// attach and any resume-parser autofill settles) that tops up fields left empty.
+async function fillFrame(frame, useKimi) {
+  let fields = [];
+  try { fields = await frame.evaluate(extractFieldsInPage); } catch { return []; }
+  if (!fields.length) return [];
+
+  let kimiMap = {};
+  if (useKimi) {
+    try { kimiMap = await kimiFillPage(fields); }
+    catch (e) { log(`  ⚠ LLM page fill failed: ${e.message} — using local resolver`); }
+  }
+
+  let det = R.resolveAnswers(fields, { cvPath: CTX.cv, coverPath: CTX.cover });
+  det = R.mergeIdentity(det, fields);
+  R.applyProfileAnswers(det, fields);
+
+  const answers = {};
+  for (const f of fields) {
+    const k = kimiMap[f.id];
+    const fallback = det[f.id] ?? det[f.name];
+    // Ring-1 doctrine: for KNOWN fields (identity + classified EEO / work-auth /
+    // education / logistics / location) the deterministic FACT wins over the LLM.
+    // The model only classifies-from-a-menu and writes essays — it never authors
+    // identity. (This is why Ashby name/email blanked before: the LLM fumbled them
+    // and overrode the resolver, which actually knew the answer.)
+    const cls = R.classifyField(f);
+    const detAuthoritative = (cls && cls.desired) || R.isIdentityField(f);
+    let val, src;
+    if (detAuthoritative && fallback !== undefined && fallback !== '' && !isDecline(fallback)) {
+      val = fallback; src = 'local';
+    } else if (k !== undefined && k !== '' && !isDecline(k)) {
+      val = k; src = 'kimi';
+    } else { val = fallback; src = 'local'; }
+    const lim = (f.label || '').match(/(\d{2,4})\s*characters?/i);
+    if (lim && typeof val === 'string' && val.length > +lim[1]) val = val.slice(0, +lim[1]).trim();
+    if (val !== undefined && val !== '' && !isDecline(val)) {
+      answers[f.id] = val;
+      if (useKimi && (f.type === 'textarea' || (f.label || '').length > 25))
+        log(`  ✎[${src}] "${(f.label || f.id).slice(0, 45)}" → ${String(val).slice(0, 55)}`);
+    }
+  }
+
+  // Detect react-select / ARIA comboboxes UP FRONT. Typing text into these does NOT
+  // register (React ignores it) and reverts on blur — so we never setNative them;
+  // selectComboboxes() does the real open→filter→click.
+  const comboIds = new Set();
+  for (const f of fields) {
+    if (['select', 'radio', 'checkbox', 'file', 'textarea'].includes(f.type)) continue;
+    const v = answers[f.id] ?? answers[f.name];
+    if (v == null || v === '') continue;
+    const loc = await fieldLoc(frame, f);
+    if (!loc) continue;
+    const isCombo = await loc.evaluate(el => {
+      if (el.tagName === 'SELECT') return false;
+      return el.getAttribute('role') === 'combobox' ||
+             el.getAttribute('aria-autocomplete') === 'list' ||
+             el.getAttribute('aria-haspopup') === 'listbox' ||
+             !!el.closest('.select__control,[class*="select__control"],[class*="select-shell"],[class*="combobox"],[role="combobox"]');
+    }).catch(() => false);
+    if (isCombo) comboIds.add(f.id);
+  }
+
+  await frame.evaluate(({ items }) => {
+    const setNative = (el, val) => {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    for (const it of items) {
+      if (it.combo) continue; // combobox → handled by selectComboboxes (open→click), never type
+      const el = document.querySelector(`[data-hl-fid="${it.hlfid}"]`) ||
+                 document.getElementById(it.id) || document.querySelector(`[name="${it.name}"]`);
+      if (!el && it.type !== 'radio') continue;
+      if (it.type === 'file' || (el && el.tagName === 'INPUT' && el.type === 'file')) continue;
+      if (el && el.tagName === 'SELECT') {
+        const opt = Array.from(el.options).find(o => o.text.trim() === String(it.value)) ||
+                    Array.from(el.options).find(o => o.text.trim().toLowerCase() === String(it.value).toLowerCase());
+        if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else if (it.type === 'radio') {
+        const radios = Array.from(document.querySelectorAll(`[name="${it.name}"]`));
+        const r = radios.find(x => (x.value || '').toLowerCase() === String(it.value).toLowerCase());
+        if (r && !r.checked) r.click();
+      } else if (!el.value) {
+        setNative(el, String(it.value));
+      }
+    }
+  }, { items: fields.filter(f => (answers[f.id] ?? answers[f.name]) !== undefined)
+                      .map(f => ({ id: f.id, name: f.name, hlfid: f.hlfid, type: f.type, value: answers[f.id] ?? answers[f.name], combo: comboIds.has(f.id) })) });
+
+  // Fallback chain for demographic comboboxes (race: Middle Eastern → Two or more
+  // races → White) so the picker can try alternates against the LIVE option list
+  // when the primary isn't offered (US-EEO forms have no MENA row).
+  const altMap = {};
+  for (const f of fields) {
+    const cls = R.classifyField(f);
+    if (cls && Array.isArray(cls.fallbacks) && cls.fallbacks.length) {
+      const primary = answers[f.id] ?? answers[f.name] ?? cls.desired;
+      altMap[f.id] = [primary, ...cls.fallbacks].filter(Boolean);
+    }
+  }
+  await selectComboboxes(frame, fields, answers, altMap).catch(() => {});
+
+  return fields.map(f => f.id || f.name || '');
+}
+
+// Attach resume + cover by PURPOSE, not blind input order. Resume → the first
+// file input (works across ATSes). Cover → ONLY a dedicated cover field: a file
+// input whose label says "cover", or a click-to-reveal "Attach" button under a
+// "Cover Letter" label (Greenhouse → native file chooser). Never the generic
+// "Upload anything" slot. No cover field → cover is left off (correct: many
+// forms don't ask for one).
+async function attachFiles(page) {
+  if (CTX.cv && existsSync(CTX.cv)) {
+    let resumeDone = false;
+    for (const fr of page.frames()) {
+      const fi = fr.locator('input[type="file"]').first();
+      if (await fi.count().catch(() => 0) === 0) continue;
+      if (await fi.setInputFiles(CTX.cv).then(() => true).catch(() => false)) {
+        resumeDone = true; log(`  📎 resume attached`);
+      }
+      break;
+    }
+    if (!resumeDone) log(`  ⚠ resume not attached — attach by hand`);
+  }
+
+  if (!(CTX.cover && existsSync(CTX.cover))) return;
+  let coverDone = false;
+
+  // 1) a file input whose surrounding label/context says "cover"
+  for (const fr of page.frames()) {
+    const found = await fr.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('input[type="file"]'));
+      for (const el of els) {
+        let ctx = ` ${el.getAttribute('aria-label') || ''} ${el.name || ''} ${el.id || ''}`;
+        let n = el;
+        for (let up = 0; up < 5 && n; up++) { n = n.parentElement; if (n) { const lb = n.querySelector('label,legend,h2,h3,h4,[class*="label"]'); if (lb) ctx += ' ' + lb.textContent; } }
+        if (/cover|motivation/i.test(ctx)) { el.setAttribute('data-hl-cover-input', '1'); return true; }
+      }
+      return false;
+    }).catch(() => false);
+    if (found) {
+      const fi = fr.locator('input[type="file"][data-hl-cover-input="1"]').first();
+      if (await fi.setInputFiles(CTX.cover).then(() => true).catch(() => false)) {
+        coverDone = true; log(`  📎 cover attached (labelled field)`);
+      }
+      break;
+    }
+  }
+
+  // 2) click-to-reveal "Attach" button under a short "Cover Letter" label
+  if (!coverDone) {
+    const tagged = await page.evaluate(() => {
+      const labels = Array.from(document.querySelectorAll('label,legend,h2,h3,h4,div,span'))
+        .filter(e => { const tx = (e.textContent || '').trim(); return tx.length < 40 && /cover letter/i.test(tx); });
+      for (const lbl of labels) {
+        let c = lbl.closest('[class*="field"], fieldset, section, div') || lbl.parentElement;
+        for (let up = 0; up < 3 && c; up++) {
+          const btn = Array.from(c.querySelectorAll('button,[role="button"]')).find(b => /^\s*attach\s*$/i.test(b.textContent || ''));
+          if (btn) { btn.setAttribute('data-hl-cover-attach', '1'); return true; }
+          c = c.parentElement;
+        }
+      }
+      return false;
+    }).catch(() => false);
+    if (tagged) {
+      const btn = page.locator('[data-hl-cover-attach="1"]').first();
+      const [chooser] = await Promise.all([
+        page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null),
+        btn.click({ timeout: 4000 }).catch(() => {}),
+      ]);
+      if (chooser && await chooser.setFiles(CTX.cover).then(() => true).catch(() => false)) {
+        coverDone = true; log(`  📎 cover attached (Attach button → file chooser)`);
+      }
+    }
+  }
+
+  if (!coverDone) log(`  ⓘ no dedicated cover field — cover left off (fine if the form has none)`);
 }
 
 // Fill the CURRENT page forward (auto-advance Next pages) and STOP at submit.
@@ -188,113 +413,26 @@ async function fillForward(page) {
     log(`\n── page ${pageNum} ──`);
     const pageFieldIds = [];
 
+    // Pass 1 — LLM + deterministic.
     for (const frame of page.frames()) {
-      let fields = [];
-      try { fields = await frame.evaluate(extractFieldsInPage); } catch { continue; }
-      if (!fields.length) continue;
-      pageFieldIds.push(...fields.map(f => f.id || f.name || ''));
-
-      let kimiMap = {};
-      try { kimiMap = await kimiFillPage(fields); }
-      catch (e) { log(`  ⚠ Kimi page fill failed: ${e.message} — falling back to local resolver`); }
-
-      let det = R.resolveAnswers(fields, { cvPath: CTX.cv, coverPath: CTX.cover });
-      det = R.mergeIdentity(det, fields);
-      R.applyProfileAnswers(det, fields);
-
-      const answers = {};
-      for (const f of fields) {
-        const k = kimiMap[f.id];
-        const fallback = det[f.id] ?? det[f.name];
-        let val = (k !== undefined && k !== '' && !isDecline(k)) ? k : fallback;
-        const lim = (f.label || '').match(/(\d{2,4})\s*characters?/i);
-        if (lim && typeof val === 'string' && val.length > +lim[1]) val = val.slice(0, +lim[1]).trim();
-        if (val !== undefined && val !== '' && !isDecline(val)) {
-          answers[f.id] = val;
-          const src = (k !== undefined && k !== '' && !isDecline(k)) ? 'kimi' : 'local';
-          if (f.type === 'textarea' || (f.label || '').length > 25)
-            log(`  ✎[${src}] "${(f.label || f.id).slice(0, 45)}" → ${String(val).slice(0, 55)}`);
-        }
-      }
-
-      // Detect react-select / ARIA comboboxes UP FRONT. Typing text into these
-      // does NOT register (React ignores it) and the value reverts to "Select..."
-      // on blur — so we must NOT setNative into them. We leave them entirely to
-      // selectComboboxes(), which does the real open→filter→click.
-      const comboIds = new Set();
-      for (const f of fields) {
-        if (['select', 'radio', 'checkbox', 'file', 'textarea'].includes(f.type)) continue;
-        const v = answers[f.id] ?? answers[f.name];
-        if (v == null || v === '') continue;
-        const sel = `[id="${String(f.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
-        const loc = frame.locator(sel).first();
-        if (await loc.count().catch(() => 0) === 0) continue;
-        const isCombo = await loc.evaluate(el => {
-          if (el.tagName === 'SELECT') return false;
-          return el.getAttribute('role') === 'combobox' ||
-                 el.getAttribute('aria-autocomplete') === 'list' ||
-                 el.getAttribute('aria-haspopup') === 'listbox' ||
-                 !!el.closest('.select__control,[class*="select__control"],[class*="select-shell"],[class*="combobox"],[role="combobox"]');
-        }).catch(() => false);
-        if (isCombo) comboIds.add(f.id);
-      }
-
-      await frame.evaluate(({ items }) => {
-        const setNative = (el, val) => {
-          const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-          Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        };
-        for (const it of items) {
-          if (it.combo) continue; // combobox → handled by selectComboboxes (open→click), never type
-          const el = document.getElementById(it.id) || document.querySelector(`[name="${it.name}"]`) || document.querySelector(`[id="${it.id}"]`);
-          if (!el && it.type !== 'radio') continue;
-          if (it.type === 'file' || (el && el.tagName === 'INPUT' && el.type === 'file')) continue;
-          if (el && el.tagName === 'SELECT') {
-            const opt = Array.from(el.options).find(o => o.text.trim() === String(it.value)) ||
-                        Array.from(el.options).find(o => o.text.trim().toLowerCase() === String(it.value).toLowerCase());
-            if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', { bubbles: true })); }
-          } else if (it.type === 'radio') {
-            const radios = Array.from(document.querySelectorAll(`[name="${it.name}"]`));
-            const r = radios.find(x => (x.value || '').toLowerCase() === String(it.value).toLowerCase());
-            if (r && !r.checked) r.click();
-          } else if (!el.value) {
-            setNative(el, String(it.value));
-          }
-        }
-      }, { items: fields.filter(f => (answers[f.id] ?? answers[f.name]) !== undefined)
-                          .map(f => ({ id: f.id, name: f.name, type: f.type, value: answers[f.id] ?? answers[f.name], combo: comboIds.has(f.id) })) });
-
-      await selectComboboxes(frame, fields, answers).catch(() => {});
+      const ids = await fillFrame(frame, true);
+      pageFieldIds.push(...ids);
     }
 
-    // attach CV + cover to empty file inputs (first → resume, next → cover).
-    // Search EVERY frame, not just the top page — embedded ATS forms (Greenhouse
-    // on okta.com) keep their file inputs inside an iframe; the old page-only
-    // scan silently missed the cover letter there. Count only SUCCESSFUL
-    // uploads: the old `attached++` after a swallowed failure made the next
-    // input receive the cover while the resume slot stayed empty.
-    // Slot = file-input ORDER (0 → resume, 1 → cover), not attach count: with
-    // the old empty-only/count logic, a pre-populated resume input shifted the
-    // resume into the cover slot. A pre-filled slot gets REPLACED with this
-    // role's file — never trust carried-over state.
-    let attached = 0, slot = 0;
-    for (const fr of page.frames()) {
-      const fileInputs = fr.locator('input[type="file"]');
-      const fc = await fileInputs.count().catch(() => 0);
-      for (let i = 0; i < fc && slot < 2; i++, slot++) {
-        const fi = fileInputs.nth(i);
-        const f = slot === 0 ? CTX.cv : CTX.cover;
-        const name = slot === 0 ? 'resume' : 'cover letter';
-        if (!f || !existsSync(f)) continue;
-        const hadVal = await fi.inputValue().catch(() => '');
-        const ok = await fi.setInputFiles(f).then(() => true).catch(() => false);
-        if (ok) { attached++; log(`  📎 ${name} ${hadVal ? 'REPLACED a carried-over file' : 'attached'}`); }
-        else log(`  ⚠ ${name} upload failed — attach by hand`);
-      }
+    // Attach resume + cover by dedicated field (see attachFiles): resume → first
+    // file input; cover → a labelled cover input or a Greenhouse "Attach" button,
+    // never the generic "Upload anything" slot.
+    await attachFiles(page);
+
+    // Pass 2 — some ATSes (Ashby "Autofill from resume") parse the uploaded resume
+    // and repopulate Name/Email/Phone AFTER our fill, sometimes WIPING a field.
+    // Wait for that to settle, then run a deterministic-only top-up: fills any KNOWN
+    // field left empty and retries comboboxes (e.g. location). No LLM call here.
+    if (CTX.cv || CTX.cover) {
+      await page.waitForTimeout(1600);
+      log(`  ↻ top-up pass (post-autofill settle)`);
+      for (const frame of page.frames()) await fillFrame(frame, false);
     }
-    if (!attached && (CTX.cv || CTX.cover)) log(`  ⚠ no file inputs found — check resume/cover attached by hand`);
 
     // Loop guard: if we've already filled a page with this exact field set,
     // we're in a re-render loop (validation errors, or a post-submit page that
@@ -438,6 +576,16 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\./i;
           setStatus('filled', msg);
         } else if (c.cmd === 'status') {
           writeJsonAtomic(OUT, { id: c.id, ok: true, msg: `at ${safeUrl()}` });
+        } else if (c.cmd === 'scroll') {
+          // Scroll the page so a read-tier screenshot can verify below-the-fold
+          // fields. dy = pixels (default 700); dy=0 scrolls back to the top.
+          const dy = Number(c.dy ?? 700);
+          try {
+            if (dy === 0) await page.evaluate(() => window.scrollTo(0, 0));
+            else await page.evaluate((y) => window.scrollBy(0, y), dy);
+          } catch {}
+          await sleep(500);
+          writeJsonAtomic(OUT, { id: c.id, ok: true, msg: `scrolled ${dy}` });
         } else if (c.cmd === 'read') {
           // Extract the rendered page text — lets the controller read JS-walled
           // portals (JDs, confirmations) that WebFetch can't see.

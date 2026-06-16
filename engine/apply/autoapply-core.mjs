@@ -91,6 +91,10 @@ export function extractFieldsInPage() {
   for (const el of elements) {
     const id   = el.id || el.name || `field_${fields.length}`;
     const name = el.name || el.id || '';
+    // Never treat anti-bot fields as fillable — the LLM was dumping essay text
+    // into hidden g-recaptcha-response/h-captcha-response inputs (harmless but
+    // wasteful). Excluding here fixes BOTH the LLM scan and the resolver.
+    if (/recaptcha|captcha|hcaptcha|turnstile|honeypot|\bnonce\b/i.test(`${id} ${name}`)) continue;
     if (seen.has(id + name)) continue;
     seen.add(id + name);
     const type = el.tagName === 'SELECT' ? 'select'
@@ -101,8 +105,10 @@ export function extractFieldsInPage() {
       : type === 'radio'
       ? Array.from(document.querySelectorAll(`[name="${el.name}"]`)).map(r => r.value)
       : [];
+    const hlfid = `f${fields.length}`;            // stable per-scan locator handle
+    try { el.setAttribute('data-hl-fid', hlfid); } catch {}
     fields.push({
-      id, name, type,
+      id, name, type, hlfid,
       label: findLabel(el),
       options,
       required: el.required || el.getAttribute('aria-required') === 'true',
@@ -216,7 +222,7 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     if (/sponsor/.test(t))                                        return { kind: 'demographic', desired: w.require_sponsorship };
     if (/authoriz|legally|eligible to work|right to work|work permit/.test(t)) return { kind: 'demographic', desired: w.legally_authorized_to_work };
     if (/hispanic|latino|latinx/.test(t))                         return { kind: 'demographic', desired: e.hispanic_latino };
-    if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity };
+    if (/race|ethnic/.test(t))                                    return { kind: 'demographic', desired: e.race_ethnicity, fallbacks: [e.race_ethnicity_fallback, e.race_ethnicity_fallback2].filter(Boolean) };
     if (/transgender/.test(t))                                    return { kind: 'demographic', desired: e.transgender };
     if (/orientation/.test(t))                                    return { kind: 'demographic', desired: e.sexual_orientation };
     if (/pronoun/.test(t))                                        return { kind: 'demographic', desired: e.pronouns };
@@ -244,6 +250,32 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     }
     return null;
   };
+
+  // Identity fields by LABEL (not just exact id/name). Ashby uses a single "Name"
+  // field with id "_systemfield_name", email "_systemfield_email", etc., so the
+  // exact-key table in mergeIdentity misses them and they fall through to the LLM
+  // (which then blanks them). This resolves name/email/phone/linkedin from the
+  // visible label, type-guarded to text-ish inputs so it never fills a select.
+  const IDL = {
+    email: /\bemail\b|e mail/, linkedin: /linkedin/,
+    phone: /\bphone\b|mobile|telephone|\bcell\b|\btel\b/,
+    first: /first name|given name|forename/, last: /last name|surname|family name/,
+    full: /full name|legal name|^name$|\byour name\b|\bname\b/,
+  };
+  const TEXTISH = new Set(['text', 'email', 'tel', 'search', '', undefined]);
+  const identityValueFor = (f) => {
+    if (!TEXTISH.has(f.type)) return '';
+    const t = norm(`${f.label} ${f.id} ${f.name}`);
+    if (IDL.email.test(t))    return CANDIDATE.email;
+    if (IDL.linkedin.test(t)) return CANDIDATE.linkedin;
+    if (IDL.phone.test(t))    return CANDIDATE.phone;
+    if (IDL.first.test(t))    return CANDIDATE.firstName;
+    if (IDL.last.test(t))     return CANDIDATE.lastName;
+    if (IDL.full.test(t) && !/company|employer|file|user|reference|emergency|manager|supervisor/.test(t))
+      return `${CANDIDATE.firstName} ${CANDIDATE.lastName}`.trim();
+    return '';
+  };
+  const isIdentityField = (f) => !!identityValueFor(f);
 
   const ESSAY_INTENT = /\bwhy\b|tell us|tell me|describe|what (interests|excites|motivat|draws|attracts)|best fit|why.*fit|what (do you|else)|anything else|bring to|cover letter|in your own words|motivat|passionate|interested in (this|the|working)/;
 
@@ -305,6 +337,14 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     for (const [key, val] of Object.entries(identity)) {
       if (val && fields.some(f => f.id === key || f.name === key)) answers[key] = val;
     }
+    // Label-based pass for ATSes whose field ids don't match the table above
+    // (Ashby _systemfield_*, custom forms). Only fills still-empty fields.
+    for (const f of fields) {
+      const cur = answers[f.id] ?? answers[f.name];
+      if (cur != null && cur !== '') continue;
+      const v = identityValueFor(f);
+      if (v) answers[f.id] = v;
+    }
     return answers;
   };
 
@@ -324,7 +364,10 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
         continue;
       }
       if (isChoice(field) && field.options?.length) {
-        const opt = bestOption(cls.desired, field.options);
+        let opt = bestOption(cls.desired, field.options);
+        if (!opt && Array.isArray(cls.fallbacks)) {
+          for (const fb of cls.fallbacks) { opt = bestOption(fb, field.options); if (opt) break; }
+        }
         if (opt) {
           if (norm(cur) !== norm(opt)) changes.push(`${field.label || key} → ${opt}`);
           answers[key] = opt;
@@ -382,6 +425,7 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
   return {
     candidate: CANDIDATE, qaBank: QA_BANK, salaryFallback: SALARY_FALLBACK,
     fillPlaceholders, matchBank, matchPackageAnswer, classifyField, bestOption,
+    identityValueFor, isIdentityField,
     resolveAnswers, mergeIdentity, applyProfileAnswers, validateApplication,
     detectAts, findPackage, readPackageJson, norm, isDecline,
   };

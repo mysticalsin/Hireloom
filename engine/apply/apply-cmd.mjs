@@ -37,6 +37,7 @@ const id = prev + 1;
 
 const payload = { id, cmd };
 if (cmd === 'goto') payload.url = a[1];
+if (cmd === 'scroll') payload.dy = a[1];
 if (cmd === 'fill') {
   payload.cv = flag('--cv'); payload.cover = flag('--cover');
   payload.jd = flag('--jd'); payload.companyRole = flag('--role');
