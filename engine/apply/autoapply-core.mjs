@@ -135,6 +135,28 @@ export function extractFieldsInPage() {
         if (t) return t;
       }
     }
+    // Stacked custom forms (e.g. Gem / jobs.gem.com) give inputs no id/name/for-link and
+    // render each caption as a plain <div>/<span> ABOVE the input wrapper — so every
+    // branch above returns "", and the deterministic fill then maps values one field off
+    // (first name ← full name, last name ← email, …). As a last resort before placeholder,
+    // take the nearest element with SHORT, caption-like text that PRECEDES this input in
+    // document order (previous siblings, climbing a few ancestors). Prefer a real
+    // <label>/<legend>, else accept short non-control text. Runs ONLY when nothing above
+    // matched, so it can solely ADD a label where there was none.
+    let cur = el;
+    for (let up = 0; up < 5 && cur; up++) {
+      let sib = cur.previousElementSibling;
+      while (sib) {
+        if (sib.querySelector && !sib.querySelector('input, textarea, select, button')) {
+          const node = (sib.tagName === 'LABEL' || sib.tagName === 'LEGEND') ? sib
+                     : (sib.querySelector('label, legend') || sib);
+          const t = (node.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t && t.length <= 80) return t;
+        }
+        sib = sib.previousElementSibling;
+      }
+      cur = cur.parentElement;
+    }
     return el.placeholder || el.getAttribute('aria-label') || '';
   };
   const elements = document.querySelectorAll(
@@ -331,6 +353,7 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     phone: /\bphone\b|mobile|telephone|\bcell\b|\btel\b/,
     first: /first name|given name|forename/, last: /last name|surname|family name/,
     full: /full name|legal name|^name$|\byour name\b|\bname\b/,
+    location: /^location\b|current (city|location)|where (are|do) you (based|located|residing|reside|live)|city.*(province|state)|town\/city/,
   };
   const TEXTISH = new Set(['text', 'email', 'tel', 'search', '', undefined]);
   const identityValueFor = (f) => {
@@ -339,6 +362,7 @@ export function createResolver({ projectDir = process.cwd(), profileFile, autoap
     if (IDL.email.test(t))    return CANDIDATE.email;
     if (IDL.linkedin.test(t)) return CANDIDATE.linkedin;
     if (IDL.phone.test(t))    return CANDIDATE.phone;
+    if (IDL.location.test(t) && !/relocat|preferred|willing/.test(t)) return CANDIDATE.location;
     if (IDL.first.test(t))    return CANDIDATE.firstName;
     if (IDL.last.test(t))     return CANDIDATE.lastName;
     if (IDL.full.test(t) && !/company|employer|file|user|\brefer|emergency|manager|supervisor/.test(t))

@@ -872,6 +872,37 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\.|workday|ici
             }
           }
           writeJsonAtomic(OUT, { id: c.id, ok: true, msg: JSON.stringify(out, null, 2) });
+        } else if (c.cmd === 'dumpfields') {
+          // Diagnostic (non-mutating): per field, dump the label findLabel resolved, the
+          // nearest caption TEXT preceding the input (even if it's a div/span, not a
+          // <label>), and the ancestor tag/class path — so we can SEE where an ATS (e.g.
+          // Gem) hides its captions instead of inferring the mapping from a screenshot.
+          const out = [];
+          for (const frame of page.frames()) {
+            let fields = [];
+            try { fields = await frame.evaluate(extractFieldsInPage); } catch { continue; }
+            let ctx = {};
+            try {
+              ctx = await frame.evaluate(() => {
+                const r = {};
+                document.querySelectorAll('[data-hl-fid]').forEach(el => {
+                  const path = []; let n = el;
+                  for (let i = 0; i < 4 && n; i++) { const cls = (typeof n.className === 'string' ? n.className : '').split(/\s+/).filter(Boolean).slice(0, 2).join('.'); path.push(n.tagName + (cls ? '.' + cls : '')); n = n.parentElement; }
+                  let near = '', cur = el;
+                  for (let up = 0; up < 4 && cur && !near; up++) {
+                    let sib = cur.previousElementSibling;
+                    while (sib && !near) { const t = (sib.textContent || '').replace(/\s+/g, ' ').trim(); if (t && t.length <= 80 && !(sib.querySelector && sib.querySelector('input,textarea,select'))) near = t; sib = sib.previousElementSibling; }
+                    cur = cur.parentElement;
+                  }
+                  r[el.getAttribute('data-hl-fid')] = { path: path.join(' < '), near };
+                });
+                return r;
+              });
+            } catch {}
+            for (const f of fields)
+              out.push({ hlfid: f.hlfid, type: f.type, label: (f.label || '').slice(0, 40), near: (ctx[f.hlfid] || {}).near || '', path: (ctx[f.hlfid] || {}).path || '' });
+          }
+          writeJsonAtomic(OUT, { id: c.id, ok: true, msg: JSON.stringify(out, null, 2) });
         } else if (c.cmd === 'set') {
           // No-LLM targeted edit: set ONE field (matched by a label/question substring)
           // to a value. Lets the controller correct any field with ZERO API calls — its
