@@ -8411,8 +8411,11 @@ const HTML = /* html */ `<!DOCTYPE html>
     try {
       const res = await fetch('/api/followup/touch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ num: num, kind: kind }) });
       const data = await res.json();
-      if (data.ok) { showToast(kind === 'responded' ? 'Marked responded' : 'Acknowledged — will nudge in 7d if quiet', 'success'); refresh(); }
-      else { showToast(data.error || 'Failed', 'error'); if (btn) btn.disabled = false; }
+      if (data.ok) {
+        showToast(kind === 'responded' ? 'Marked responded' : 'Acknowledged — will nudge in 7d if quiet', 'success');
+        refresh();        // stats (/api/data)
+        refreshBrain();   // radar/groups (/api/groups) — re-runs the cadence so the chip clears
+      } else { showToast(data.error || 'Failed', 'error'); if (btn) btn.disabled = false; }
     } catch { showToast('Network error', 'error'); if (btn) btn.disabled = false; }
   }
   // Delegated click → no inline onclick (avoids the template-literal quote-escape
