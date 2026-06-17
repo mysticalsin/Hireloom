@@ -674,8 +674,14 @@ async function loadData() {
   // heuristic everywhere else ('4.2/5*' — the * marks an auto-fit estimate;
   // user rule 2026-06-13: no scoreless rows). Pool rank rides along, and
   // rows with unresolved review emails surface as "pending your review".
+  let appliedAcrossLanes = null;
   try {
     const index = await getRoleIndex();
+    // Headline APPLIED counts every lane (tracker ∪ pool ∪ aviation ∪ …), not just
+    // applications.md — the tracker-only count showed 100 while All Roles listed 140
+    // roles in 'applied' status (2026-06-17). Falls back to the tracker count below
+    // if the index is unavailable.
+    appliedAcrossLanes = (index.roles || []).filter(r => String(r.status || '').toLowerCase() === 'applied').length;
     const reviewKeys = pendingReviewKeys();
     for (const a of applications) {
       const r = index.byKey ? index.byKey['t' + a.num] : null;
@@ -712,7 +718,7 @@ async function loadData() {
   const stats = {
     total:     applications.length,
     evaluated: applications.filter(a => a.status==='evaluated').length,
-    applied:   applications.filter(a => a.status==='applied').length,
+    applied:   appliedAcrossLanes ?? applications.filter(a => a.status==='applied').length,
     responded: applications.filter(a => a.status==='responded').length,
     interview: applications.filter(a => a.status==='interview').length,
     offer:     applications.filter(a => a.status==='offer').length,
@@ -1185,6 +1191,37 @@ async function logGmailTouch(signal) {
   return true;
 }
 
+// A user clicking "Responded" / "Acknowledge" on the follow-up radar is a real
+// touch — log it to data/follow-ups.md so the cadence clock resets and the row
+// drops off the radar, re-surfacing in 7 days if still silent. This is the user's
+// "an invite that needs no reply — let me acknowledge it and remind me later if
+// nothing happens" ask (2026-06-17). Idempotent per day via a [tag:num:date]
+// marker so double-clicks don't stack rows.
+async function logRadarTouch(num, kind) {
+  if (!num) return false;
+  const file = path.join(DATA_DIR, 'follow-ups.md');
+  let content;
+  try { content = await fs.readFile(file, 'utf8'); } catch { content = '# Follow-ups\n\n| # | App # | Date | Company | Role | Type | Contact | Notes |\n|---|---|---|---|---|---|---|---|\n'; }
+  const date = new Date().toISOString().slice(0, 10);
+  const tag = kind === 'responded' ? 'reply' : 'ack';
+  const marker = `[${tag}:${num}:${date}]`;
+  if (content.includes(marker)) return true; // already logged today
+  let company = '', role = '';
+  try {
+    const apps = parseMarkdownTable(await fs.readFile(path.join(DATA_DIR, 'applications.md'), 'utf8'));
+    const r = apps.find(x => stripMd(x['#'] || x['num'] || '') === String(num));
+    if (r) { company = stripMd(r['company'] || ''); role = stripMd(r['role'] || ''); }
+  } catch { /* tracker optional */ }
+  let maxNum = 0;
+  for (const line of content.split('\n')) { const m = line.match(/^\|\s*(\d+)\s*\|/); if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10)); }
+  const note = kind === 'responded'
+    ? `Marked responded from radar ${marker}`
+    : `Acknowledged — no reply needed, tracking for follow-up ${marker}`;
+  const row = `| ${maxNum + 1} | ${num} | ${date} | ${company} | ${role} | ${tag} | — | ${note} |`;
+  await fs.writeFile(file, content.trimEnd() + '\n' + row + '\n', 'utf8');
+  return true;
+}
+
 async function scanGmailInbox() {
   const token = await getAccessToken();
   if (!token) return;
@@ -1259,12 +1296,19 @@ async function scanGmailInbox() {
     if (signal.type === 'verification') {
       if (signal.codes?.length) {
         const now = Date.now();
+        // Expiry is anchored to the EMAIL's received time, NOT now(). Verification
+        // emails are never stored as signals, so they fall outside existingById and
+        // get re-fetched on every poll — stamping expiry from now() made every code
+        // from the last 14 days show "9m left" forever and flooded the codes panel
+        // (2026-06-17). Real-date expiry keeps only genuinely fresh codes (≤10 min
+        // old, i.e. an apply in progress) visible.
+        const recvMs = parseEmailDate(date)?.getTime?.() || now;
         for (const c of signal.codes) {
           if (!verificationCodes.some(v => v.value === c.value && v.messageId === msg.id)) {
             verificationCodes.push({
               value: c.value, type: c.type, company: matched?.company || null,
               from: from.substring(0, 80), subject: subject.substring(0, 120),
-              receivedAt: now, expiresAt: now + 10 * 60 * 1000, messageId: msg.id,
+              receivedAt: recvMs, expiresAt: recvMs + 10 * 60 * 1000, messageId: msg.id,
             });
           }
         }
@@ -8347,12 +8391,36 @@ const HTML = /* html */ `<!DOCTYPE html>
         const mail = '<span class="hb-mail-actions">' +
           ((grp && grp.emails && grp.emails[0] && grp.emails[0].id) ? '<a class="hb-btn hb-btn-ghost" target="_blank" rel="noopener" href="https://mail.google.com/mail/u/0/#all/' + esc(grp.emails[0].id) + '">✉ open</a>' : '') +
           (gmailReplyAddr(composeSig.from) ? '<a class="hb-btn hb-btn-respond" target="_blank" rel="noopener" title="Pre-filled Gmail draft — nothing sends until you hit Send" href="' + esc(gmailComposeUrl(composeSig)) + '">↩ Respond</a>' : '') +
+          // Resolve the row without composing: "Responded" (you replied) or
+          // "Acknowledge" (no reply needed) — both log a touch, reset the 7-day
+          // clock, and clear any pending flag; the row re-surfaces if still silent.
+          (e.num ? '<button class="hb-btn hb-btn-ghost hb-radar-touch" data-num="' + esc(String(e.num)) + '" data-kind="responded" title="You replied — reset the follow-up clock">✓ Responded</button>' : '') +
+          (e.num ? '<button class="hb-btn hb-btn-ghost hb-radar-touch" data-num="' + esc(String(e.num)) + '" data-kind="acknowledged" title="No reply needed — acknowledge and remind me in 7 days if nothing happens">✓ Acknowledge</button>' : '') +
           '</span>';
         return '<div class="hb-row"><span class="hb-chip' + (/overdue|urgent/.test(e.urgency) ? ' hb-hot' : e.urgency === 'respond-pending' ? ' hb-warm' : '') + '">' + esc(chipTxt) + '</span>' +
           '<a class="hb-link hb-co" href="#role/t' + esc(String(e.num)) + '">' + esc(e.company) + '</a>' +
           '<span>' + esc(e.role) + '</span><span class="hb-num">' + detail + '</span>' + mail + '</div>';
       }).join('');
   }
+
+  // Follow-up radar: "✓ Responded" / "✓ Acknowledge" — log a touch (resets the
+  // 7-day clock + clears any pending flag) and re-render. Acknowledge is for an
+  // invite that needs no reply but should still nudge later if it goes quiet.
+  async function hbRadarTouch(num, kind, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+      const res = await fetch('/api/followup/touch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ num: num, kind: kind }) });
+      const data = await res.json();
+      if (data.ok) { showToast(kind === 'responded' ? 'Marked responded' : 'Acknowledged — will nudge in 7d if quiet', 'success'); refresh(); }
+      else { showToast(data.error || 'Failed', 'error'); if (btn) btn.disabled = false; }
+    } catch { showToast('Network error', 'error'); if (btn) btn.disabled = false; }
+  }
+  // Delegated click → no inline onclick (avoids the template-literal quote-escape
+  // trap that has bitten this file before; data attributes need no escaping).
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.hb-radar-touch');
+    if (b) hbRadarTouch(b.getAttribute('data-num'), b.getAttribute('data-kind'), b);
+  });
 
   function hbRenderReview() {
     const host = document.getElementById('review-content');
@@ -9667,6 +9735,29 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── API: Follow-up radar touch — "Responded" / "Acknowledge" ──
+  // Logs a touch to data/follow-ups.md (resets the cadence clock so the row leaves
+  // the radar and re-surfaces in 7 days if still silent) AND dismisses any pending
+  // Gmail next-step signal for the role (the radar honors gmail flags over cadence,
+  // so the clock reset alone wouldn't clear a flagged row). 'acknowledged' = no
+  // reply needed but keep tracking; 'responded' = the user replied.
+  if (pathname === '/api/followup/touch' && req.method === 'POST') {
+    try {
+      const { num, kind } = await readJsonBody(req);
+      if (!num || !/^\d{1,5}$/.test(String(num))) return sendJsonError(res, 400, 'valid num required');
+      const k = kind === 'responded' ? 'responded' : 'acknowledged';
+      await logRadarTouch(String(num), k);
+      let cleared = 0;
+      for (const s of (gmailCache.signals || [])) {
+        if (!s.dismissed && String(s.num) === String(num) && ['interview', 'unknown'].includes(s.signal)) { s.dismissed = true; cleared++; }
+      }
+      if (cleared) await saveGmailCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, kind: k, clearedSignals: cleared }));
+    } catch (err) { sendJsonError(res, 400, 'touch failed', err); }
+    return;
+  }
+
   // ── API: Apply queue (pool) — full ranked list, head for the overview ──
   if (pathname === '/api/queue') {
     try {
@@ -10147,6 +10238,21 @@ async function handleRequest(req, res) {
         if (existing) Object.assign(existing, fields, { at });
         else store.overrides.push({ key, ...fields, at });
         await fs.writeFile(OVERRIDES_FILE, JSON.stringify(store, null, 2), 'utf8');
+      }
+      // Setting a definite status resolves any still-pending Gmail review signals
+      // for this role. Otherwise a stale signal keeps it flagged "pending your
+      // review" with NO card to act on (it isn't in the live review list), and
+      // changing the status never clears it — the Aritzia ghost (2026-06-17).
+      if (body.status) {
+        const role = index.byKey[key];
+        const num = role && role.num != null ? String(role.num) : null;
+        const poolKey = role && role.pool && role.pool.key ? role.pool.key : null;
+        let dz = 0;
+        for (const s of (gmailCache.signals || [])) {
+          if (s.dismissed) continue;
+          if ((num && String(s.num) === num) || (s.poolKey && (s.poolKey === key || s.poolKey === poolKey))) { s.dismissed = true; dz++; }
+        }
+        if (dz) await saveGmailCache();
       }
       invalidateRoleIndex();
       res.writeHead(200, { 'Content-Type': 'application/json' });
