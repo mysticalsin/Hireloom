@@ -86,6 +86,13 @@ export function extractVerificationCodes(bodyText, subject) {
     { re: /(?:code|verification|OTP|confirm|pin|passcode)[\s:is]*(\d{4,8})/i, type: 'numeric' },
     { re: /(\d{4,8})[\s]*(?:is your|verification|code|OTP|passcode)/i, type: 'numeric' },
     { re: /(?:enter|use)[\s:]*(\d{4,8})/i, type: 'numeric' },
+    // Greenhouse (and similar) security codes are ALPHANUMERIC, delivered as
+    // "...paste this code into the security code field on your application: FFmPTiwD".
+    // The numeric patterns miss them, so the apply flow couldn't read the code AND
+    // the email mis-classified as a plain ack. Capture a 6–12 char token after a
+    // "code … :" lead-in that contains at least one digit OR mixed case (so a plain
+    // lowercase word can't qualify).
+    { re: /code\b[^:\n]{0,60}:\s*((?=[A-Za-z0-9]{6,12}\b)(?=\w*(?:\d|[A-Z][a-z]|[a-z][A-Z]))[A-Za-z0-9]{6,12})\b/i, type: 'alnum' },
   ];
   for (const { re, type } of patterns) {
     const m = text.match(re);
@@ -104,15 +111,36 @@ export function extractVerificationCodes(bodyText, subject) {
 export function detectSignal(subject, snippet, bodyText, from) {
   const text = (subject + ' ' + snippet + ' ' + (bodyText || '')).toLowerCase();
   const subj = (subject || '').toLowerCase();
-  if (VERIFICATION_SIGNALS.some(s => text.includes(s))) {
-    const codes = extractVerificationCodes(bodyText || snippet, subject);
-    if (codes.length > 0) return { type: 'verification', codes };
+  // Verification / security-code emails. A verification phrase in the SUBJECT
+  // ("Security code for your application to X") is unambiguous → always a code
+  // email, EVEN when the code is alphanumeric and we can't parse it (the bug that
+  // let Greenhouse's one-address codes fall through to an ack and cross-pollinate
+  // applications — a StackAdapt code rendered inside Ada's conversation). A phrase
+  // only in the BODY still requires a parsed code, so a footer "verify your email"
+  // link can't flip a real recruiter email to verification.
+  {
+    const verifInSubject = VERIFICATION_SIGNALS.some(s => subj.includes(s));
+    const verifInText = !verifInSubject && VERIFICATION_SIGNALS.some(s => text.includes(s));
+    if (verifInSubject || verifInText) {
+      const codes = extractVerificationCodes(bodyText || snippet, subject);
+      if (verifInSubject || codes.length > 0) return { type: 'verification', codes };
+    }
   }
   // 0. Job-alert newsletters are never application signals.
   if (JOB_ALERT_SIGNALS.some(s => text.includes(s))) return { type: 'other' };
   // 1. Strong, unambiguous rejection wins outright.
   if (STRONG_REJECTION_SIGNALS.some(s => text.includes(s)) ||
       STRONG_REJECTION_REGEXES.some(re => re.test(text))) return { type: 'rejected' };
+  // 1b. Unambiguous submit-confirmations ("Your application for X is on its way",
+  //     "Application submitted/received") are pure acks — the Workday/ATS receipt
+  //     template. Checked BEFORE the interview list because their bodies often
+  //     describe the process ("we'll be in touch about next steps"), which would
+  //     otherwise loose-match as an interview and stack phantom flags in Needs
+  //     Review (the Generac "Myworkday" cards, 2026-06-17). A real rejection never
+  //     wears these subjects, and strong rejections already returned above.
+  if (/\bis on its way\b|\byour application (?:has been|was) (?:submitted|sent|received)\b|\bapplication (?:submitted|received)(?: successfully)?\b/i.test(subj)) {
+    return { type: 'received' };
+  }
   // 2. Interview/next-step language BEFORE the ack short-circuit — recall over
   //    precision by design: yes, some auto-acks describe the interview process
   //    and will land here, but the user would rather review a false next-step

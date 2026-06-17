@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectSignal, matchApplication } from '../apps/web/lib/gmail-signals.mjs';
+import { detectSignal, matchApplication, extractVerificationCodes } from '../apps/web/lib/gmail-signals.mjs';
 
 // ── detectSignal ────────────────────────────────────────────────────────────
 
@@ -335,4 +335,61 @@ test('Aritzia ack with the "Thanks you" vendor typo still classifies as received
     'Thank you for your application. Our team will review it and be in touch.',
     '', '"My Workday @ Aritzia" <myworkday@aritzia.com>');
   assert.equal(signal.type, 'received');
+});
+
+// ── verification / security-code emails (2026-06-17) ─────────────────────────
+// Greenhouse sends ALL security codes from one address, so when they fell
+// through to 'received' acks (the code is alphanumeric, the old extractor only
+// read numeric) they cross-pollinated applications — a StackAdapt code rendered
+// inside Ada's conversation. They must classify as 'verification' (→ dropped).
+
+test('Greenhouse alphanumeric security code → verification (not a "received" ack)', () => {
+  const signal = detectSignal(
+    'Security code for your application to Ada',
+    'Hi Ramy, Copy and paste this code into the security code field on your application: FFmPTiwD After you enter the code, resubmit your application.',
+    'Hi Ramy, Copy and paste this code into the security code field on your application: FFmPTiwD After you enter the code, resubmit your application.',
+    'Greenhouse <no-reply@us.greenhouse-mail.io>');
+  assert.equal(signal.type, 'verification');
+});
+
+test('security-code subject classifies as verification even when the code cannot be parsed', () => {
+  const signal = detectSignal(
+    'Security code for your application to StackAdapt',
+    'Please use the code provided in your portal.', '',
+    'Greenhouse <no-reply@us.greenhouse-mail.io>');
+  assert.equal(signal.type, 'verification');
+});
+
+test('extractVerificationCodes reads an alphanumeric Greenhouse code', () => {
+  const codes = extractVerificationCodes(
+    'Copy and paste this code into the security code field on your application: A7u13ANi',
+    'Security code for your application to Plooto');
+  assert.equal(codes[0]?.value, 'A7u13ANi');
+});
+
+test('extractVerificationCodes still reads a numeric OTP', () => {
+  const codes = extractVerificationCodes('Your verification code is 482913', 'Verify your email');
+  assert.equal(codes[0]?.value, '482913');
+});
+
+// ── Workday submit-confirm acks (the Generac "Myworkday" cards, 2026-06-17) ───
+// "Your application for X is on its way" is a pure receipt. Its body often
+// describes the process ("we'll be in touch about next steps"), which used to
+// loose-match the interview list and stack non-confident interview flags in
+// Needs Review (3 Generac roles collapsed into one "Myworkday" card).
+
+test('Workday "is on its way" submit-confirm → received, not a loose interview flag', () => {
+  const signal = detectSignal(
+    'Your application for Senior Global Supply Manager, Contract Manufacturing is on its way',
+    'Hello Ramy, Thank you for applying to the Senior Global Supply Manager, Contract Manufacturing and for your interest in Generac. We will be in touch about next steps.',
+    '', 'generac@myworkday.com');
+  assert.equal(signal.type, 'received');
+});
+
+test('a genuine interview invite is still classified as interview (no over-suppression)', () => {
+  const signal = detectSignal(
+    'Interview Invitation - Project Manager',
+    'We would like to schedule an interview with you for next week.',
+    '', 'recruiter@acme.com');
+  assert.equal(signal.type, 'interview');
 });

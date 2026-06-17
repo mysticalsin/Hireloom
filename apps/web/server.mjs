@@ -1251,6 +1251,28 @@ async function scanGmailInbox() {
       : null;
     const signal = detectSignal(subject, snippet, bodyText, from);
 
+    // Verification / security-code emails are pure transactional noise. Greenhouse
+    // sends them ALL from one address (no-reply@greenhouse-mail.io), so once they
+    // became groupable signals their codes cross-pollinated applications — a
+    // StackAdapt security code rendered inside the Ada conversation (2026-06-17).
+    // Harvest the code for the apply flow, then NEVER let a code email be a signal.
+    if (signal.type === 'verification') {
+      if (signal.codes?.length) {
+        const now = Date.now();
+        for (const c of signal.codes) {
+          if (!verificationCodes.some(v => v.value === c.value && v.messageId === msg.id)) {
+            verificationCodes.push({
+              value: c.value, type: c.type, company: matched?.company || null,
+              from: from.substring(0, 80), subject: subject.substring(0, 120),
+              receivedAt: now, expiresAt: now + 10 * 60 * 1000, messageId: msg.id,
+            });
+          }
+        }
+        verificationCodes = verificationCodes.filter(v => v.expiresAt > now);
+      }
+      continue;
+    }
+
     if (!matched) {
       if (signal.type === 'other') continue;
       // Pool-only match: it IS one of ours (applied via the pool lane), there
@@ -1396,21 +1418,6 @@ async function scanGmailInbox() {
       signalObj.dismissed = true;
     }
     signals.push(signalObj);
-
-    // Store verification codes for quick access
-    if (signal.type === 'verification' && signal.codes?.length) {
-      const now = Date.now();
-      for (const c of signal.codes) {
-        if (!verificationCodes.some(v => v.value === c.value && v.messageId === msg.id)) {
-          verificationCodes.push({
-            value: c.value, type: c.type, company: matched.company,
-            from: from.substring(0, 80), subject: subject.substring(0, 120),
-            receivedAt: now, expiresAt: now + 10 * 60 * 1000, messageId: msg.id,
-          });
-        }
-      }
-      verificationCodes = verificationCodes.filter(v => v.expiresAt > now);
-    }
   }
 
   // Merge with existing cache (keep dismissed state, avoid dups). Previously
