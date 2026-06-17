@@ -209,6 +209,7 @@ export function buildCoverHtml(paras) {
   </style></head><body>
   <div class="h">${esc(ID.name)}</div><div class="rule"></div>
   <div class="c">${esc(ID.contactText)}</div>
+  <p style="margin-bottom:12px">Dear Hiring Team,</p>
   ${body}<p>Sincerely,<br>${esc(ID.name)}</p></body></html>`;
 }
 

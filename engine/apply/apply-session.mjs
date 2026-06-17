@@ -742,8 +742,11 @@ function readCmd() {
 // form (Greenhouse "reuse last resume", 2026-06-11), so those start cold every
 // time. Workday is a per-company candidate ACCOUNT (one login → many roles in the
 // same tenant), so it belongs with the persistent set — a fresh window per role
-// would force a re-login on every application (2026-06-16).
-const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\.|workday/i;
+// would force a re-login on every application (2026-06-16). iCIMS (incl. Porter's
+// careers.flyporter.com) is also a per-company candidate account with a slow
+// sign-in, so it joins the persistent set — one login covers all its roles
+// (2026-06-17).
+const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\.|workday|icims|flyporter/i;
 
 (async () => {
   mkdirSync(SDIR, { recursive: true });
@@ -926,6 +929,40 @@ const PERSIST_RE = /(^|\.)(indeed|linkedin|glassdoor|ziprecruiter)\.|workday/i;
           }
           writeJsonAtomic(OUT, { id: c.id, ok: !!result.ok, msg: JSON.stringify(result) });
           if (result.ok) log(`  ✎[set] "${sel.slice(0, 30)}" → ${val.slice(0, 40)}`);
+        } else if (c.cmd === 'keys') {
+          // Real keystroke typing for split/OTP code inputs (e.g. Greenhouse's
+          // 8-box "Security code"): setNative dumps the whole string into box 1,
+          // so we focus the first box and keyboard.type() char-by-char — real key
+          // events fire the component's auto-advance. sel = field-label substring
+          // (e.g. "security code"); empty sel types into the active element.
+          const sel = String(c.sel || ''), val = String(c.val ?? '');
+          let typed = false;
+          for (const frame of page.frames()) {
+            const handle = await frame.evaluateHandle((sel) => {
+              const nm = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+              const want = nm(sel);
+              const ctx = (el) => { const c = el.closest('fieldset,[class*="field"],[class*="question"],[class*="security"],form,li,label'); return nm(c ? c.textContent : ''); };
+              const ins = [...document.querySelectorAll('input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([type=file]):not([type=submit]):not([type=button])')]
+                .filter(x => x.offsetParent !== null);
+              // Prefer a 1-char (OTP) box in matching context; else first matching/visible input.
+              return ins.find(x => (x.maxLength === 1) && (!want || ctx(x).includes(want)))
+                  || ins.find(x => !want || ctx(x).includes(want))
+                  || (want ? null : (document.activeElement && document.activeElement.tagName === 'INPUT' ? document.activeElement : null));
+            }, sel).catch(() => null);
+            const el = handle && handle.asElement && handle.asElement();
+            if (el) {
+              try {
+                await el.click({ clickCount: 3 }).catch(() => {});   // select box-1 contents (incl. a bad earlier set)
+                await frame.page().keyboard.press('Backspace').catch(() => {});
+                await frame.page().keyboard.type(val, { delay: 45 }); // char-by-char → OTP auto-advance
+                typed = true;
+              } catch {}
+            }
+            if (handle) await handle.dispose().catch(() => {});
+            if (typed) break;
+          }
+          writeJsonAtomic(OUT, { id: c.id, ok: typed, msg: typed ? `typed "${val}" (${val.length} chars)` : 'no code field matched' });
+          if (typed) log(`  ⌨[keys] "${sel.slice(0, 24)}" → ${val}`);
         } else if (c.cmd === 'submit') {
           // Click the verified submit button. SEPARATE from fill (which ALWAYS
           // hard-stops): only the controller calls this, AFTER screenshot-verifying
