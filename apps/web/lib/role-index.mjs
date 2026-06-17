@@ -292,7 +292,10 @@ export function domainRoot(domain) {
   return labels[labels.length - 1] || null;
 }
 
-function isAtsDomain(domain) {
+// Is this sender domain a multi-tenant ATS RELAY (the employer's mail never
+// originates here)? Exported so the email scanner can refuse to name the
+// company after the relay (generac@myworkday.com is NOT "Myworkday").
+export function isAtsDomain(domain) {
   return ATS_DOMAINS.some(d => domain === d || domain.endsWith('.' + d));
 }
 

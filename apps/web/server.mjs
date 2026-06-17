@@ -38,8 +38,8 @@ import { runDoctorChecks } from '../../engine/doctor.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
-import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
-import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes, reconcilePoolKeys } from './lib/role-index.mjs';
+import { detectSignal, matchApplication, extractRoleFromEmail, deriveCompanyFromText } from './lib/gmail-signals.mjs';
+import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes, reconcilePoolKeys, isAtsDomain, senderDomain } from './lib/role-index.mjs';
 import { buildSentIndex, groupSignals, groupsForInbox, groupsForReview, signalPendingReview, NO_REVIEW_STATUSES } from './lib/email-groups.mjs';
 import { autoFitScore, explainFit } from './lib/fit-score.mjs';
 import { appendHistory, loadHistory, latestStatusDate, interviewDateFor, setInterviewDate, extractInterviewDateFromText } from './lib/status-history.mjs';
@@ -1136,8 +1136,19 @@ function runAnalyzer(rel, ttlMs) {
 // domains say nothing about the company — use the sender's display name
 // instead (a recruiter on gmail.com shouldn't render as company "Gmail").
 const FREEMAIL_RE = /^(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|proton|protonmail|aol)\./i;
-function guessCompanyFromSender(from) {
+// Best-effort employer name from an email. ATS RELAY senders
+// (generac@myworkday.com) never identify the employer, so for those we read the
+// real company out of the subject/body ("...interest in Generac") and NEVER
+// fall back to the relay root — otherwise every Workday ack collapses into one
+// "Myworkday" card (2026-06-17).
+function guessCompanyFromSender(from, subject = '', snippet = '', bodyText = '') {
   const dom = (String(from).match(/@([a-z0-9.-]+)/i) || [])[1] || '';
+  const relay = isAtsDomain(senderDomain(from) || dom.toLowerCase());
+  if (relay) {
+    const fromText = deriveCompanyFromText(subject, snippet, bodyText);
+    if (fromText) return fromText;
+    return ''; // never label a group after the relay; caller leaves it blank
+  }
   const root = dom.replace(/\.[a-z]{2,4}(\.[a-z]{2})?$/i, '').split('.').pop() || '';
   if (FREEMAIL_RE.test(root + '.')) {
     const disp = String(from).replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
@@ -1265,6 +1276,35 @@ async function scanGmailInbox() {
         });
         continue;
       }
+      // Plain confirmation ("Thank you for your interest in StackAdapt!") that
+      // didn't bind to a unique role — there are several StackAdapt rows and the
+      // subject names none. Recall over precision (user doctrine): if the
+      // EMPLOYER is one we've applied to, auto-file it as a company-level
+      // confirmation (dismissed → counts in the "N auto-filed" tally) instead of
+      // letting it stack in Needs Review. A unique role is NOT required for an
+      // ack (2026-06-17). Only confirmations get this — interview/rejection keep
+      // their confidence gate.
+      if (signal.type === 'received') {
+        const ackCompany = extracted.company || guessCompanyFromSender(from, subject, snippet, bodyText);
+        const knownCompany = !!ackCompany && (roleIndex?.roles || []).some(r => companiesMatch(r.company, ackCompany));
+        if (knownCompany) {
+          signals.push({
+            id: msg.id, threadId: parsed.threadId || null,
+            num: null, unmatched: true,
+            company: ackCompany,
+            role: extracted.role || '', extractedRole: extracted.role || '',
+            currentStatus: null,
+            signal: 'received', codes: [],
+            subject: subject.substring(0, 120),
+            snippet: snippet.substring(0, 200),
+            from: from.substring(0, 80),
+            date,
+            suggestedStatus: null,
+            dismissed: true, // company-level confirmation — auto-filed, never review
+          });
+        }
+        continue; // unknown employer ack = drop (keep personal mail out)
+      }
       // No index match at all — historically dropped on the floor, which is
       // how a real recruiter invite for an untracked application went unseen
       // (Compass Group, 2026-06-12). Strong signals surface as "unmatched"
@@ -1275,7 +1315,7 @@ async function scanGmailInbox() {
       signals.push({
         id: msg.id, threadId: parsed.threadId || null,
         num: null, unmatched: true,
-        company: extracted.company || guessCompanyFromSender(from),
+        company: extracted.company || guessCompanyFromSender(from, subject, snippet, bodyText),
         role: extracted.role || '', extractedRole: extracted.role || '',
         currentStatus: null,
         signal: signal.type, codes: [],

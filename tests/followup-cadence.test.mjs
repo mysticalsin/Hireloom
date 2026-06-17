@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeUrgency, computeNextFollowupDate } from '../engine/tracker/followup-cadence.mjs';
+import { computeUrgency, computeNextFollowupDate, isApplicationAck } from '../engine/tracker/followup-cadence.mjs';
 
 // All calls pass autoApplied explicitly so the suite is independent of the
 // local config/profile.yml followups.auto_applied setting.
@@ -60,4 +60,25 @@ test('next follow-up anchors to the touch when it is newer than the response', (
 test('no inbound, no touch: anchors to apply date (old behavior)', () => {
   const next = computeNextFollowupDate('responded', '2026-06-01', null, 0, null, false);
   assert.equal(next, '2026-06-08');
+});
+
+// ── isApplicationAck: an "application received" auto-ack is NOT a response ───
+// Bug (2026-06-17): Aritzia #16 (an Applied row) showed "next step? · respond
+// by ..." in the radar because its only inbound was a plain application ack
+// ("Aritzia Thanks you for your Application!") that a stale cache had typed as
+// 'unknown'. An ack must never anchor the silence clock or raise a flag.
+
+test('isApplicationAck recognizes plain application acknowledgements (incl. the Aritzia typo)', () => {
+  assert.equal(isApplicationAck('Aritzia Thanks you for your Application!'), true);
+  assert.equal(isApplicationAck('Thank you for your interest in StackAdapt!'), true);
+  assert.equal(isApplicationAck('Thank you for applying to Acme'), true);
+  assert.equal(isApplicationAck('We received your application'), true);
+});
+
+test('isApplicationAck does NOT swallow real conversation subjects', () => {
+  assert.equal(isApplicationAck("You're invited to interview with Kong"), false);
+  assert.equal(isApplicationAck('Next steps — availability for a call'), false);
+  assert.equal(isApplicationAck('Quick question about your background'), false);
+  assert.equal(isApplicationAck(''), false);
+  assert.equal(isApplicationAck(null), false);
 });

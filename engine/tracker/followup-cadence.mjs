@@ -14,8 +14,21 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { ACK_SUBJECT_SIGNALS } from '../../apps/web/lib/gmail-signals.mjs';
 
 const CAREER_OPS = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+
+// An "application received" auto-ack ("Thank you for your interest in
+// StackAdapt!", "Aritzia Thanks you for your Application!") is NOT a response —
+// it must never anchor the silence clock or raise a respond-by flag (user
+// policy). Detected by SUBJECT so a stale signal mis-typed as interview/unknown
+// in the cache (older classifier) is still recognized as the ack it is. The
+// 2026-06-17 fix: Aritzia #16 was an Applied row whose only inbound was this
+// ack, yet it showed "next step? · respond by ..." in the radar.
+export function isApplicationAck(subject) {
+  const subj = String(subject || '').toLowerCase();
+  return ACK_SUBJECT_SIGNALS.some(s => subj.includes(s));
+}
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
@@ -167,6 +180,9 @@ function parseInboundResponses() {
       const num = parseInt(s.num);
       if (!Number.isFinite(num)) continue;
       if (!['interview', 'unknown'].includes(s.signal)) continue;
+      // A plain application-acknowledgement is not a live conversation — never
+      // a flag, never a silence-clock anchor (2026-06-17 Aritzia radar bug).
+      if (isApplicationAck(s.subject)) continue;
       const d = new Date(s.date || '');
       const inboundDate = isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
       if (!s.dismissed && !s.autoApplied && !s.userResponded) {

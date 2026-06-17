@@ -355,3 +355,65 @@ test('signalPendingReview: pool-only and unknown signals pend; resolved/auto-wri
   // Plain matched interview flag (unconfident) pends — it sits in review.
   assert.equal(signalPendingReview(sig({ id: 'p6', num: '9', signal: 'interview' })), true);
 });
+
+// ── ATS-relay company resolution: the Generac/Myworkday collapse (2026-06-17) ─
+// Three Workday acks from generac@myworkday.com all stored company "Myworkday"
+// with an empty role, so they collapsed into one "Myworkday (3)" card. The
+// company must come from the body (the real employer), and the role from the
+// subject, so they split into three distinct cards. Aritzia mails via its OWN
+// domain (myworkday@aritzia.com) and must keep its real name.
+
+import { resolveCompany, resolveRole } from '../apps/web/lib/email-groups.mjs';
+
+const GENERAC = [
+  sig({ id: 'gen1', num: null, company: 'Myworkday', role: '', signal: 'received',
+    from: 'generac@myworkday.com', date: 'Tue, 16 Jun 2026 10:00:00 +0000',
+    subject: 'Your application for Senior Global Supply Manager, Contract Manufacturing is on its way',
+    snippet: 'Hello Ramy , Thank you for applying to the Senior Global Supply Manager, Contract Manufacturing and for your interest in Generac. We are excited' }),
+  sig({ id: 'gen2', num: null, company: 'Myworkday', role: '', signal: 'received',
+    from: 'generac@myworkday.com', date: 'Tue, 16 Jun 2026 10:05:00 +0000',
+    subject: 'Your application for Senior Sales Operations Analyst is on its way',
+    snippet: 'Hello Ramy , Thank you for applying to the Senior Sales Operations Analyst and for your interest in Generac. We are excited' }),
+  sig({ id: 'gen3', num: null, company: 'Myworkday', role: '', signal: 'received',
+    from: 'generac@myworkday.com', date: 'Tue, 16 Jun 2026 10:10:00 +0000',
+    subject: 'Your application for Program Manager is on its way',
+    snippet: 'Hello Ramy , Thank you for applying to the Program Manager and for your interest in Generac. We are excited' }),
+];
+
+test('resolveCompany: relay sender "Myworkday" → real employer from body; Aritzia own-domain kept', () => {
+  assert.equal(resolveCompany(GENERAC[2]), 'Generac');
+  // Aritzia mails via its OWN domain — the stored name is trusted as-is.
+  assert.equal(resolveCompany(sig({ company: 'Aritzia', from: '"My Workday @ Aritzia" <myworkday@aritzia.com>',
+    subject: 'Aritzia Thanks you for your Application!' })), 'Aritzia');
+  // A relay sender carrying a REAL employer name is left untouched.
+  assert.equal(resolveCompany(sig({ company: 'Generac', from: 'generac@myworkday.com',
+    subject: 'Your application for Program Manager is on its way', snippet: 'interest in Generac' })), 'Generac');
+});
+
+test('resolveRole: falls back to subject extraction when the signal carries no role', () => {
+  assert.equal(resolveRole(GENERAC[2]), 'Program Manager');
+  // A stored role always wins over extraction.
+  assert.equal(resolveRole(sig({ role: 'Stored Role', subject: 'Your application for Program Manager is on its way' })), 'Stored Role');
+});
+
+test('Generac: three Workday acks split into THREE cards keyed by company+role (not one "Myworkday")', () => {
+  const groups = groupSignals({ signals: GENERAC });
+  assert.equal(groups.length, 3);
+  for (const g of groups) assert.equal(g.company, 'Generac');
+  assert.deepEqual(
+    groups.map(g => g.roles[0]).sort(),
+    ['Program Manager', 'Senior Global Supply Manager, Contract Manufacturing', 'Senior Sales Operations Analyst']);
+  // None of the three keys is the bare relay name.
+  for (const g of groups) assert.ok(g.key.startsWith('generac::'), g.key);
+});
+
+// ── confirmations never pile into Needs Review (the StackAdapt bug, 2026-06-17) ─
+
+test('a dismissed company-level confirmation is auto-filed, never a review card', () => {
+  const conf = sig({ id: 'sa1', num: null, company: 'StackAdapt', signal: 'received', dismissed: true,
+    subject: 'Thank you for your interest in StackAdapt!', from: 'no-reply@stackadapt.com',
+    date: 'Tue, 16 Jun 2026 10:00:00 +0000' });
+  const groups = groupSignals({ signals: [conf] });
+  assert.equal(groupsForReview(groups).length, 0);          // never in review
+  assert.equal(groupsForInbox(groups).autoFiledCount, 1);   // counts as auto-filed
+});

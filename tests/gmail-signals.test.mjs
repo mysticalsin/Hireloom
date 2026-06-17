@@ -191,7 +191,7 @@ test('no company match returns null', () => {
 // ── extractRoleFromEmail ────────────────────────────────────────────────────
 // Fixtures are REAL subjects from data/gmail-cache.json (import is hoisted —
 // appended here so the pre-existing lines above stay untouched).
-import { extractRoleFromEmail } from '../apps/web/lib/gmail-signals.mjs';
+import { extractRoleFromEmail, deriveCompanyFromText } from '../apps/web/lib/gmail-signals.mjs';
 
 test('R5: "Your COMPANY Application - ROLE | bilingual dup" (Hootsuite)', () => {
   const r = extractRoleFromEmail(
@@ -281,4 +281,58 @@ test('rejection: "direction that better fits our needs" beats the Stripe ack sub
     'After careful consideration, we have decided to go in a direction that better fits our needs at this time.',
     'Stripe <no-reply@stripe.com>');
   assert.equal(signal.type, 'rejected');
+});
+
+// ── Workday relay acks (the Generac collapse, 2026-06-17) ────────────────────
+// generac@myworkday.com sent three application acks whose subjects only differ
+// by role. R8 extracts the role from "Your application for ROLE is on its way";
+// deriveCompanyFromText pulls the employer out of the body ("...interest in
+// Generac"), since the relay sender is never the company.
+
+test('R8: "Your application for ROLE is on its way" (the Workday submit-confirm)', () => {
+  for (const [subj, role] of [
+    ['Your application for Senior Global Supply Manager, Contract Manufacturing is on its way',
+      'Senior Global Supply Manager, Contract Manufacturing'],
+    ['Your application for Senior Sales Operations Analyst is on its way', 'Senior Sales Operations Analyst'],
+    ['Your application for Program Manager is on its way', 'Program Manager'],
+  ]) {
+    const r = extractRoleFromEmail(subj, '');
+    assert.equal(r.role, role, subj);
+  }
+});
+
+test('snippet companion recovers role AND company from "applying to ROLE and for your interest in COMPANY"', () => {
+  const r = extractRoleFromEmail('Your application is on its way',
+    'Hello Ramy , Thank you for applying to the Program Manager and for your interest in Generac. We are excited');
+  assert.equal(r.role, 'Program Manager');
+  assert.equal(r.company, 'Generac');
+});
+
+test('deriveCompanyFromText pulls the employer from a relay ack body', () => {
+  assert.equal(deriveCompanyFromText(
+    'Your application for Program Manager is on its way',
+    'Hello Ramy , Thank you for applying to the Program Manager and for your interest in Generac. We are excited to get to know you.',
+    ''), 'Generac');
+  // "Thank you for your interest in StackAdapt!" subject form.
+  assert.equal(deriveCompanyFromText('Thank you for your interest in StackAdapt!', '', ''), 'StackAdapt');
+  // No recognizable employer phrasing → '' (caller falls back).
+  assert.equal(deriveCompanyFromText('Re: your stuff', 'hi there', ''), '');
+});
+
+// ── StackAdapt / Aritzia confirmations are acks, not next-steps (Bugs 2 & 3) ──
+
+test('StackAdapt confirmation classifies as received, never an interview flag', () => {
+  const signal = detectSignal(
+    'Thank you for your interest in StackAdapt!',
+    "Hello Ramy! Thanks for applying for the Data Analyst, Business Intelligence position at StackAdapt—we're so excited you're interested in joining our team! We've received your application",
+    '', 'StackAdapt <no-reply@stackadapt.com>');
+  assert.equal(signal.type, 'received');
+});
+
+test('Aritzia ack with the "Thanks you" vendor typo still classifies as received', () => {
+  const signal = detectSignal(
+    'Aritzia Thanks you for your Application!',
+    'Thank you for your application. Our team will review it and be in touch.',
+    '', '"My Workday @ Aritzia" <myworkday@aritzia.com>');
+  assert.equal(signal.type, 'received');
 });

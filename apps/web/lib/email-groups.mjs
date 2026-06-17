@@ -9,6 +9,8 @@
 // No I/O here — callers load the cache/sent entries and pass data in
 // (tests/email-groups.test.mjs).
 
+import { deriveCompanyFromText, extractRoleFromEmail } from './gmail-signals.mjs';
+
 // Near-duplicate window: the SMS duplicate invite arrived 13s after the
 // original; 15 minutes catches resend hiccups without eating genuine
 // follow-ups (two real Kong reminders 17m42s apart must stay separate).
@@ -41,6 +43,35 @@ export function isAts(domain) {
   const d = String(domain || '').toLowerCase();
   // Suffix match so "hire.lever.co" hits "lever.co" (hostMatches-style, never substring).
   return ATS_DOMAINS.some(a => d === a || d.endsWith('.' + a));
+}
+
+// A relay sender NEVER names the employer ("generac@myworkday.com" → not
+// "Myworkday"). When a signal's stored company is just the relay root, re-derive
+// the real employer from the subject/body so three Generac Workday acks don't
+// collapse into one "Myworkday" card (2026-06-17). Pure: caller passes a signal.
+const RELAY_NAME_RE = /^(myworkday|workday|greenhouse|ashby|ashbyhq|lever|smartrecruiters|icims|rippling|dayforce|dayforcehcm|gem|bamboohr|workable|jobvite|taleo|successfactors)$/i;
+export function resolveCompany(s) {
+  const stored = String(s?.company || '').trim();
+  const senderDom = senderEmail(s?.from).split('@')[1] || '';
+  // Only second-guess the stored name when the SENDER is a relay AND the stored
+  // name is itself the relay's brand — a real employer name (Aritzia, even when
+  // it mails via myworkday@aritzia.com) is trusted as-is.
+  if (senderDom && isAts(senderDom) && (!stored || RELAY_NAME_RE.test(stored.replace(/\s+/g, '')))) {
+    const derived = deriveCompanyFromText(s?.subject || '', s?.snippet || '', s?.bodyText || '');
+    if (derived) return derived;
+  }
+  return stored;
+}
+
+// The role a signal belongs to: the stored role/extractedRole first, falling
+// back to extracting it from the subject/snippet at group time. The fallback
+// rescues signals minted before the role-extraction templates existed (the
+// cached Generac acks carried an empty role, which would re-collapse them into
+// one card even with the company fixed — 2026-06-17).
+export function resolveRole(s) {
+  const stored = String(s?.role || s?.extractedRole || '').trim();
+  if (stored) return stored;
+  return (extractRoleFromEmail(s?.subject || '', s?.snippet || '').role || '').trim();
 }
 
 // "Michelle Parker <mparker@smsequip.com>" / bare "Devyn.Kelly@compass-canada.com"
@@ -145,10 +176,15 @@ export function groupSignals({ signals = [], sentIndex = null, touchesByNum = nu
   const deduped = dedupeSignals(signals);
   const buckets = new Map();
   for (const s of deduped) {
-    const role = String(s.role || s.extractedRole || '').trim();
+    // Real employer, not the relay sender, and a role recovered from the
+    // subject/snippet when missing: keying on these splits three Generac
+    // Workday acks (all stored company "Myworkday", empty role) into three
+    // cards. Tracker-matched rows (num) key on num as before.
+    const role = resolveRole(s);
+    const company = resolveCompany(s);
     const key = (s.num != null && s.num !== '')
       ? 't' + String(s.num)
-      : normName(s.company) + (role ? '::' + normName(role) : '');
+      : normName(company) + (role ? '::' + normName(role) : '');
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(s);
   }
@@ -163,7 +199,7 @@ export function groupSignals({ signals = [], sentIndex = null, touchesByNum = nu
     const num = members.find(s => s.num != null && s.num !== '')?.num ?? null;
     const roles = [], seenRoles = new Set();
     for (const { s } of emails) {
-      const r = String(s.role || s.extractedRole || '').trim();
+      const r = resolveRole(s);
       const k = normName(r);
       if (r && !seenRoles.has(k)) { seenRoles.add(k); roles.push(r); }
     }
@@ -214,7 +250,7 @@ export function groupSignals({ signals = [], sentIndex = null, touchesByNum = nu
     groups.push({
       key,
       num,
-      company: latest.company || members.find(s => s.company)?.company || '',
+      company: resolveCompany(latest) || members.map(resolveCompany).find(Boolean) || '',
       roles,
       status,
       emails: emails.map(e => e.s),

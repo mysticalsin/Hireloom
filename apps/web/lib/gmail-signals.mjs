@@ -59,10 +59,10 @@ export const RECEIVED_SIGNALS  = ['received your application','thank you for app
 // these, it's a "received" confirmation — even if the body describes the interview
 // process — so it never gets mis-flagged as an interview invite.
 export const ACK_SUBJECT_SIGNALS = ['thank you for applying','thanks for applying','thank you for your application',
-  'thanks for your application','application received','received your application','we received your application',
-  'we\'ve received your application','got your application','we\'ve got your application','what happens next',
-  'what to expect','application confirmation','application submitted','your application to','your application for',
-  'thanks for your interest','thank you for your interest'];
+  'thanks for your application','thanks you for your application','application received','received your application',
+  'we received your application','we\'ve received your application','got your application','we\'ve got your application',
+  'what happens next','what to expect','application confirmation','application submitted','your application to',
+  'your application for','thanks for your interest','thank you for your interest'];
 // Job-alert newsletters / talent-community blasts are about NEW postings, not
 // the user's existing application — never classify them as signals. (A "New
 // jobs posted from Capgemini Group" digest auto-flipped a tracker row to
@@ -222,6 +222,14 @@ export function extractRoleFromEmail(subject, snippet) {
   m = subj.match(/^your\s+application\s+for\s+(?:our\s+|the\s+)?(.+?)(?:\s+(?:role|position))?\s+at\s+(.+?)\s*$/i);
   if (m) return done(m[1], m[2]);
 
+  // R8 "Your application for ROLE is on its way" — the Workday submit-confirm
+  // template (generac@myworkday.com et al.). Carries no company in the subject;
+  // the relay sender ("Myworkday") is NOT the employer, so the company is left
+  // for the body/role-index to supply. Without this, three Generac acks all
+  // extract no role and collapse into one "Myworkday" card (2026-06-17).
+  m = subj.match(/^your\s+application\s+for\s+(.+?)\s+is\s+on\s+its\s+way\s*$/i);
+  if (m) return done(m[1]);
+
   // R6 "thank you for applying to/for [the] ROLE position|role" — the
   // position/role tail is REQUIRED: "Thank you for applying to Tenstorrent"
   // names only the company and must not mint a role.
@@ -241,12 +249,42 @@ export function extractRoleFromEmail(subject, snippet) {
     return done(role, m[1], partial);
   }
 
+  const snip = (snippet || '').replace(ZERO_WIDTH_RE, '');
+
+  // Snippet companion (Workday submit-confirm body): "Thank you for applying to
+  // [the] ROLE and for your interest in COMPANY." — the relay sender hides the
+  // employer, but the body names BOTH (the Generac arc, 2026-06-17). Runs
+  // before the "position of" companion because it also recovers the company.
+  m = snip.match(/applying\s+to\s+(?:the\s+)?(.+?)\s+and\s+for\s+your\s+interest\s+in\s+(.+?)(?:\s*[.!]|\s*$)/i);
+  if (m) return done(m[1], m[2]);
+
   // Snippet companion (last resort — a subject hit always wins): acks that
   // hide the title in the body as "the position of ROLE (req-id)". Same
   // digit rule as R3 — the id paren is dropped, real parens are kept.
-  m = (snippet || '').replace(ZERO_WIDTH_RE, '')
-    .match(/position of\s+(.+?)(?:\s*\([^()]*\d[^()]*\))?(?:\s*[,.;]|$)/i);
+  m = snip.match(/position of\s+(.+?)(?:\s*\([^()]*\d[^()]*\))?(?:\s*[,.;]|$)/i);
   if (m) return done(m[1]);
 
   return done(null);
+}
+
+// Pull the EMPLOYER name out of the body/subject when the sender is a
+// multi-tenant ATS relay (generac@myworkday.com → "Generac"). Relay senders
+// never identify the company, so deriving "Myworkday" as the company collapses
+// every Workday ack into one card. These phrasings name the real employer in
+// plain ATS templates; '' when none is found (caller falls back).
+export function deriveCompanyFromText(subject = '', snippet = '', bodyText = '') {
+  const text = (subject + ' ' + snippet + ' ' + (bodyText || '')).replace(ZERO_WIDTH_RE, '');
+  const patterns = [
+    /\bfor\s+your\s+interest\s+in\s+([A-Z][\w&.,'’-]*(?:\s+[A-Z][\w&.,'’-]*){0,3})/, // "...interest in Generac"
+    /\bthank\s+you\s+for\s+your\s+interest\s+in\s+([A-Z][\w&.,'’-]*(?:\s+[A-Z][\w&.,'’-]*){0,3})/i,
+    /\bapplication\s+(?:to|at)\s+([A-Z][\w&.,'’-]*(?:\s+[A-Z][\w&.,'’-]*){0,3})/, // "...application to Acme"
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      // Trim a trailing connective the greedy group may have eaten ("Generac We").
+      return m[1].replace(/\s+(?:We|Our|The|And|Is|For|To)\b.*$/, '').replace(/[.,!]+$/, '').trim();
+    }
+  }
+  return '';
 }
