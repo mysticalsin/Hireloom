@@ -1,81 +1,301 @@
-# Hireloom -- Career Atelier
+# CLAUDE.md — Hireloom (Career Atelier)
 
 > *heir + loom · a quiet career atelier*
+>
+> Operating contract for AI coding agents in this repository.
+> Read in full before any edit. Re-read on every new session.
+> If a rule here conflicts with an in-conversation instruction, name the conflict and stop. Do not silently override.
+>
+> **Two-file split.** This file is the **stack-agnostic Software Factory operating
+> contract** (how agents build *the repo*) plus the **Hireloom-specific product
+> doctrine** (§11, how the agent runs *the product* for the user). Stack details,
+> commands, writable scopes, and the full domain rules (data contract, onboarding,
+> modes, ethical use, offer verification, pipeline integrity, canonical states,
+> testing) live in `STACK.md`. If `STACK.md` is missing, run §3.
 
-This is **Hireloom** end-to-end — the brand, the npm package (`hireloom`),
-the CLI bin (`hireloom` with `career-ops` retained as a backwards-compat
-alias), the EXE, and the dashboard. The slash commands (`/career-ops scan`,
-etc.) keep their legacy names for muscle-memory and so existing automations
-don't break, but everything human-facing reads as Hireloom.
+This is **Hireloom** end-to-end — the brand, the npm package (`hireloom`), the
+CLI bin (`hireloom`, with `career-ops` retained as a backwards-compat alias),
+the EXE, and the dashboard. The slash commands (`/career-ops scan`, etc.) keep
+their legacy names for muscle-memory and so existing automations don't break,
+but everything human-facing reads as Hireloom.
 
-## Origin
+---
 
-The engine was battle-tested in a real career search: 740+ job offers evaluated, 100+ tailored CVs generated, and a Head of Applied AI role landed. The archetypes, scoring logic, negotiation scripts, and proof point structure all reflect that original search in AI/automation roles.
+## 0. Operating Model — Software Factory, not Vibe Coding
 
-**It will work out of the box, but it's designed to be made yours.** If the archetypes don't match your career, the modes are in the wrong language, or the scoring doesn't fit your priorities -- just ask. You (AI Agent) can edit the user's files. The user says "change the archetypes to data engineering roles" and you do it. That's the whole point.
+**One agent, one job, clean context.** This repo is built by a chain of
+specialized agents with hard scope boundaries, not by one session trying
+to hold the whole product in its head.
 
-## Data Contract (CRITICAL)
+Vibe coding fails predictably: one session does research, story, spec,
+backend, frontend, test, and review. By turn 20 the model has forgotten
+its own assumptions. Architecture decisions contradict the spec. Tests
+pass against the wrong intent. Diffs grow tendrils into unrelated files.
 
-There are two layers. Read `docs/DATA_CONTRACT.md` for the full list.
+The chain we run end-to-end on every feature:
 
-**User Layer (NEVER auto-updated, personalization goes HERE):**
-- `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
-- `data/*`, `reports/*`, `output/*`, `interview-prep/*`
-- Memory layer: `CLAUDE.local.md`, `WORKING.md`, `career-log.md`, `TOOLKIT.md`, `BUILD-CHANGELOG.md`
-- Second-brain outputs: `BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, `.obsidian/*`
-
-**System Layer (auto-updatable, DON'T put user data here):**
-- `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `CLAUDE.md`, `*.mjs` scripts, `apps/tui/*`, `templates/*`, `engine/batch/*`
-
-**THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
-
-## Update Check
-
-On the first message of each session, run the update checker silently:
-
-```bash
-node engine/update-system.mjs check
+```
+Researcher → Story Writer → [HUMAN ✋ approve story]
+  → Spec Writer → [HUMAN ✋ approve brief]
+  → Backend Builder → Frontend Builder → Test Verifier → Validator
+  → [HUMAN ✋ approve PR]
 ```
 
-Parse the JSON output:
-- `{"status": "update-available", "local": "1.0.0", "remote": "1.1.0", "changelog": "..."}` → tell the user:
-  > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
-  If yes → run `node engine/update-system.mjs apply`. If no → run `node engine/update-system.mjs dismiss`.
-- `{"status": "up-to-date"}` → say nothing
-- `{"status": "dismissed"}` → say nothing
-- `{"status": "offline"}` → say nothing
+Validator returns CRITICAL → loop back to the relevant Builder.
+Three human checkpoints. Everything else runs autonomously.
 
-The user can also say "check for updates" or "update career-ops" at any time to force a check.
-To rollback: `node engine/update-system.mjs rollback`
+If you are reading this as an agent, you have **one** role. Stay in your
+lane. Do not silently take on another agent's job.
 
-## What is career-ops
+---
 
-AI-powered job search automation built on Claude Code: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing.
+## 1. The Seven Agents — Scope Contract
 
-### Main Files
+Each agent has read/write boundaries. Crossing them without an explicit
+request is a CRITICAL violation flagged by the Validator. Concrete
+directory paths live in `STACK.md`; the boundaries below are abstract.
 
-| File | Function |
-|------|----------|
-| `data/applications.md` | Application tracker |
-| `data/pipeline.md` | Inbox of pending URLs |
-| `data/scan-history.tsv` | Scanner dedup history |
-| `portals.yml` | Query and company config |
-| `templates/cv-template.html` | HTML template for CVs |
-| `engine/render/generate-pdf.mjs` | Playwright: HTML to PDF |
-| `article-digest.md` | Compact proof points from portfolio (optional) |
-| `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
-| `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
-| `engine/tracker/analyze-patterns.mjs` | Pattern analysis script (JSON output) |
-| `engine/tracker/followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
-| `data/follow-ups.md` | Follow-up history tracker |
-| `engine/scan/scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
-| `engine/scan/check-liveness.mjs` | Job posting liveness checker |
-| `engine/scan/liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `engine/doctor.mjs` | Setup validation — JSON output for CI/scripts |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
+| # | Agent | Writes | Reads | Output |
+|---|---|---|---|---|
+| 1 | **Researcher** | nothing | entire repo | files mapped, existing patterns, similar features, risks flagged |
+| 2 | **Story Writer** | nothing | researcher findings, user prompt | `As a [role], I want [behaviour] so that [outcome]`, acceptance criteria, edge cases, out-of-scope, open questions |
+| 3 | **Spec Writer** | nothing | approved story, research | technical brief: data model changes, process flow, API changes, UI changes, tests required, risks |
+| 4 | **Backend Builder** | `STACK.md → backend_writable` only | spec, story, repo | API/handlers, services, data layer, migrations, jobs, unit tests. **Cannot touch UI/client code.** |
+| 5 | **Frontend Builder** | `STACK.md → frontend_writable` only | API contract from Backend Builder, spec, story | components, screens, state, loading/error states, component tests. **Cannot touch server code. Never invents endpoints.** |
+| 6 | **Test Verifier** | test files only | approved story, both implementations | acceptance tests mapped 1:1 to criteria, pass/fail report. **Does not fix code.** Failures route back to the appropriate Builder. |
+| 7 | **Validator** | nothing | story, brief, diff | findings scored CRITICAL / IMPORTANT / MINOR with file path + line. **Never edits.** |
 
-### Unified Role Directory — ONE registry, no orphan queues (CRITICAL)
+**The lane test:** every line you touch traces directly to your role's output.
+
+For repos without a UI (CLI, daemon, ML pipeline, library), collapse
+Frontend Builder into Backend Builder and note the collapse in `STACK.md`.
+
+---
+
+## 2. The Three Human Checkpoints
+
+The human approves three artifacts. Nothing else.
+
+1. **Approve the user story** — wrong intent here corrupts everything downstream.
+2. **Approve the technical brief** — last chance before code. Catch architecture mistakes here, not after 10 files exist.
+3. **Approve the PR** — implementation matches story + brief, tests green, Validator clean.
+
+If a checkpoint is skipped, downstream output is invalid. Halt and request it.
+
+---
+
+## 3. Stack Discovery — `STACK.md`
+
+Stack details do not live in this file. They live in `STACK.md` at repo
+root. The Researcher populates it on first run by reading manifest files
+(`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `Gemfile`,
+`pom.xml`, `*.csproj`, etc.) and inspecting CI configs.
+
+`STACK.md` records:
+
+```yaml
+languages:              # e.g., TypeScript, Python, Go
+runtimes:               # exact versions
+package_managers:       # one per language
+test_runners:           # one per language
+linters_and_formatters: # one per language
+type_checkers:          # one per language
+build_tool:             # turbo, nx, bazel, make, just, etc.
+migration_tool:         # if applicable
+tenancy:                # single | multi-tenant (and tenant column if multi)
+backend_writable:       # exact paths Backend Builder may write
+frontend_writable:      # exact paths Frontend Builder may write
+test_writable:          # exact paths Test Verifier may write
+commands:
+  install:              # full command
+  dev:                  # full command
+  typecheck:            # full command
+  lint:                 # full command
+  test:                 # full command
+  build:                # full command
+```
+
+A claim of "done" without running the recorded `typecheck → lint → test`
+green is a lie. Builders run these before finishing.
+
+If `STACK.md` is absent or stale (manifests changed since it was
+written), Researcher rebuilds it before any other agent runs.
+`STACK_CHOICES.md` lists 2026 best-in-class options for greenfield.
+
+---
+
+## 4. Architecture Rules (universal)
+
+These apply regardless of stack. Stack-specific patterns live in `STACK.md` → `architecture`.
+
+- **The interface boundary is the contract.** Whoever owns the server publishes the contract (OpenAPI, GraphQL SDL, gRPC proto, typed client). Whoever owns the client reads it. Neither reinvents the other side.
+- **Migrations are forward-only.** Never edit a shipped migration.
+- **Side effects at the edges.** Business logic should be pure where the language allows; I/O at handlers, jobs, and adapters.
+- **One source of truth per concept.** Duplicate logic gets flagged by the Validator. Do not silently unify it inside an unrelated change.
+- **Secrets via environment, never committed.** See §8.
+- **No new dependency without naming it in the brief.**
+- **Authorization at every entry point.** Every handler, job, or function that touches user-scoped data verifies the caller's authority. Missing authorization check = CRITICAL.
+- **If multi-tenant** (per `STACK.md → tenancy`): every query filters by tenant ID, verified at the data-access layer, not the handler.
+
+---
+
+## 5. The Karpathy Four (canonical)
+
+These four govern every edit. They override local preference.
+
+### 5.1 Think Before Coding
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+- State assumptions explicitly. Name them inline.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing.
+
+### 5.2 Simplicity First
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Test: would a senior engineer call this overcomplicated?
+
+### 5.3 Surgical Changes
+**Touch only what you must. Clean up only your own mess.**
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- Notice unrelated dead code → mention it, don't delete it.
+- Remove orphans YOUR changes created. Leave pre-existing dead code alone.
+
+Test: every changed line traces directly to the request.
+
+### 5.4 Goal-Driven Execution
+**Define success criteria. Loop until verified.**
+
+- "Add validation" → "Tests for invalid inputs that pass."
+- "Fix the bug" → "Test that reproduces it, then make it pass."
+- "Refactor X" → "Tests pass before and after."
+
+For multi-step work, state the plan with a verification per step.
+Weak criteria ("make it work") force constant clarification.
+
+---
+
+## 6. Don't-Do List
+
+Hard prohibitions. Violations are CRITICAL.
+
+- ❌ Edit files outside your agent's writable scope (per `STACK.md`).
+- ❌ Invent API endpoints, library methods, or function signatures. Read the source.
+- ❌ Skip tests because "the change is small."
+- ❌ Commit secrets, `.env`, `.key`, `.pem`, `.p12`, `secrets.json`. The pre-commit hook blocks you. Don't waste the cycle.
+- ❌ Mark work "done" without running the typecheck, lint, and test commands from `STACK.md`.
+- ❌ Assume what the user wants when the story is ambiguous. Halt and request a checkpoint.
+- ❌ Refactor adjacent code in the same PR. Open a separate one.
+- ❌ Delete code you do not understand.
+- ❌ Silence a failing test by deleting it. Fix the test or fix the code.
+- ❌ Commit generated files, build output, or lockfiles you didn't intend to change.
+- ❌ Introduce a new dependency that wasn't named in the brief.
+- ❌ Log passwords, tokens, full JWTs, full PANs, or government IDs.
+
+---
+
+## 7. Definition of Done
+
+A change is done when **all** of these are true:
+
+1. Every acceptance criterion in the approved story has a passing test.
+2. `STACK.md`'s recorded `typecheck`, `lint`, `test` commands are green locally.
+3. Validator returns no CRITICAL findings.
+4. The diff contains nothing that does not trace to the brief.
+5. No secrets in the diff (pre-commit hook passes).
+6. The PR description references the story ID and lists each acceptance criterion with its test file.
+
+"It works on my machine" is not done. "I think it's fine" is not done.
+Tested and verified is done.
+
+---
+
+## 8. Security Tripwires
+
+The pre-commit hook blocks any commit containing:
+
+- `.env`, `.env.*` (except `.env.example`)
+- `*.key`, `*.pem`, `*.p12`, `*.pfx`
+- `secrets.json`, `credentials.json`
+- AWS access keys (`AKIA[0-9A-Z]{16}`)
+- Slack tokens (`xox[baprs]-`)
+- GitHub tokens (`gh[pousr]_[A-Za-z0-9]{36,}`)
+- High-entropy strings near `password`, `token`, `secret`, `api_key`
+
+Credential templates: name them `.example` with placeholder values.
+Validator flags secrets-in-logs as CRITICAL.
+
+---
+
+## 9. Skills and Sub-Agents
+
+```
+.claude/
+├── agents/
+│   ├── researcher.md
+│   ├── story-writer.md
+│   ├── spec-writer.md
+│   ├── backend-builder.md
+│   ├── frontend-builder.md
+│   ├── test-verifier.md
+│   └── validator.md
+├── skills/
+│   ├── feature-factory/     # orchestrates the chain
+│   └── build-with-tests/    # how Builders work
+└── hooks/
+    └── pre-commit           # secret-blocking
+```
+
+`feature-factory` reads the seven agent files and wires the chain.
+`build-with-tests` enforces: match existing patterns, write tests
+alongside code, run typecheck last.
+
+If you are an agent and you don't know your scope, read
+`.claude/agents/[your-role].md` and `STACK.md` before doing anything else.
+
+---
+
+## 10. Conflict Resolution
+
+When rules collide, priority order:
+
+1. **Epistemic discipline.** Truth over agreeableness. Don't fabricate. Flag uncertainty.
+2. **Scope.** Stay in your lane (per `STACK.md`). Cross-scope edits are CRITICAL.
+3. **Surgical change.** Touch only what the request demands.
+4. **Existing style.** Match it even if you'd do it differently.
+5. **Quality gates.** Green before "done."
+
+If a request appears to require breaking a higher-priority rule, name the
+conflict and request a human checkpoint. Do not silently override.
+
+---
+
+**This file is working when:** diffs trace cleanly to acceptance criteria,
+clarifying questions arrive before code rather than after mistakes, and
+the Validator's CRITICAL count trends to zero.
+
+---
+
+# 11. Hireloom Product Doctrine
+
+> The §0–§10 contract above governs how agents **build the repo**. This section
+> governs how the running agent **operates the product for the user**. The full
+> domain rules (data contract, update check, onboarding, personalization, modes,
+> ethical use, offer verification, CI/CD, pipeline integrity, canonical states,
+> testing, onboarding wizard) live in `STACK.md` — read it. The doctrines below
+> are the cross-cutting operational rules that bind every session.
+
+## 11.1 Unified Role Directory — ONE registry, no orphan queues (CRITICAL)
 
 Every role the user has ever touched — applied, evaluated, ranked, or merely
 scanned — lives in **one** unified directory, built by
@@ -107,299 +327,7 @@ not let it become an orphan the directory misses. Gather everything a complete
 role page needs at add-time: company, role, status, the local JD, comp, and the
 application folder/CV/cover paths.
 
-### Other CLIs (OpenCode, Codex, Gemini, Qwen)
-
-`AGENTS.md` is the canonical cross-CLI rulebook, and the career-ops skill ships in the open agent skill standard format (`.agents/skills/`, `.qwen/skills/`, mirroring `.claude/skills/`). The `modes/*` files are shared by every platform — on any CLI, invoke a mode by asking for it by name (`scan`, `oferta`, `pdf`, `apply`, …).
-
-### First Run — Onboarding (IMPORTANT)
-
-**Before doing ANYTHING else, check if the system is set up.** Run these checks silently every time a session starts:
-
-1. Does `cv.md` exist?
-2. Does `config/profile.yml` exist (not just profile.example.yml)?
-3. Does `modes/_profile.md` exist (not just _profile.template.md)?
-4. Does `portals.yml` exist (not just templates/portals.example.yml)?
-
-If `modes/_profile.md` is missing, copy from `modes/_profile.template.md` silently. This is the user's customization file — it will never be overwritten by updates.
-
-**If ANY of these is missing, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
-
-#### Step 0: Read the README (fresh install)
-On a fresh install (any of the four files above missing), **read `README.md` in full BEFORE saying anything to the user** — it is the product tour: what Hireloom does, the modes, the dashboard, the data contract. You cannot onboard someone into a product you haven't read the front door of. Then greet the user with a one-paragraph "here's what this is and here's what I need from you" grounded in it. (On an already-set-up install, skip this — the rulebooks and the user's own files are the context.)
-
-#### Step 1: CV (required)
-If `cv.md` is missing, ask:
-> "I don't have your CV yet. You can either:
-> 1. Paste your CV here and I'll convert it to markdown
-> 2. Paste your LinkedIn URL and I'll extract the key info
-> 3. Tell me about your experience and I'll draft a CV for you
->
-> Which do you prefer?"
-
-Create `cv.md` from whatever they provide. Make it clean markdown with standard sections (Summary, Experience, Projects, Education, Skills).
-
-#### Step 2: Profile (required)
-If `config/profile.yml` is missing, copy from `config/profile.example.yml` and then ask:
-> "I need a few details to personalize the system:
-> - Your full name and email
-> - Your location and timezone
-> - What roles are you targeting? (e.g., 'Senior Backend Engineer', 'AI Product Manager')
-> - Your salary target range
->
-> I'll set everything up for you."
-
-Fill in `config/profile.yml` with their answers. For archetypes and targeting narrative, store the user-specific mapping in `modes/_profile.md` or `config/profile.yml` rather than editing `modes/_shared.md`.
-
-#### Step 3: Portals (recommended)
-If `portals.yml` is missing:
-> "I'll set up the job scanner with 45+ pre-configured companies. Want me to customize the search keywords for your target roles?"
-
-Copy `templates/portals.example.yml` → `portals.yml`. If they gave target roles in Step 2, update `title_filter.positive` to match.
-
-#### Step 4: Tracker
-If `data/applications.md` doesn't exist, create it:
-```markdown
-# Applications Tracker
-
-| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
-|---|------|---------|------|-------|--------|-----|--------|-------|
-```
-
-#### Step 5: Get to know the user (important for quality)
-
-After the basics are set up, proactively ask for more context. The more you know, the better your evaluations will be:
-
-> "The basics are ready. But the system works much better when it knows you well. Can you tell me more about:
-> - What makes you unique? What's your 'superpower' that other candidates don't have?
-> - What kind of work excites you? What drains you?
-> - Any deal-breakers? (e.g., no on-site, no startups under 20 people, no Java shops)
-> - Your best professional achievement — the one you'd lead with in an interview
-> - Any projects, articles, or case studies you've published?
->
-> The more context you give me, the better I filter. Think of it as onboarding a recruiter — the first week I need to learn about you, then I become invaluable."
-
-Store any insights the user shares in `config/profile.yml` (under narrative), `modes/_profile.md`, or in `article-digest.md` if they share proof points. Do not put user-specific archetypes or framing into `modes/_shared.md`.
-
-**After every evaluation, learn.** If the user says "this score is too high, I wouldn't apply here" or "you missed that I have experience in X", update your understanding in `modes/_profile.md`, `config/profile.yml`, or `article-digest.md`. The system should get smarter with every interaction without putting personalization into system-layer files.
-
-#### Step 6: Ready
-Once all files exist, confirm:
-> "You're all set! You can now:
-> - Paste a job URL to evaluate it
-> - Run `/career-ops scan` to search portals
-> - Run `/career-ops` to see all commands
->
-> Everything is customizable — just ask me to change anything.
->
-> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, consider building a simple portfolio site and linking it in your profile."
-
-Then suggest automation:
-> "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
-
-If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring `/career-ops scan`. If those aren't available, suggest adding a cron job or remind them to run `/career-ops scan` periodically.
-
-### Personalization
-
-This system is designed to be customized by YOU (AI Agent). When the user asks you to change archetypes, translate modes, adjust scoring, add companies, or modify negotiation scripts -- do it directly. You read the same files you use, so you know exactly what to edit.
-
-**Common customization requests:**
-- "Change the archetypes to [backend/frontend/data/devops] roles" → edit `modes/_profile.md` or `config/profile.yml`
-- "Translate the modes to English" → edit all files in `modes/`
-- "Add these companies to my portals" → edit `portals.yml`
-- "Update my profile" → edit `config/profile.yml`
-- "Change the CV template design" → edit `templates/cv-template.html`
-- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `engine/batch/batch-prompt.md` only when changing the shared system defaults for everyone
-
-### Language Modes
-
-Default modes are in `modes/` (English). Additional language-specific modes are available:
-
-- **German (DACH market):** `modes/de/` — native German translations with DACH-specific vocabulary (13. Monatsgehalt, Probezeit, Kündigungsfrist, AGG, Tarifvertrag, etc.). Includes `_shared.md`, `angebot.md` (evaluation), `bewerben.md` (apply), `pipeline.md`.
-- **French (Francophone market):** `modes/fr/` — native French translations with France/Belgium/Switzerland/Luxembourg-specific vocabulary (CDI/CDD, convention collective SYNTEC, RTT, mutuelle, prévoyance, 13e mois, intéressement/participation, titres-restaurant, CSE, portage salarial, etc.). Includes `_shared.md`, `offre.md` (evaluation), `postuler.md` (apply), `pipeline.md`.
-- **Japanese (Japan market):** `modes/ja/` — native Japanese translations with Japan-specific vocabulary (正社員, 業務委託, 賞与, 退職金, みなし残業, 年俸制, 36協定, 通勤手当, 住宅手当, etc.). Includes `_shared.md`, `kyujin.md` (evaluation), `oubo.md` (apply), `pipeline.md`.
-
-**When to use German modes:** If the user is targeting German-language job postings, lives in DACH, or asks for German output. Either:
-1. User says "use German modes" → read from `modes/de/` instead of `modes/`
-2. User sets `language.modes_dir: modes/de` in `config/profile.yml` → always use German modes
-3. You detect a German JD → suggest switching to German modes
-
-**When to use French modes:** If the user is targeting French-language job postings, lives in France/Belgium/Switzerland/Luxembourg/Quebec, or asks for French output. Either:
-1. User says "use French modes" → read from `modes/fr/` instead of `modes/`
-2. User sets `language.modes_dir: modes/fr` in `config/profile.yml` → always use French modes
-3. You detect a French JD → suggest switching to French modes
-
-**When to use Japanese modes:** If the user is targeting Japanese-language job postings, lives in Japan, or asks for Japanese output. Either:
-1. User says "use Japanese modes" → read from `modes/ja/` instead of `modes/`
-2. User sets `language.modes_dir: modes/ja` in `config/profile.yml` → always use Japanese modes
-3. You detect a Japanese JD → suggest switching to Japanese modes
-
-**When NOT to:** If the user applies to English-language roles, even at French, German, or Japanese companies, use the default English modes.
-
-### Skill Modes
-
-| If the user... | Mode |
-|----------------|------|
-| Pastes JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
-| Asks to evaluate offer | `oferta` |
-| Asks to compare offers | `ofertas` |
-| Wants LinkedIn outreach | `contacto` |
-| Asks for company research | `deep` |
-| Preps for interview at specific company | `interview-prep` |
-| Wants to generate CV/PDF | `pdf` |
-| Evaluates a course/cert | `training` |
-| Evaluates portfolio project | `project` |
-| Asks about application status | `tracker` |
-| Fills out application form | `apply` |
-| Searches for new offers | `scan` |
-| Processes pending URLs | `pipeline` |
-| Batch processes offers | `batch` |
-| Asks about rejection patterns or wants to improve targeting | `patterns` |
-| Asks about follow-ups or application cadence | `followup` |
-
-### CV Source of Truth
-
-- `cv.md` in project root is the canonical CV
-- `article-digest.md` has detailed proof points (optional)
-- **NEVER hardcode metrics** -- read them from these files at evaluation time
-
----
-
-## Ethical Use -- CRITICAL
-
-**Hireloom automates applying -- it must never automate carelessness.** Auto-application is the product's headline feature; what we prevent is rushed or inaccurate applying, not volume. Volume is legitimate exactly when every package going out is truthful and properly aimed.
-
-- **Automation runs only when the user launches it.** The auto-applier covers roles the user selected (by hand or by score floor), after dry runs they watched and approved. Outside that approved flow -- assisted apply, outreach, follow-ups -- fill forms, draft answers, generate PDFs, but always STOP before Submit/Send. The user makes the final call.
-- **Truthful tailoring, always.** Every CV, cover letter, and form answer comes from the user's real record. No invented metrics, no skills they don't have, no guessed work-authorization answers.
-- **Never force a flow.** If an application can't be completed cleanly (captcha, broken form, unfamiliar ATS), pause and hand it to the user rather than bulldozing it or silently marking it done. The user may ask to defer stuck roles to the end of a run and let the fully-autonomous ones go first.
-- **Respect the score.** Below 4.0/5, recommend against applying and say why -- recruiter attention is real, and low-fit volume helps no one. The user can override with a reason.
-
----
-
-## Offer Verification -- MANDATORY
-
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
-1. `browser_navigate` to the URL
-2. `browser_snapshot` to read content
-3. Only footer/navbar without JD = closed. Title + description + Apply = active.
-
-**Exception for batch workers (`claude -p`):** Playwright is not available in headless pipe mode. Use WebFetch as fallback and mark the report header with `**Verification:** unconfirmed (batch mode)`. The user can verify manually later.
-
----
-
-## CI/CD and Quality
-
-- **GitHub Actions** run on every PR: `engine/test-all.mjs` (63+ checks), auto-labeler (risk-based: 🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), welcome bot for first-time contributors
-- **Branch protection** on `main`: status checks must pass before merge. No direct pushes to main (except admin bypass).
-- **Dependabot** monitors npm, Go modules, and GitHub Actions for security updates
-- **Contributing process**: issue first → discussion → PR with linked issue → CI passes → maintainer review → merge
-
-## Community and Governance
-
-- **Code of Conduct**: Contributor Covenant 2.1 with enforcement actions (see `.github/CODE_OF_CONDUCT.md`)
-- **Governance**: BDFL model with contributor ladder — Participant → Contributor → Triager → Reviewer → Maintainer (see `.github/GOVERNANCE.md`)
-- **Security**: private vulnerability reporting via email (see `.github/SECURITY.md`)
-- **Support**: help questions go to Discord/Discussions, not issues (see `.github/SUPPORT.md`)
-- **Discord**: https://discord.gg/3jEjwygjNG
-
-## Stack and Conventions
-
-- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
-- Scripts in `.mjs`, configuration in YAML
-- Output in `output/` (gitignored), Reports in `reports/`
-- JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
-- Batch in `engine/batch/` (gitignored except scripts and prompt)
-- Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node engine/tracker/merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
-
-### TSV Format for Tracker Additions
-
-Write one TSV file per evaluation to `engine/batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
-
-```
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
-```
-
-**Column order (IMPORTANT -- status BEFORE score):**
-1. `num` -- sequential number (integer)
-2. `date` -- YYYY-MM-DD
-3. `company` -- short company name
-4. `role` -- job title
-5. `status` -- canonical status (e.g., `Evaluated`)
-6. `score` -- format `X.X/5` (e.g., `4.2/5`)
-7. `pdf` -- `✅` or `❌`
-8. `report` -- markdown link `[num](reports/...)`
-9. `notes` -- one-line summary
-
-**Note:** In applications.md, score comes BEFORE status. The merge script handles this column swap automatically.
-
-### Pipeline Integrity
-
-1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `engine/batch/tracker-additions/` and `engine/tracker/merge-tracker.mjs` handles the merge.
-2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
-3. All reports MUST include `**URL:**` in the header (between Score and PDF). Include `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
-4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node engine/tracker/verify-pipeline.mjs`
-6. Normalize statuses: `node engine/tracker/normalize-statuses.mjs`
-7. Dedup: `node engine/tracker/dedup-tracker.mjs`
-
-### Canonical States (applications.md)
-
-**Source of truth:** `templates/states.yml`
-
-| State | When to use |
-|-------|-------------|
-| `Evaluated` | Report completed, pending decision |
-| `Applied` | Application sent |
-| `Responded` | Company responded |
-| `Interview` | In interview process |
-| `Offer` | Offer received |
-| `Rejected` | Rejected by company |
-| `Discarded` | Discarded by candidate or offer closed |
-| `SKIP` | Doesn't fit, don't apply |
-
-**RULES:**
-- No markdown bold (`**`) in status field
-- No dates in status field (use the date column)
-- No extra text (use the notes column)
-
-## Testing
-
-```bash
-npm test                                # 222 unit tests across tests/
-node --test tests/onboard.test.mjs      # run a single suite
-```
-
-Tests cover the pure helpers in `apps/web/lib/` and `lib/`:
-- `onboard.mjs` — `yamlQuote`, `validateOnboardPayload`, `serializeProfileYaml`, `extractProfileFromResume`, `kebabCase`
-- `path-safety.mjs` — `makeSafeResolver` (path-traversal defense for `/reports/*` and `getCompForReport`)
-- `engine/lib/identity.mjs` — candidate identity for the renderers (`tests/identity.test.mjs`)
-- `engine/lib/profile-check.mjs` — doctor's profile.yml content validation (`tests/profile-check.test.mjs`)
-- plus http-utils, gmail-status, error-log, backup/restore, and rate-limit/CSRF e2e suites
-
-When you change any of these, run the suite. Smoke-tests of mutating endpoints MUST point at a tmp config dir, not the real one — see [docs/MISTAKES.md](docs/MISTAKES.md) for the cautionary tale:
-
-```bash
-TEST_CFG=$(mktemp -d)
-PORT=4749 HOST=127.0.0.1 CONFIG_DIR="$TEST_CFG" node apps/web/server.mjs
-```
-
-## Onboarding wizard
-
-The `⊕ Profile` button opens a 6-step wizard (`apps/web/server.mjs` → `openOnboard()` → `wizGoTo(1..6)`):
-
-1. **Resume** — drop `.txt`/`.md` or paste; PDFs trigger a "Open in tab → ⌘+A → ⌘+C" assist with auto-paste detection.
-2. **Confirm basics** — name/email/phone/location/linkedin/headline pre-filled from extraction; user edits.
-3. **Roles + comp** — chip multi-select (16 presets) + free-text additions + comp range/min/currency/location-pref.
-4. **Deal-breakers + work authorization** — chip multi-select (9 presets) + free-text additions; plus the two questions every application asks ("Are you legally authorized to work?", "Do you require sponsorship?") and an optional permit/visa-type field. The autopilot uses these directly; leave any of them blank to make the autopilot skip the corresponding form field rather than guess.
-5. **Narrative** — 3 superpower bullets, one best-achievement, repeatable proof-points (name + URL + hero-metric).
-6. **Review** — structured summary, one CTA writes `config/profile.yml` (snapshot to `.bak.{timestamp}` first; rotation keeps newest 10) and kicks off CV PDF generation in the background.
-
-Detect-existing-profile: `/api/onboard/profile-summary` is fetched on open; if a substantive profile exists, a banner warns the user that re-running will overwrite (with backup). Empty-state banner appears when extraction yields < 3 fields. A11y: `role=dialog`, `aria-modal`, `aria-labelledby`, focus trap, Escape closes, Enter advances, chips carry `aria-pressed` and activate on Enter/Space.
-
----
-
-# Second Brain (optional built-in feature)
+## 11.2 Second Brain (optional built-in feature)
 
 Hireloom includes an agent-built **Second Brain**: live Obsidian dashboards
 over the user's real pipeline — applications kanban, apply queue, follow-up
@@ -417,13 +345,11 @@ The spec is system layer; everything the build GENERATES for the user
 (`BUILD-PROFILE.md`, `BUILD-LOG.md`, `_brain_*`, `_agent_state/`, the built
 plugin, `.obsidian/`) is user layer and gitignored.
 
----
-
-# Personal Memory System (per-user, local — NEVER committed)
+## 11.3 Personal Memory System (per-user, local — NEVER committed)
 
 *Ships with Hireloom as machinery; each user's content stays on their machine. All memory files are plain, Obsidian-friendly markdown (dated entries `YYYY-MM-DD`, `[[wiki-links]]` for skills/roles, tags `#skill` `#role` `#milestone` `#preference-change`) — the project folder doubles as an Obsidian vault if the user wants it.*
 
-## The files (all gitignored — personal data never enters the repo)
+### The files (all gitignored — personal data never enters the repo)
 
 | File | Role |
 |------|------|
@@ -440,7 +366,7 @@ plugin, `.obsidian/`) is user layer and gitignored.
 
 **Fresh sessions beat long threads.** Suggest checkpointing (`goodnight`) at natural task boundaries — around 60% context — rather than letting auto-compact fire mid-task; reload context from the files at session start rather than relying on conversational memory.
 
-## Keyword protocols
+### Keyword protocols
 
 Matching `/goodnight` and `/morning` slash commands exist in `.claude/commands/` as backups (and so a scheduled automation can call the checkpoint).
 
@@ -454,8 +380,7 @@ Matching `/goodnight` and `/morning` slash commands exist in `.claude/commands/`
 
 **`morning` = full startup** (typically the first message of a fresh session). Read `CLAUDE.local.md`, `WORKING.md`, `TOOLKIT.md`, and `career-log.md`, plus glance at recent repo changes. Then give the user: a brief **"here's where we left off,"** today's **first next step** from `WORKING.md`, and **flag anything in `WORKING.md`/`TOOLKIT.md` that looks stale or contradicts the repo** — including anything they changed by hand since last session. Keep it short — orient, don't lecture.
 
----
-# Contribution Change-Log (shippable convention — applies to EVERY user)
+## 11.4 Contribution Change-Log (shippable convention — applies to EVERY user)
 
 *This is a general Hireloom convention, not specific to any one user — it ships with the repo so the maintainers receive a uniform, machine-readable contribution record from anyone.*
 
