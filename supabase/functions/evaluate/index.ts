@@ -87,20 +87,20 @@ Deno.serve(async (req) => {
 
   // Quota (Free = 10/mo)
   const period = new Date().toISOString().slice(0, 7);
-  const [{ data: sub }, { data: usage }, { data: keyRow }, { data: profile }] = await Promise.all([
+  const [{ data: sub }, { data: usage }, { data: apiKey }, { data: profile }] = await Promise.all([
     supabase.from('subscriptions').select('plan').maybeSingle(),
     supabase.from('usage_counters').select('count').eq('period', period).eq('metric', 'evaluationsPerMonth').maybeSingle(),
-    supabase.from('provider_keys').select('api_key').eq('provider', provider).maybeSingle(),
+    supabase.rpc('get_provider_key', { p_provider: provider }), // decrypts from Vault, scoped to the caller
     supabase.from('profiles').select('cv_md').maybeSingle(),
   ]);
   const plan = sub?.plan || 'free';
   if ((usage?.count || 0) >= (PLAN_EVAL_CAP[plan] ?? 10)) return json({ error: 'quota_exceeded', plan }, 402);
-  if (!keyRow?.api_key) return json({ error: `No ${provider} API key saved. Add it in Settings.` }, 400);
+  if (!apiKey) return json({ error: `No ${provider} API key saved. Add it in Settings.` }, 400);
 
   const defaultModel = provider === 'anthropic' ? 'claude-sonnet-4-0' : provider === 'gemini' ? 'gemini-2.0-flash' : 'moonshot-v1-128k';
   try {
     const jd = await fetchJd(input);
-    const text = await callProvider(provider, model || defaultModel, keyRow.api_key, SYSTEM(profile?.cv_md || ''), `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jd}`);
+    const text = await callProvider(provider, model || defaultModel, apiKey, SYSTEM(profile?.cv_md || ''), `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jd}`);
     const summary = parseSummary(text);
     const scoreNum = parseFloat(summary.score);
     const { data: role, error: roleErr } = await supabase.from('roles').upsert({
