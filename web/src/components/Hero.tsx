@@ -175,14 +175,26 @@ export default function Hero({ onGetStarted, onSignIn }: HeroProps) {
               </div>
             </div>
 
-            {/* Right: slide nav */}
-            <div className="flex gap-3 self-start md:self-end">
-              <button onClick={prev} aria-label="Previous" className="liquid-glass flex items-center gap-1 rounded-full px-4 py-2.5 sm:px-6 sm:py-3 animate-blur-fade-up" style={{ animationDelay: '800ms' }}>
-                <ChevronLeft size={18} />
-              </button>
-              <button onClick={next} aria-label="Next" className="liquid-glass flex items-center gap-1 rounded-full px-4 py-2.5 sm:px-6 sm:py-3 animate-blur-fade-up" style={{ animationDelay: '900ms' }}>
-                <ChevronRight size={18} />
-              </button>
+            {/* Right: slide indicator + nav */}
+            <div className="flex flex-col items-start gap-3 self-start md:items-end md:self-end">
+              <div className="flex gap-2 animate-blur-fade-up" style={{ animationDelay: '780ms' }}>
+                {SLIDES.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setIdx(i)}
+                    aria-label={`Slide ${i + 1}`}
+                    className={`h-1.5 rounded-full transition-all duration-300 ${i === idx ? 'w-6 bg-white' : 'w-1.5 bg-white/40 hover:bg-white/70'}`}
+                  />
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={prev} aria-label="Previous" className="liquid-glass flex items-center gap-1 rounded-full px-4 py-2.5 sm:px-6 sm:py-3 animate-blur-fade-up" style={{ animationDelay: '800ms' }}>
+                  <ChevronLeft size={18} />
+                </button>
+                <button onClick={next} aria-label="Next" className="liquid-glass flex items-center gap-1 rounded-full px-4 py-2.5 sm:px-6 sm:py-3 animate-blur-fade-up" style={{ animationDelay: '900ms' }}>
+                  <ChevronRight size={18} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
