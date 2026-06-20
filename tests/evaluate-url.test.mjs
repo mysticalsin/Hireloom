@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateUrl } from '../engine/pipeline/evaluate-url.mjs';
+import { makeInMemoryStore } from '../engine/store/store.mjs';
 
 const EVAL_TEXT = `## A) Role\nStrong fit.\n\n---SCORE_SUMMARY---
 COMPANY: Anthropic
@@ -62,6 +63,30 @@ test('evaluateUrl: pasted text skips JD fetch, evaluates directly', async () => 
   assert.equal(ff.calls.length, 1);            // only the eval call, no JD fetch
   assert.match(ff.calls[0], /anthropic\.com/);
   assert.equal(r.summary.company, 'Anthropic');
+});
+
+test('evaluateUrl persists role + report into the tenant-scoped store', async () => {
+  const ff = routedFetch();
+  const store = makeInMemoryStore();
+  const t = store.createTenant({ name: 'Acme' });
+  const r = await evaluateUrl({
+    input: 'https://job-boards.greenhouse.io/acme/jobs/1',
+    shared: 'S', oferta: 'O', cv: 'C',
+    provider: 'anthropic', model: 'claude-sonnet-4-0', apiKey: 'k',
+    date: '2026-06-20', fetchImpl: ff,
+    store, tenantId: t.id,
+  });
+  assert.ok(r.persisted);
+  assert.equal(r.persisted.role.company, 'Anthropic');
+  assert.equal(r.persisted.role.score, 4.6);
+  assert.equal(r.persisted.role.source, 'greenhouse');
+  // round-trips through the store, tenant-scoped
+  const fromStore = store.getRole(t.id, r.persisted.role.id);
+  assert.equal(fromStore.title, 'Applied AI Engineer');
+  assert.match(store.getReport(t.id, r.persisted.report.id).markdown, /# Evaluation: Anthropic/);
+  // no store passed → no persistence
+  const r2 = await evaluateUrl({ input: 'JD text here', shared: 'S', oferta: 'O', cv: 'C', provider: 'anthropic', model: 'claude-sonnet-4-0', apiKey: 'k', fetchImpl: routedFetch() });
+  assert.equal(r2.persisted, null);
 });
 
 test('evaluateUrl requires input', async () => {

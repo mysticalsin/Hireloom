@@ -43,11 +43,15 @@ export function loadEvalContext(root = ROOT) {
  * @param {string} [o.model]
  * @param {string} [o.apiKey] per-call key (falls back to the provider env var)
  * @param {string} [o.date]   report date (YYYY-MM-DD); defaults to today
- * @returns {Promise<{jd, evaluationText, summary, usage, model, reportMarkdown}>}
+ * @param {object} [o.store]  tenant-scoped store; if given with tenantId, the role
+ *                            + report are persisted (engine/store/store.mjs interface)
+ * @param {string} [o.tenantId] tenant to persist under
+ * @returns {Promise<{jd, evaluationText, summary, usage, model, reportMarkdown, persisted}>}
  */
 export async function evaluateUrl({
   input, shared, oferta, cv,
   provider = 'anthropic', model, apiKey, date, fetchImpl, productName,
+  store, tenantId,
 } = {}) {
   if (!input) throw new Error('evaluateUrl: input (URL or JD text) is required');
 
@@ -70,5 +74,23 @@ export async function evaluateUrl({
     toolLabel: `${provider}${result.model ? ` (${result.model})` : ''}`,
     date: reportDate,
   });
-  return { jd, ...result, reportMarkdown };
+
+  // Persist into the tenant-scoped store when one is provided (hosted path).
+  let persisted = null;
+  if (store && tenantId) {
+    const scoreNum = Number.parseFloat(result.summary.score);
+    const role = store.saveRole(tenantId, {
+      company: result.summary.company || 'Unknown',
+      title: result.summary.role || 'Unknown',
+      status: 'Evaluated',
+      score: Number.isFinite(scoreNum) ? scoreNum : null,
+      url: jd.url,
+      source: jd.source,
+      jdText: jd.text,
+    });
+    const report = store.saveReport(tenantId, { roleId: role.id, markdown: reportMarkdown, score: role.score });
+    persisted = { role, report };
+  }
+
+  return { jd, ...result, reportMarkdown, persisted };
 }
