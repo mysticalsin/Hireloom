@@ -65,3 +65,26 @@ export function requireFeature(store, tenantId, feature) {
   }
   return r;
 }
+
+/**
+ * Usage quota check against the store's monthly counters.
+ * @param {object} store  tenant-scoped store (getUsage/tenantPlan)
+ * @param {string} metric one of the plan limit keys (e.g. evaluationsPerMonth)
+ * @returns {{ok, used, limit, plan}}
+ */
+export function checkQuota(store, tenantId, metric) {
+  const plan = store.tenantPlan(tenantId);
+  const used = store.getUsage(tenantId, metric);
+  return { ok: withinLimit(plan, metric, used), used, limit: planFor(plan).limits[metric], plan };
+}
+
+export function requireQuota(store, tenantId, metric) {
+  const r = checkQuota(store, tenantId, metric);
+  if (!r.ok) {
+    const err = new Error(`Monthly ${metric} limit reached on the ${r.plan} plan (${r.used}/${r.limit}). Upgrade to continue.`);
+    err.code = 'quota_exceeded';
+    err.upgradeTo = 'pro';
+    throw err;
+  }
+  return r;
+}

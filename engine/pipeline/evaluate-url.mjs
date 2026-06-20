@@ -15,6 +15,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { fetchJd } from '../scan/fetch-jd.mjs';
 import { evaluateOffer, buildReportMarkdown } from '../eval/evaluate.mjs';
+import { requireQuota } from '../billing/plans.mjs';
 
 // engine/pipeline/evaluate-url.mjs → repo root
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -55,6 +56,10 @@ export async function evaluateUrl({
 } = {}) {
   if (!input) throw new Error('evaluateUrl: input (URL or JD text) is required');
 
+  // Enforce the monthly evaluation quota BEFORE spending tokens (hosted path only;
+  // throws { code: 'quota_exceeded' } when a Free tenant is over the cap).
+  if (store && tenantId) requireQuota(store, tenantId, 'evaluationsPerMonth');
+
   const needDisk = shared === undefined || oferta === undefined || cv === undefined;
   const disk = needDisk ? loadEvalContext() : { shared: '', oferta: '', cv: '' };
   const ctx = {
@@ -78,6 +83,7 @@ export async function evaluateUrl({
   // Persist into the tenant-scoped store when one is provided (hosted path).
   let persisted = null;
   if (store && tenantId) {
+    store.incrementUsage(tenantId, 'evaluationsPerMonth', 1);
     const scoreNum = Number.parseFloat(result.summary.score);
     const role = store.saveRole(tenantId, {
       company: result.summary.company || 'Unknown',

@@ -31,9 +31,11 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
   const roles = new Map();
   const reports = new Map();
   const subscriptions = new Map(); // tenantId -> subscription record
+  const usage = new Map();          // `${tenantId}|${YYYY-MM}|${metric}` -> count
   let counter = 0;
   let order = 0;
   const id = (p) => `${p}_${(++counter).toString(36)}`;
+  const period = () => now().slice(0, 7); // YYYY-MM from the injected clock
 
   // Return a record only if it belongs to the tenant (the isolation gate).
   const owned = (rec, tenantId) => (rec && rec.tenantId === tenantId ? rec : null);
@@ -171,6 +173,17 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
     // Effective plan id for a tenant (defaults to free when unsubscribed).
     tenantPlan(tenantId) {
       return subscriptions.get(tenantId)?.plan || 'free';
+    },
+
+    // ---- usage metering (per tenant, per calendar month) ----
+    incrementUsage(tenantId, metric, n = 1) {
+      const key = `${tenantId}|${period()}|${metric}`;
+      const next = (usage.get(key) || 0) + n;
+      usage.set(key, next);
+      return next;
+    },
+    getUsage(tenantId, metric, p = period()) {
+      return usage.get(`${tenantId}|${p}|${metric}`) || 0;
     },
   };
 }
