@@ -30,6 +30,7 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
   const providerKeys = new Map();
   const roles = new Map();
   const reports = new Map();
+  const subscriptions = new Map(); // tenantId -> subscription record
   let counter = 0;
   let order = 0;
   const id = (p) => `${p}_${(++counter).toString(36)}`;
@@ -144,6 +145,30 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
     getReport(tenantId, reportId) {
       const rep = owned(reports.get(reportId), tenantId);
       return rep ? { ...rep } : null;
+    },
+
+    // ---- subscriptions / entitlement (Stripe-backed) ----
+    setSubscription(tenantId, sub = {}) {
+      if (!tenants.has(tenantId)) throw new Error('setSubscription: unknown tenant');
+      const rec = {
+        tenantId,
+        plan: sub.plan || 'free',
+        status: sub.status || 'active',
+        currentPeriodEnd: sub.currentPeriodEnd ?? null,
+        customerId: sub.customerId ?? null,
+        subscriptionId: sub.subscriptionId ?? null,
+        updatedAt: now(),
+      };
+      subscriptions.set(tenantId, rec);
+      return { ...rec };
+    },
+    getSubscription(tenantId) {
+      const s = subscriptions.get(tenantId);
+      return s ? { ...s } : null;
+    },
+    // Effective plan id for a tenant (defaults to free when unsubscribed).
+    tenantPlan(tenantId) {
+      return subscriptions.get(tenantId)?.plan || 'free';
     },
   };
 }
