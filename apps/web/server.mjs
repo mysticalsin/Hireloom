@@ -11,7 +11,7 @@
 import http from 'http';
 import https from 'https';
 import fs from 'fs/promises';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import crypto from 'crypto';
@@ -27,6 +27,9 @@ import {
 } from './lib/onboard.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
+import { makeFileStore } from '../../engine/store/file-store.mjs';
+import { createCheckoutSession, constructEvent, priceToPlanFromEnv } from '../../engine/billing/stripe.mjs';
+import { applyWebhookEvent } from '../../engine/billing/entitlement.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
 import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes, reconcilePoolKeys } from './lib/role-index.mjs';
@@ -8914,12 +8917,37 @@ const ERROR_COUNTERS = {
   routeError:         0,
 };
 
+// ── Billing (Stripe) ────────────────────────────────────────────────────
+// Single-tenant interim: full multi-tenant billing needs auth (Phase 3) + the
+// Postgres store. Until then, seed one stable tenant and persist its subscription
+// to a JSON file so entitlement survives restarts. Endpoints are dead until the
+// STRIPE_* env vars are set (see engine/billing/*).
+const BILLING_TENANT = process.env.HIRELOOM_TENANT_ID || 'local';
+const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+// Durable file-backed store (auto-persists on every mutation). Holds the seeded
+// tenant + its subscription/usage; swaps to the Postgres adapter for multi-instance.
+const billingStore = makeFileStore({ file: path.join(DATA_DIR, 'store.json') });
+try { billingStore.createTenant({ id: BILLING_TENANT, name: BILLING_TENANT }); } catch { /* already seeded */ }
+// Raw body (Stripe webhook signature verification needs the unparsed bytes).
+function readRawBody(req, limit = MAX_BODY_BYTES) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { req.destroy(); reject(new Error('body too large')); } else { chunks.push(c); }
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 async function handleRequest(req, res) {
   applySecurityHeaders(req, res);
   // Auth gate: only allow /api/health unauthenticated when bound to a
   // non-loopback address. Everything else needs the token.
   const urlForAuth = new URL(req.url, `http://${HOST}:${PORT}`);
-  if (NON_LOOPBACK && urlForAuth.pathname !== '/api/health' && !isAuthorized(req)) {
+  if (NON_LOOPBACK && urlForAuth.pathname !== '/api/health' && urlForAuth.pathname !== '/api/stripe/webhook' && !isAuthorized(req)) {
     res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'WWW-Authenticate': 'Bearer realm="Hireloom"' });
     res.end(JSON.stringify({ ok: false, error: 'authentication required' }));
     return;
@@ -8937,7 +8965,56 @@ async function handleRequest(req, res) {
   // Methods that mutate state must come from a trusted Origin or be
   // same-origin (no Origin header).
   if (req.method !== 'GET' && req.method !== 'HEAD' && !isOriginAllowed(req)) {
+    // Stripe posts the webhook cross-origin (no Origin header → already allowed);
+    // this guard only blocks browser CSRF, which the webhook isn't.
     return sendJsonError(res, 403, 'origin not allowed');
+  }
+
+  // ── API: Stripe webhook (raw body, signature-verified) ──
+  // Verifies with STRIPE_WEBHOOK_SECRET, maps the event to an entitlement, and
+  // persists it. Bypasses the auth gate (Stripe can't send AUTH_TOKEN); the
+  // signature IS the auth.
+  if (pathname === '/api/stripe/webhook' && req.method === 'POST') {
+    try {
+      const raw = await readRawBody(req);
+      const event = await constructEvent(raw, req.headers['stripe-signature']);
+      await applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() }); // file-store auto-persists
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ received: true }));
+    } catch (err) {
+      // 400 tells Stripe to retry; verification failures land here.
+      sendJsonError(res, 400, 'webhook verification failed', err);
+    }
+    return;
+  }
+
+  // ── API: create a Stripe Checkout session ──
+  if (pathname === '/api/billing/checkout' && req.method === 'POST') {
+    try {
+      const { plan } = await readJsonBody(req);
+      const priceId = plan === 'studio' ? process.env.STRIPE_PRICE_STUDIO
+        : plan === 'pro' ? process.env.STRIPE_PRICE_PRO : '';
+      if (!priceId) return sendJsonError(res, 400, 'unknown or unconfigured plan (expected "pro" or "studio")');
+      const session = await createCheckoutSession({
+        tenantId: BILLING_TENANT,
+        priceId,
+        successUrl: `${PUBLIC_URL}/?billing=success`,
+        cancelUrl: `${PUBLIC_URL}/?billing=cancel`,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ url: session.url }));
+    } catch (err) {
+      sendJsonError(res, 500, 'checkout failed', err);
+    }
+    return;
+  }
+
+  // ── API: billing status (current plan + subscription) ──
+  if (pathname === '/api/billing/status') {
+    const sub = billingStore.getSubscription(BILLING_TENANT);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ plan: billingStore.tenantPlan(BILLING_TENANT), subscription: sub }));
+    return;
   }
 
   // ── API: Data ──
@@ -10511,6 +10588,15 @@ async function runPipelineCycle() {
   pipelineNextRun = new Date(Date.now() + PIPELINE_INTERVAL_MS).toISOString();
   console.log('[pipeline] Starting autonomous cycle (scan → eval → CL → assemble)...');
   try {
+    // jobseeker.mjs is the author's personal, gitignored autopilot — not shipped in
+    // the product. Guard the spawn so deploys without it skip cleanly instead of
+    // erroring on a missing file. The tracked eval path is
+    // engine/pipeline/evaluate-url.mjs (BYOK, server-side); the full hosted
+    // autopilot lands with the job-queue phase.
+    if (!existsSync(path.join(ROOT, 'jobseeker.mjs'))) {
+      console.warn('[pipeline] jobseeker.mjs not present in this build — autonomous pipeline disabled.');
+      return;
+    }
     await new Promise((resolve) => {
       const args = ['jobseeker.mjs', '--model', process.env.CAREER_OPS_MODEL || 'kimi'];
       const p = spawn('node', args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
