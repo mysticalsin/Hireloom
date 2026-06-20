@@ -3,13 +3,79 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Hireloom — Apply to fewer jobs. Get more interviews.</title>
-<meta name="description" content="The anti-spam job-search engine. Hireloom scores every role against your real CV, writes a truthful tailored CV and cover letter only for the ones worth it, and tracks the whole pipeline. Bring your own AI key — no token markup." />
+<title>Hireloom — The AI Job-Search Engine That Gets You Hired</title>
+<meta name="description" content="The AI job-search engine that gets you hired: score every role against your real CV, generate truthful tailored CVs and cover letters, and track your whole pipeline. Bring your own AI key — no token markup. Start free." />
 <meta name="theme-color" content="#0a0612" />
-<meta property="og:title" content="Hireloom — Apply to fewer jobs. Get more interviews." />
-<meta property="og:description" content="The anti-spam job-search engine. Quality over volume. Bring your own AI key." />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<!-- TODO(launch): confirm production domain; update canonical + og:url + sitemap to it -->
+<link rel="canonical" href="https://hireloom.app/" />
 <meta property="og:type" content="website" />
+<meta property="og:site_name" content="Hireloom" />
+<meta property="og:url" content="https://hireloom.app/" />
+<meta property="og:title" content="Hireloom — The AI Job-Search Engine That Gets You Hired" />
+<meta property="og:description" content="Apply to fewer jobs, get more interviews. Score every role, generate truthful tailored CVs, track your pipeline. Bring your own AI key — no token markup." />
+<meta property="og:image" content="https://hireloom.app/og-image.svg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Hireloom — open your horizons, get hired." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Hireloom — The AI Job-Search Engine That Gets You Hired" />
+<meta name="twitter:description" content="Apply to fewer jobs, get more interviews. Truthful tailored CVs, fit scoring, pipeline tracking. Bring your own AI key." />
+<meta name="twitter:image" content="https://hireloom.app/og-image.svg" />
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://hireloom.app/#org",
+      "name": "Hireloom",
+      "url": "https://hireloom.app/",
+      "logo": "https://hireloom.app/favicon.svg",
+      "description": "The anti-spam AI job-search engine. Score every role, generate truthful tailored CVs and cover letters, and track your pipeline. Bring your own AI key.",
+      "sameAs": ["https://github.com/mysticalsin/Hireloom"]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://hireloom.app/#website",
+      "url": "https://hireloom.app/",
+      "name": "Hireloom",
+      "publisher": { "@id": "https://hireloom.app/#org" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Hireloom",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "AI job-search engine: fit scoring, truthful CV and cover-letter tailoring, pipeline tracking, inbox signals, and assisted apply. Bring your own AI key.",
+      "featureList": [
+        "Role fit scoring (A–G)",
+        "Truthful AI CV and cover-letter tailoring",
+        "Job application pipeline tracker",
+        "Email inbox signals and follow-up reminders",
+        "One-click assisted apply",
+        "Bring your own AI key (no token markup)"
+      ],
+      "offers": [
+        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
+        { "@type": "Offer", "name": "Pro", "price": "29", "priceCurrency": "USD", "description": "per month" },
+        { "@type": "Offer", "name": "Studio", "price": "79", "priceCurrency": "USD", "description": "per month" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is Hireloom just another auto-apply bot?", "acceptedAnswer": { "@type": "Answer", "text": "No. Hireloom drafts everything up to the submit button, then stops. You review and click send. It sells quality and fit, not volume, because mass-applying gets you ignored." } },
+        { "@type": "Question", "name": "What does bring your own key (BYOK) mean?", "acceptedAnswer": { "@type": "Answer", "text": "You connect your own AI provider key (Anthropic and OpenAI-compatible providers supported). You pay your provider directly at cost — Hireloom never marks up tokens. Your subscription is for the platform, not the inference." } },
+        { "@type": "Question", "name": "Will Hireloom lie on my résumé to beat the ATS?", "acceptedAnswer": { "@type": "Answer", "text": "Never. Truthful tailoring is the core principle. Hireloom rewrites and reweights from your real record only — no invented metrics, no skills you do not have." } },
+        { "@type": "Question", "name": "Is my career data private?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your CV and pipeline are yours — encrypted at rest, never sold, exportable and deletable any time. The core is open-source, so you can also self-host and audit it." } },
+        { "@type": "Question", "name": "Can I self-host Hireloom instead of paying?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The core is open-source and free forever under a bring-your-own-key model. Hosted plans add convenience, inbox signals, autopilot, and premium features." } }
+      ]
+    }
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
@@ -63,7 +129,8 @@
   nav .social a { color: var(--muted); transition: color .2s var(--ease); }
   nav .social a:hover { color: var(--text); }
   nav .social svg { width: 1.2rem; height: 1.2rem; }
-  @media (max-width: 820px){ nav { padding: 1rem 1.4rem; } nav .nav-links { display: none; } }
+  nav .nav-cta { padding: 9px 16px; font-size: 14px; margin-left: .4rem; }
+  @media (max-width: 820px){ nav { padding: 1rem 1.4rem; } nav .nav-links { display: none; } nav .social a:not(.nav-cta) { display: none; } }
 
   /* ---------- buttons ---------- */
   .btn { display: inline-flex; align-items: center; gap: 8px; font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px; padding: 13px 22px; border-radius: 12px; cursor: pointer; border: 1px solid transparent; transition: transform .18s var(--ease), box-shadow .25s var(--ease), background .2s var(--ease), border-color .2s var(--ease); will-change: transform; }
@@ -229,6 +296,7 @@
     <a href="https://github.com/mysticalsin/Hireloom" target="_blank" rel="noopener" aria-label="GitHub"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
     <a href="#" aria-label="Discord"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg></a>
     <a href="#" aria-label="X"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+    <a class="btn btn-primary nav-cta" href="#waitlist">Get early access</a>
   </div>
 </nav>
 
@@ -244,7 +312,7 @@
         <a href="#waitlist" class="btn btn-primary">Reserve founder pricing <span>&rarr;</span></a>
       </div>
     </div>
-    <p class="fineprint">Bring your own AI key — we never mark up a token. Open-source core, free forever.</p>
+    <p class="fineprint">No credit card · Bring your own AI key (no token markup) · Open-source core, free forever.</p>
     <div class="bounce-arrow"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg></div>
   </section>
 
@@ -260,7 +328,7 @@
     <div class="inner" id="section-three-inner">
       <p>Presenting</p>
       <h2 class="accent-text">Hireloom</h2>
-      <p class="tag">The anti-spam job-search engine.</p>
+      <p class="tag">The anti-spam AI job-search engine.</p>
     </div>
   </section>
 
@@ -371,7 +439,8 @@
             <a class="btn btn-ghost" href="#waitlist">Choose Studio</a>
           </div>
         </div>
-        <p class="center muted" style="margin-top:28px; font-size:14px">Need applications done for you? <a href="#waitlist" style="color:var(--accent)">Concierge</a> — a human submits on your behalf, from $199 per search.</p>
+        <p class="center muted" style="margin-top:28px; font-size:14px">No credit card to start · Cancel anytime · Your data stays yours.</p>
+        <p class="center muted" style="margin-top:8px; font-size:14px">Need applications done for you? <a href="#waitlist" style="color:var(--accent)">Concierge</a> — a human submits on your behalf, from $199 per search.</p>
       </div>
     </section>
 
@@ -409,7 +478,7 @@
             <button class="btn btn-primary" type="submit">Reserve my spot</button>
           </form>
           <div class="form-msg" id="wl-msg" role="status" aria-live="polite"></div>
-          <p class="founder">Founder pricing: lifetime discount for early members. No spam — one email when it's ready.</p>
+          <p class="founder">Founder pricing: the first 500 members lock a lifetime discount. No spam — one email when it's ready.</p>
         </div>
       </div>
     </section>

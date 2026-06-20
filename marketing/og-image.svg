@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Hireloom — Your AI-Powered Career Accelerator">
+  <title>Hireloom — Your AI-Powered Career Accelerator</title>
+  <defs>
+    <!-- Midnight-velvet base with violet glow corners (matches the dashboard) -->
+    <linearGradient id="og-bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0a0612"/>
+      <stop offset="50%" stop-color="#140a24"/>
+      <stop offset="100%" stop-color="#0a0612"/>
+    </linearGradient>
+    <radialGradient id="og-violet-tl" cx="0" cy="0" r="0.7" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="rgba(168,85,247,.22)"/>
+      <stop offset="100%" stop-color="rgba(168,85,247,0)"/>
+    </radialGradient>
+    <radialGradient id="og-violet-br" cx="1" cy="1" r="0.7" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="rgba(192,132,252,.18)"/>
+      <stop offset="100%" stop-color="rgba(192,132,252,0)"/>
+    </radialGradient>
+    <!-- Logo gradient: blue -> cyan -> teal (the brand mark) -->
+    <linearGradient id="og-logo-grad" x1="600" y1="120" x2="600" y2="370" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="45%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+    <!-- Halo behind the mark for depth -->
+    <radialGradient id="og-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="rgba(20,184,166,.30)"/>
+      <stop offset="60%" stop-color="rgba(37,99,235,.18)"/>
+      <stop offset="100%" stop-color="rgba(37,99,235,0)"/>
+    </radialGradient>
+  </defs>
+  <!-- Base + ambient violet washes -->
+  <rect width="1200" height="630" fill="url(#og-bg)"/>
+  <rect width="1200" height="630" fill="url(#og-violet-tl)"/>
+  <rect width="1200" height="630" fill="url(#og-violet-br)"/>
+  <!-- Centered halo + hex H mark -->
+  <ellipse cx="600" cy="245" rx="220" ry="180" fill="url(#og-halo)"/>
+  <g transform="translate(540, 120) scale(3)">
+    <path d="M4 12 L9 4 L14 12 L14 16 L26 16 L26 12 L31 4 L36 12 L36 28 L31 36 L26 28 L26 24 L14 24 L14 28 L9 36 L4 28 Z"
+          fill="url(#og-logo-grad)"/>
+  </g>
+  <!-- Wordmark: confident HIRELOOM with airy tracking -->
+  <text x="600" y="445" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="800" fill="#fafafa" text-anchor="middle"
+        letter-spacing="14">HIRELOOM</text>
+  <!-- Tagline: matches the official brand graphic -->
+  <text x="600" y="500" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="400" fill="#c084fc" text-anchor="middle"
+        letter-spacing="2">Your AI-Powered Career Accelerator</text>
+  <!-- Footer hint: subtle credit + handle (legible but quiet) -->
+  <text x="600" y="585" font-family="'JetBrains Mono', ui-monospace, monospace"
+        font-size="16" font-weight="500" fill="#7e6a99" text-anchor="middle"
+        letter-spacing="3">heir + loom · a quiet career atelier</text>
+</svg>
