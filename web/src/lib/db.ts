@@ -36,6 +36,20 @@ export async function listRoles(): Promise<RoleRow[]> {
   return (data as RoleRow[]) ?? [];
 }
 
+export interface Report { markdown: string; score: number | null; created_at: string; }
+
+export async function getReportForRole(roleId: string): Promise<Report | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('reports')
+    .select('markdown,score,created_at')
+    .eq('role_id', roleId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as Report | null) ?? null;
+}
+
 export async function getUsage(metric = 'evaluationsPerMonth'): Promise<number> {
   if (!supabase) return 0;
   const period = new Date().toISOString().slice(0, 7); // YYYY-MM

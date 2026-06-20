@@ -5,6 +5,7 @@ import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription }
 import { startCheckout } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
 import { getCv, saveCv, getSavedProviders, saveProviderKey } from '../lib/settings';
+import RoleDetail from './RoleDetail';
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
 const PROVIDERS = ['anthropic', 'kimi', 'openrouter', 'gemini'];
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [banner, setBanner] = useState<string | null>(null);
   const [billingMsg, setBillingMsg] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<RoleRow | null>(null);
 
   // new evaluation
   const [input, setInput] = useState('');
@@ -118,7 +120,7 @@ export default function Dashboard() {
                 <thead className="bg-white/5 text-xs uppercase tracking-wide text-gray-400"><tr><th className="px-4 py-3">Company</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Score</th><th className="px-4 py-3">Status</th></tr></thead>
                 <tbody>
                   {roles.map((r) => (
-                    <tr key={r.id} className="border-t border-white/5">
+                    <tr key={r.id} onClick={() => setSelectedRole(r)} className="cursor-pointer border-t border-white/5 transition-colors hover:bg-white/5">
                       <td className="px-4 py-3 font-medium">{r.company}</td>
                       <td className="px-4 py-3 text-gray-300">{r.title}</td>
                       <td className="px-4 py-3">{r.score ?? '—'}</td>
@@ -132,6 +134,7 @@ export default function Dashboard() {
       </main>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {selectedRole && <RoleDetail role={selectedRole} onClose={() => setSelectedRole(null)} />}
     </div>
   );
 }
