@@ -1,6 +1,21 @@
 import { useEffect, useState, type JSX } from 'react';
-import { X, ExternalLink } from 'lucide-react';
-import { getReportForRole, type RoleRow } from '../lib/db';
+import { X, ExternalLink, Sparkles, Download } from 'lucide-react';
+import { getReportForRole, getTailoring, type RoleRow, type Tailoring } from '../lib/db';
+import { runTailor } from '../lib/tailor';
+
+function download(name: string, text: string) {
+  const blob = new Blob([text], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function cvMarkdown(t: Tailoring): string {
+  const exp = t.experience.map((j) => `### ${j.title} — ${j.period}\n${j.location}\n${j.bullets.map((b) => `- ${b}`).join('\n')}`).join('\n\n');
+  return `# ${t.title}\n\n## Summary\n${t.summary}\n\n## Experience\n${exp}\n\n## Competencies\n${t.competencies}\n\n## Tools\n${t.tools}\n`;
+}
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 // Tiny, XSS-safe markdown → JSX (headings, bullets, **bold**, paragraphs).
 function inline(s: string) {
@@ -27,12 +42,26 @@ function renderMarkdown(text: string): JSX.Element[] {
 export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: () => void }) {
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tailoring, setTailoring] = useState<Tailoring | null>(null);
+  const [tailorBusy, setTailorBusy] = useState(false);
+  const [tailorMsg, setTailorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    getReportForRole(role.id).then((r) => { if (alive) { setReport(r?.markdown ?? null); setLoading(false); } });
+    Promise.all([getReportForRole(role.id), getTailoring(role.id)]).then(([r, t]) => {
+      if (!alive) return;
+      setReport(r?.markdown ?? null); setTailoring(t); setLoading(false);
+    });
     return () => { alive = false; };
   }, [role.id]);
+
+  const tailor = async () => {
+    setTailorBusy(true); setTailorMsg('Tailoring CV + cover letter… 30–60s.');
+    const res = await runTailor(role.id);
+    setTailorBusy(false);
+    if (res.error) { setTailorMsg(res.error); return; }
+    setTailoring(res.content ?? null); setTailorMsg(null);
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -54,6 +83,37 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
           {loading ? <p className="text-gray-500">Loading report…</p>
             : report ? renderMarkdown(report)
             : <p className="text-gray-500">No report stored for this role yet.</p>}
+
+          {/* Tailoring */}
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-white"><Sparkles size={15} /> Tailored package</span>
+              <button onClick={tailor} disabled={tailorBusy} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200 disabled:opacity-50">
+                {tailorBusy ? 'Tailoring…' : tailoring ? 'Re-tailor' : 'Tailor CV + cover letter'}
+              </button>
+              {tailoring && (
+                <>
+                  <button onClick={() => download(`${slug(role.company)}-cv.md`, cvMarkdown(tailoring))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> CV</button>
+                  <button onClick={() => download(`${slug(role.company)}-cover-letter.md`, tailoring.coverLetter.join('\n\n'))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> Cover letter</button>
+                </>
+              )}
+            </div>
+            {tailorMsg && <p className="mb-3 text-xs text-gray-400">{tailorMsg}</p>}
+            {tailoring && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
+                <p className="mb-2 font-semibold text-white">{tailoring.title}</p>
+                <p className="mb-3 text-gray-300">{tailoring.summary}</p>
+                {tailoring.experience.slice(0, 2).map((j, i) => (
+                  <div key={i} className="mb-3">
+                    <p className="text-sm font-medium text-white">{j.title} <span className="text-gray-500">· {j.period}</span></p>
+                    <ul className="mt-1">{j.bullets.slice(0, 3).map((b, bi) => <li key={bi} className="ml-5 list-disc text-gray-400">{b}</li>)}</ul>
+                  </div>
+                ))}
+                <p className="mt-3 text-xs text-gray-500">Cover letter ready — download above. Print to PDF from your browser.</p>
+              </div>
+            )}
+            {!tailoring && !tailorBusy && <p className="text-xs text-gray-600">Generate a truthful CV + cover letter tuned to this role (uses your saved key + CV).</p>}
+          </div>
         </div>
       </div>
     </div>

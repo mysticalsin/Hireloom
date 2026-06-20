@@ -38,6 +38,21 @@ export async function listRoles(): Promise<RoleRow[]> {
 
 export interface Report { markdown: string; score: number | null; created_at: string; }
 
+export interface Tailoring {
+  title: string;
+  summary: string;
+  experience: { title: string; period: string; location: string; bullets: string[] }[];
+  competencies: string;
+  tools: string;
+  coverLetter: string[];
+}
+
+export async function getTailoring(roleId: string): Promise<Tailoring | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.from('tailorings').select('content').eq('role_id', roleId).maybeSingle();
+  return (data as { content: Tailoring } | null)?.content ?? null;
+}
+
 export async function getReportForRole(roleId: string): Promise<Report | null> {
   if (!supabase) return null;
   const { data } = await supabase
