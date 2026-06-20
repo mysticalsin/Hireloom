@@ -31,7 +31,7 @@ try {
   // dotenv is optional — fall back to process.env if not installed
 }
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { evaluateOffer, buildReportMarkdown } from './eval/evaluate.mjs';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -168,73 +168,29 @@ const ofertaLogic    = readFile(PATHS.oferta,   'modes/oferta.md');
 const cvContent      = readFile(PATHS.cv,       'cv.md');
 
 // ---------------------------------------------------------------------------
-// Build the system prompt (mirrors the Claude skill router logic)
-// ---------------------------------------------------------------------------
-const systemPrompt = `You are career-ops, an AI-powered job search assistant.
-You evaluate job offers against the user's CV using a structured A-G scoring system.
-
-Your evaluation methodology is defined below. Follow it exactly.
-
-═══════════════════════════════════════════════════════
-SYSTEM CONTEXT (_shared.md)
-═══════════════════════════════════════════════════════
-${sharedContext}
-
-═══════════════════════════════════════════════════════
-EVALUATION MODE (oferta.md)
-═══════════════════════════════════════════════════════
-${ofertaLogic}
-
-═══════════════════════════════════════════════════════
-CANDIDATE RESUME (cv.md)
-═══════════════════════════════════════════════════════
-${cvContent}
-
-═══════════════════════════════════════════════════════
-IMPORTANT OPERATING RULES FOR THIS CLI SESSION
-═══════════════════════════════════════════════════════
-1. You do NOT have access to WebSearch, Playwright, or file writing tools.
-   - For Block D (Comp research): provide salary estimates based on your training data, clearly noted as estimates.
-   - For Block G (Legitimacy): analyze the JD text only; skip URL/page freshness checks.
-   - Post-evaluation file saving is handled by the script, not by you.
-2. Generate Blocks A through G in full, in English, unless the JD is in another language.
-3. At the very end, output a machine-readable summary block in this exact format:
-
----SCORE_SUMMARY---
-COMPANY: <company name or "Unknown">
-ROLE: <role title>
-SCORE: <global score as decimal, e.g. 3.8>
-ARCHETYPE: <detected archetype>
-LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
----END_SUMMARY---
-`;
-
-// ---------------------------------------------------------------------------
-// Call Gemini API
+// Evaluate via the unified BYOK provider chokepoint (provider: gemini)
 // ---------------------------------------------------------------------------
 console.log(`🤖  Calling Gemini (${modelName})... this may take 30-60 seconds.\n`);
 
-const genAI = new GoogleGenerativeAI(apiKey);
-const model = genAI.getGenerativeModel({
-  model: modelName,
-  generationConfig: {
-    temperature: 0.4,      // deterministic enough for structured evaluation
-    maxOutputTokens: 8192, // full 7-block evaluation
-  },
-});
-
 let evaluationText;
+let summary;
 try {
-  const result = await model.generateContent([
-    { text: systemPrompt },
-    { text: `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
-  ]);
-  evaluationText = result.response.text();
+  const r = await evaluateOffer({
+    jdText,
+    shared: sharedContext,
+    oferta: ofertaLogic,
+    cv: cvContent,
+    provider: 'gemini',
+    model: modelName,
+    apiKey,
+  });
+  evaluationText = r.evaluationText;
+  summary = r.summary;
 } catch (err) {
   console.error('❌  Gemini API error:', err.message);
-  if (err.message?.includes('API_KEY')) {
+  if (err.message?.includes('API key') || err.message?.includes('API_KEY')) {
     console.error('    Check your GEMINI_API_KEY in .env');
-  } else if (err.message?.includes('quota') || err.message?.includes('rate')) {
+  } else if (err.message?.includes('quota') || err.message?.includes('rate') || err.message?.includes('429')) {
     console.error('    You may have hit the free-tier rate limit. Wait 60s and retry.');
   }
   process.exit(1);
@@ -249,30 +205,9 @@ console.log('═'.repeat(66) + '\n');
 console.log(evaluationText);
 
 // ---------------------------------------------------------------------------
-// Parse score summary
+// Score summary (parsed by the evaluator module)
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(
-  /---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/
-);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const block = summaryMatch[1];
-  const extract = (key) => {
-    const m = block.match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+const { company, role, score, archetype, legitimacy } = summary;
 
 // ---------------------------------------------------------------------------
 // Save report
@@ -289,19 +224,12 @@ if (saveReport) {
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
-    const reportContent = `# Evaluation: ${company} — ${role}
-
-**Date:** ${today}
-**Archetype:** ${archetype}
-**Score:** ${score}/5
-**Legitimacy:** ${legitimacy}
-**PDF:** pending
-**Tool:** Gemini (${modelName})
-
----
-
-${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
-`;
+    const reportContent = buildReportMarkdown({
+      summary,
+      evaluationText,
+      toolLabel: `Gemini (${modelName})`,
+      date: today,
+    });
 
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
