@@ -11,7 +11,7 @@
 import http from 'http';
 import https from 'https';
 import fs from 'fs/promises';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import crypto from 'crypto';
@@ -10511,6 +10511,15 @@ async function runPipelineCycle() {
   pipelineNextRun = new Date(Date.now() + PIPELINE_INTERVAL_MS).toISOString();
   console.log('[pipeline] Starting autonomous cycle (scan → eval → CL → assemble)...');
   try {
+    // jobseeker.mjs is the author's personal, gitignored autopilot — not shipped in
+    // the product. Guard the spawn so deploys without it skip cleanly instead of
+    // erroring on a missing file. The tracked eval path is
+    // engine/pipeline/evaluate-url.mjs (BYOK, server-side); the full hosted
+    // autopilot lands with the job-queue phase.
+    if (!existsSync(path.join(ROOT, 'jobseeker.mjs'))) {
+      console.warn('[pipeline] jobseeker.mjs not present in this build — autonomous pipeline disabled.');
+      return;
+    }
     await new Promise((resolve) => {
       const args = ['jobseeker.mjs', '--model', process.env.CAREER_OPS_MODEL || 'kimi'];
       const p = spawn('node', args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });

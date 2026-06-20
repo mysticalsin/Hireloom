@@ -204,6 +204,23 @@ function checkAutoDir(name) {
   }
 }
 
+// BYOK provider key for the standalone/hosted engine (evaluator, tailoring).
+// Optional: the Claude Code flow uses the CLI's own key, so this only warns.
+// Checks process.env only (never reads the .env file).
+function checkProviderKey() {
+  const vars = ['ANTHROPIC_API_KEY', 'KIMI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY'];
+  const present = vars.filter((v) => process.env[v]);
+  if (present.length > 0) {
+    return { pass: true, label: `BYOK provider key present in env (${present.join(', ')})` };
+  }
+  return {
+    pass: true,
+    warn: true,
+    label: 'No BYOK provider key in env (optional — needed to run the engine without Claude Code)',
+    fix: 'Set one of ANTHROPIC_API_KEY / KIMI_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY (loaded at runtime) for standalone/hosted evaluation + tailoring',
+  };
+}
+
 async function main() {
   console.log('\nHireloom doctor');
   console.log('================\n');
@@ -216,6 +233,7 @@ async function main() {
     checkProfile(),
     ...checkCvBlock(),
     checkPortals(),
+    checkProviderKey(),
     checkFonts(),
     checkAutoDir('data'),
     checkAutoDir('output'),
