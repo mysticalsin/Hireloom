@@ -49,14 +49,14 @@ export function withinLimit(planId, key, used) {
  * Feature gate against a store-backed tenant plan. Returns {ok} or {ok:false,...}.
  * Throwing variant: requireFeature(...) for handler use.
  */
-export function checkFeature(store, tenantId, feature) {
-  const plan = store.tenantPlan(tenantId);
+export async function checkFeature(store, tenantId, feature) {
+  const plan = await store.tenantPlan(tenantId);
   if (hasFeature(plan, feature)) return { ok: true, plan };
   return { ok: false, plan, feature, upgradeTo: feature === 'autopilot' || feature === 'second_brain' ? 'studio' : 'pro' };
 }
 
-export function requireFeature(store, tenantId, feature) {
-  const r = checkFeature(store, tenantId, feature);
+export async function requireFeature(store, tenantId, feature) {
+  const r = await checkFeature(store, tenantId, feature);
   if (!r.ok) {
     const err = new Error(`Feature "${feature}" requires the ${r.upgradeTo} plan (current: ${r.plan})`);
     err.code = 'plan_required';
@@ -72,14 +72,14 @@ export function requireFeature(store, tenantId, feature) {
  * @param {string} metric one of the plan limit keys (e.g. evaluationsPerMonth)
  * @returns {{ok, used, limit, plan}}
  */
-export function checkQuota(store, tenantId, metric) {
-  const plan = store.tenantPlan(tenantId);
-  const used = store.getUsage(tenantId, metric);
+export async function checkQuota(store, tenantId, metric) {
+  const plan = await store.tenantPlan(tenantId);
+  const used = await store.getUsage(tenantId, metric);
   return { ok: withinLimit(plan, metric, used), used, limit: planFor(plan).limits[metric], plan };
 }
 
-export function requireQuota(store, tenantId, metric) {
-  const r = checkQuota(store, tenantId, metric);
+export async function requireQuota(store, tenantId, metric) {
+  const r = await checkQuota(store, tenantId, metric);
   if (!r.ok) {
     const err = new Error(`Monthly ${metric} limit reached on the ${r.plan} plan (${r.used}/${r.limit}). Upgrade to continue.`);
     err.code = 'quota_exceeded';

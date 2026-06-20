@@ -50,27 +50,27 @@ test('entitlementFromEvent ignores unrelated events', () => {
   assert.equal(entitlementFromEvent({ type: 'invoice.paid', data: { object: {} } }, { priceToPlan: PRICE_TO_PLAN }), null);
 });
 
-test('applyWebhookEvent writes the entitlement to the store and gates features', () => {
+test('applyWebhookEvent writes the entitlement to the store and gates features', async () => {
   const store = makeInMemoryStore();
   const t = store.createTenant({ name: 'Acme' });
   // before paying: free plan, premium feature gated
   assert.equal(store.tenantPlan(t.id), 'free');
-  assert.equal(checkFeature(store, t.id, 'assisted_apply').ok, false);
-  assert.throws(() => requireFeature(store, t.id, 'assisted_apply'), /requires the pro plan/);
+  assert.equal((await checkFeature(store, t.id, 'assisted_apply')).ok, false);
+  await assert.rejects(() => requireFeature(store, t.id, 'assisted_apply'), /requires the pro plan/);
 
   // Pro subscription event arrives
   const ev = { type: 'customer.subscription.updated', data: { object: { id: 'sub_1', status: 'active', customer: 'cus_1', metadata: { tenantId: t.id }, items: { data: [{ price: { id: 'price_pro' } }] } } } };
-  const applied = applyWebhookEvent(store, ev, { priceToPlan: PRICE_TO_PLAN });
+  const applied = await applyWebhookEvent(store, ev, { priceToPlan: PRICE_TO_PLAN });
   assert.equal(applied.plan, 'pro');
   assert.equal(store.tenantPlan(t.id), 'pro');
-  assert.ok(checkFeature(store, t.id, 'assisted_apply').ok);
+  assert.ok((await checkFeature(store, t.id, 'assisted_apply')).ok);
   // studio-only still gated on pro
-  assert.equal(checkFeature(store, t.id, 'autopilot').upgradeTo, 'studio');
+  assert.equal((await checkFeature(store, t.id, 'autopilot')).upgradeTo, 'studio');
 });
 
-test('applyWebhookEvent no-ops without a tenant', () => {
+test('applyWebhookEvent no-ops without a tenant', async () => {
   const store = makeInMemoryStore();
-  assert.equal(applyWebhookEvent(store, { type: 'invoice.paid', data: { object: {} } }, {}), null);
+  assert.equal(await applyWebhookEvent(store, { type: 'invoice.paid', data: { object: {} } }, {}), null);
 });
 
 test('priceToPlanFromEnv builds the map from env vars', () => {

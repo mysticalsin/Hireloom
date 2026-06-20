@@ -8978,7 +8978,7 @@ async function handleRequest(req, res) {
     try {
       const raw = await readRawBody(req);
       const event = await constructEvent(raw, req.headers['stripe-signature']);
-      applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() }); // file-store auto-persists
+      await applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() }); // file-store auto-persists
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ received: true }));
     } catch (err) {

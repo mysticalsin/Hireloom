@@ -17,17 +17,17 @@ test('usage counters increment per metric and isolate by month', () => {
   assert.equal(s.getUsage(t.id, 'evaluationsPerMonth'), 0);
 });
 
-test('checkQuota: Free caps at the limit, Pro is unlimited', () => {
+test('checkQuota: Free caps at the limit, Pro is unlimited', async () => {
   const s = makeInMemoryStore();
   const t = s.createTenant({ name: 'Acme' });
   for (let i = 0; i < 9; i++) s.incrementUsage(t.id, 'evaluationsPerMonth');
-  assert.equal(checkQuota(s, t.id, 'evaluationsPerMonth').ok, true);   // 9 < 10
-  s.incrementUsage(t.id, 'evaluationsPerMonth');                        // now 10
-  assert.equal(checkQuota(s, t.id, 'evaluationsPerMonth').ok, false);  // 10 not < 10
-  assert.throws(() => requireQuota(s, t.id, 'evaluationsPerMonth'), /limit reached/);
+  assert.equal((await checkQuota(s, t.id, 'evaluationsPerMonth')).ok, true);   // 9 < 10
+  s.incrementUsage(t.id, 'evaluationsPerMonth');                                // now 10
+  assert.equal((await checkQuota(s, t.id, 'evaluationsPerMonth')).ok, false);  // 10 not < 10
+  await assert.rejects(() => requireQuota(s, t.id, 'evaluationsPerMonth'), /limit reached/);
   // upgrade to Pro → unlimited
   s.setSubscription(t.id, { plan: 'pro', status: 'active' });
-  assert.equal(checkQuota(s, t.id, 'evaluationsPerMonth').ok, true);
+  assert.equal((await checkQuota(s, t.id, 'evaluationsPerMonth')).ok, true);
 });
 
 // --- evaluateUrl quota enforcement ---

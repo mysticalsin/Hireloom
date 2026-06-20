@@ -61,7 +61,7 @@ export function entitlementFromEvent(event, { priceToPlan = {} } = {}) {
  * Apply a verified Stripe event to the store. Returns the applied entitlement,
  * or null if the event isn't actionable / has no tenant.
  */
-export function applyWebhookEvent(store, event, { priceToPlan = {} } = {}) {
+export async function applyWebhookEvent(store, event, { priceToPlan = {} } = {}) {
   const ent = entitlementFromEvent(event, { priceToPlan });
   if (!ent || !ent.tenantId) return null;
   return store.setSubscription(ent.tenantId, ent);

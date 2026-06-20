@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { LogOut, Briefcase, Gauge, CreditCard } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
+import { startCheckout } from '../lib/billing';
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
 
@@ -11,6 +12,13 @@ export default function Dashboard() {
   const [used, setUsed] = useState(0);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [billingMsg, setBillingMsg] = useState<string | null>(null);
+
+  const upgrade = async (plan: 'pro' | 'studio') => {
+    setBillingMsg('Redirecting to checkout…');
+    const r = await startCheckout(plan);
+    if (r.error) setBillingMsg(r.error);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -54,6 +62,27 @@ export default function Dashboard() {
             <span className="text-2xl font-semibold">{roles.length}</span>
           </Card>
         </div>
+
+        {plan !== 'studio' && (
+          <div className="mb-10 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+            <span className="text-sm text-gray-300">
+              {plan === 'free'
+                ? 'You’re on Free. Upgrade for unlimited evaluations, inbox signals, and assisted apply.'
+                : 'You’re on Pro. Go Studio for autopilot scanning + the Second Brain.'}
+            </span>
+            <div className="ml-auto flex gap-3">
+              {plan === 'free' && (
+                <button onClick={() => upgrade('pro')} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-black transition-colors hover:bg-gray-200">
+                  Upgrade to Pro
+                </button>
+              )}
+              <button onClick={() => upgrade('studio')} className="liquid-glass rounded-full px-5 py-2 text-sm font-medium">
+                Upgrade to Studio
+              </button>
+            </div>
+            {billingMsg && <span className="w-full text-sm text-gray-400">{billingMsg}</span>}
+          </div>
+        )}
 
         <h2 className="mb-3 text-lg font-semibold">Roles</h2>
         <div className="overflow-hidden rounded-xl border border-white/10">

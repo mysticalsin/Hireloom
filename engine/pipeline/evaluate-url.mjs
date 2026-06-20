@@ -58,7 +58,7 @@ export async function evaluateUrl({
 
   // Enforce the monthly evaluation quota BEFORE spending tokens (hosted path only;
   // throws { code: 'quota_exceeded' } when a Free tenant is over the cap).
-  if (store && tenantId) requireQuota(store, tenantId, 'evaluationsPerMonth');
+  if (store && tenantId) await requireQuota(store, tenantId, 'evaluationsPerMonth');
 
   const needDisk = shared === undefined || oferta === undefined || cv === undefined;
   const disk = needDisk ? loadEvalContext() : { shared: '', oferta: '', cv: '' };
@@ -83,9 +83,9 @@ export async function evaluateUrl({
   // Persist into the tenant-scoped store when one is provided (hosted path).
   let persisted = null;
   if (store && tenantId) {
-    store.incrementUsage(tenantId, 'evaluationsPerMonth', 1);
+    await store.incrementUsage(tenantId, 'evaluationsPerMonth', 1);
     const scoreNum = Number.parseFloat(result.summary.score);
-    const role = store.saveRole(tenantId, {
+    const role = await store.saveRole(tenantId, {
       company: result.summary.company || 'Unknown',
       title: result.summary.role || 'Unknown',
       status: 'Evaluated',
@@ -94,7 +94,7 @@ export async function evaluateUrl({
       source: jd.source,
       jdText: jd.text,
     });
-    const report = store.saveReport(tenantId, { roleId: role.id, markdown: reportMarkdown, score: role.score });
+    const report = await store.saveReport(tenantId, { roleId: role.id, markdown: reportMarkdown, score: role.score });
     persisted = { role, report };
   }
 
