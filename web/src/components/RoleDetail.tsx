@@ -1,8 +1,10 @@
 import { useEffect, useState, type JSX } from 'react';
-import { X, ExternalLink, Sparkles, Download, ClipboardCheck, Copy, Send } from 'lucide-react';
+import { X, ExternalLink, Sparkles, Download, FileDown, ClipboardCheck, Copy, Send } from 'lucide-react';
 import { getReportForRole, getTailoring, getApplyAnswers, type RoleRow, type Tailoring, type ApplyAnswers } from '../lib/db';
 import { runTailor } from '../lib/tailor';
 import { runApplyAssist } from '../lib/apply';
+import { openPrint, cvHtml, coverHtml } from '../lib/print';
+import { useAuth } from '../auth/AuthProvider';
 
 function download(name: string, text: string) {
   const blob = new Blob([text], { type: 'text/markdown' });
@@ -41,6 +43,9 @@ function renderMarkdown(text: string): JSX.Element[] {
 }
 
 export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: () => void }) {
+  const { user } = useAuth();
+  const name = (user?.user_metadata?.full_name as string) || user?.email || 'Candidate';
+  const contact = user?.email ?? '';
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tailoring, setTailoring] = useState<Tailoring | null>(null);
@@ -107,8 +112,10 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
               </button>
               {tailoring && (
                 <>
-                  <button onClick={() => download(`${slug(role.company)}-cv.md`, cvMarkdown(tailoring))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> CV</button>
-                  <button onClick={() => download(`${slug(role.company)}-cover-letter.md`, tailoring.coverLetter.join('\n\n'))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> Cover letter</button>
+                  <button onClick={() => openPrint(cvHtml(tailoring, name, contact))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><FileDown size={13} /> CV PDF</button>
+                  <button onClick={() => openPrint(coverHtml(tailoring, name, contact))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><FileDown size={13} /> Cover PDF</button>
+                  <button onClick={() => download(`${slug(role.company)}-cv.md`, cvMarkdown(tailoring))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> .md</button>
+                  <button onClick={() => download(`${slug(role.company)}-cover-letter.md`, tailoring.coverLetter.join('\n\n'))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> Cover .md</button>
                 </>
               )}
             </div>
