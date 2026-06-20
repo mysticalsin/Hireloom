@@ -1,6 +1,6 @@
 # Hireloom Landing — SEO + CRO Action Plan
 
-> Acting CMO / CRO / SEO. Built with the SEO Commander discipline:
+> Acting CMO / CRO / SEO. Core rule:
 > **every recommendation has a KPI, a timeline, and an owner.** No drawer reports.
 > Companion to `docs/PRODUCT-GTM-STRATEGY.md`. Dates are absolute from 2026-06-20.
 > Owners: **Tony** (solo) wearing the role hat named.
@@ -65,9 +65,9 @@
 
 ---
 
-## Next composition (per SEO Commander)
+## Next steps (sequence)
 
-`mantu-copywriting-forge` (SEO-optimised long-form for the blog clusters) →
-`mantu-thought-leadership` (POV content on the anti-spam thesis) →
-`mantu-growth-engine` (post-launch conversion optimisation on pages receiving organic traffic) →
-`mantu-seo-commander` (next quarterly re-audit).
+1. SEO-optimised long-form content for the blog clusters above.
+2. Thought-leadership / POV content on the anti-spam thesis.
+3. Post-launch conversion optimisation on pages receiving organic traffic.
+4. Quarterly SEO re-audit — measure, re-crawl, iterate.
