@@ -15,7 +15,7 @@
 | Tenancy | Single-user per install (`STACK.md → tenancy`) |
 | Storage | Local files: `data/`, `reports/`, `output/`, `config/`. No DB. |
 | Core AI loop | Executed **by the local Claude Code CLI** reading `modes/*.md` — uses Claude Code's own key |
-| Standalone AI | `engine/llm-api.mjs` (Anthropic / Kimi / OpenRouter) + `jobseeker.mjs` — runs on user's key, no Claude Code |
+| Standalone AI | ⚠️ **CORRECTION (Phase-1 grounding):** the clean provider abstraction (`llm-api.mjs`) and the `jobseeker.mjs` autopilot are **untracked/gitignored personal files — NOT in the product.** The dashboard autopilot spawns gitignored `jobseeker.mjs` (`apps/web/server.mjs:10515`) → dead path for any other deploy. The shipped product's tracked AI = four scripts each hardwired to one provider (`engine/gemini-eval.mjs` Gemini SDK; `engine/batch/tailor-engine.mjs`, `engine/apply/kimi-apply.mjs`, `engine/apply/apply-session.mjs` raw Kimi). No unified BYOK chokepoint exists in the product. |
 | Server | `apps/web/server.mjs` — raw Node `http`, ~10k lines, no framework |
 | Auth | None (localhost-open); Gmail OAuth only; `AUTH_TOKEN` gate for non-loopback |
 | Secrets | Plaintext `.env`; no encryption at rest |
@@ -152,7 +152,7 @@ cost + **ToS-liability** minefield at scale, and puts your servers' IPs in the f
 | Phase | Deliverable | Verification | Infra risk |
 |---|---|---|---|
 | **0** | This brief approved | Your sign-off | none |
-| **1 — BYOK unification** | Route eval / tailor / cover-letter / scan through `llm-api.mjs` on the user's key; convert `modes/*.md` to programmatic prompt templates; **remove Claude Code from the core loop** | Existing flows produce identical outputs with only a user key set; no Claude Code running | none (local) |
+| **1 — BYOK unification** | **Build** a tracked provider chokepoint in the product (`engine/llm/`) that takes **provider + model + apiKey as per-call params** (not `process.env` — required for multi-tenant vault keys); route the four tracked AI scripts + a new programmatic evaluator + cover-letter generator through it; convert `modes/*.md` to prompt templates; fix the dashboard's dependency on gitignored `jobseeker.mjs`; **remove Claude Code from the core loop** | Flows produce equivalent outputs with only a passed key; no Claude Code; no gitignored deps | none (local) |
 | **2 — Persistence** | Postgres + Drizzle schema + migrations; data-access layer with `tenant_id`; migrate file reads/writes; object storage for reports/PDFs | Single-user UX unchanged, now DB-backed; migration of sample data round-trips | low |
 | **3 — Multi-tenant shell** | Auth provider wired; accounts; sessions; RLS + per-entry authz; tenant isolation tests | Two tenants cannot see each other's data (test proves it) | med |
 | **4 — BYOK vault** | KMS envelope encryption; key entry → live validation → rotation UI; spend metering (reuse `second-brain/plugin/spend.mjs`) | Keys never persisted plaintext; validation call works; audit log entries | med (KMS) |
