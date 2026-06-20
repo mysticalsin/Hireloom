@@ -24,7 +24,7 @@ export function dedupeKey(company = '', title = '') {
  * @param {object} [opts]
  * @param {() => string} [opts.now] clock returning an ISO timestamp (injectable for tests)
  */
-export function makeInMemoryStore({ now = () => new Date().toISOString() } = {}) {
+export function makeInMemoryStore({ now = () => new Date().toISOString(), snapshot } = {}) {
   const tenants = new Map();
   const users = new Map();
   const providerKeys = new Map();
@@ -34,6 +34,19 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
   const usage = new Map();          // `${tenantId}|${YYYY-MM}|${metric}` -> count
   let counter = 0;
   let order = 0;
+
+  // Hydrate from a prior toJSON() snapshot (used by the file-store adapter).
+  if (snapshot) {
+    for (const t of snapshot.tenants || []) tenants.set(t.id, t);
+    for (const u of snapshot.users || []) users.set(u.id, u);
+    for (const k of snapshot.providerKeys || []) providerKeys.set(k.id, k);
+    for (const r of snapshot.roles || []) roles.set(r.id, r);
+    for (const rep of snapshot.reports || []) reports.set(rep.id, rep);
+    for (const s of snapshot.subscriptions || []) subscriptions.set(s.tenantId, s);
+    for (const [key, val] of snapshot.usage || []) usage.set(key, val);
+    counter = snapshot.counter || 0;
+    order = snapshot.order || 0;
+  }
   const id = (p) => `${p}_${(++counter).toString(36)}`;
   const period = () => now().slice(0, 7); // YYYY-MM from the injected clock
 
@@ -173,6 +186,20 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
     // Effective plan id for a tenant (defaults to free when unsubscribed).
     tenantPlan(tenantId) {
       return subscriptions.get(tenantId)?.plan || 'free';
+    },
+
+    // ---- serialization (for the file-store adapter / backups) ----
+    toJSON() {
+      return {
+        tenants: [...tenants.values()],
+        users: [...users.values()],
+        providerKeys: [...providerKeys.values()],
+        roles: [...roles.values()],
+        reports: [...reports.values()],
+        subscriptions: [...subscriptions.values()],
+        usage: [...usage.entries()],
+        counter, order,
+      };
     },
 
     // ---- usage metering (per tenant, per calendar month) ----

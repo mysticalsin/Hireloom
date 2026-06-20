@@ -11,7 +11,7 @@
 import http from 'http';
 import https from 'https';
 import fs from 'fs/promises';
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import crypto from 'crypto';
@@ -27,7 +27,7 @@ import {
 } from './lib/onboard.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
-import { makeInMemoryStore } from '../../engine/store/store.mjs';
+import { makeFileStore } from '../../engine/store/file-store.mjs';
 import { createCheckoutSession, constructEvent, priceToPlanFromEnv } from '../../engine/billing/stripe.mjs';
 import { applyWebhookEvent } from '../../engine/billing/entitlement.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
@@ -8923,20 +8923,11 @@ const ERROR_COUNTERS = {
 // to a JSON file so entitlement survives restarts. Endpoints are dead until the
 // STRIPE_* env vars are set (see engine/billing/*).
 const BILLING_TENANT = process.env.HIRELOOM_TENANT_ID || 'local';
-const BILLING_STATE_FILE = path.join(DATA_DIR, 'billing-state.json');
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-const billingStore = makeInMemoryStore();
+// Durable file-backed store (auto-persists on every mutation). Holds the seeded
+// tenant + its subscription/usage; swaps to the Postgres adapter for multi-instance.
+const billingStore = makeFileStore({ file: path.join(DATA_DIR, 'store.json') });
 try { billingStore.createTenant({ id: BILLING_TENANT, name: BILLING_TENANT }); } catch { /* already seeded */ }
-try {
-  const saved = JSON.parse(readFileSync(BILLING_STATE_FILE, 'utf8'));
-  if (saved && saved.plan) billingStore.setSubscription(BILLING_TENANT, saved);
-} catch { /* no prior state */ }
-function persistBillingState() {
-  try {
-    const sub = billingStore.getSubscription(BILLING_TENANT);
-    if (sub) writeFileSync(BILLING_STATE_FILE, JSON.stringify(sub, null, 2));
-  } catch (e) { console.error('[billing] persist failed:', e.message); }
-}
 // Raw body (Stripe webhook signature verification needs the unparsed bytes).
 function readRawBody(req, limit = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
@@ -8987,8 +8978,7 @@ async function handleRequest(req, res) {
     try {
       const raw = await readRawBody(req);
       const event = await constructEvent(raw, req.headers['stripe-signature']);
-      const applied = applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() });
-      if (applied) persistBillingState();
+      applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() }); // file-store auto-persists
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ received: true }));
     } catch (err) {
