@@ -1,7 +1,8 @@
 import { useEffect, useState, type JSX } from 'react';
-import { X, ExternalLink, Sparkles, Download } from 'lucide-react';
-import { getReportForRole, getTailoring, type RoleRow, type Tailoring } from '../lib/db';
+import { X, ExternalLink, Sparkles, Download, ClipboardCheck, Copy, Send } from 'lucide-react';
+import { getReportForRole, getTailoring, getApplyAnswers, type RoleRow, type Tailoring, type ApplyAnswers } from '../lib/db';
 import { runTailor } from '../lib/tailor';
+import { runApplyAssist } from '../lib/apply';
 
 function download(name: string, text: string) {
   const blob = new Blob([text], { type: 'text/markdown' });
@@ -45,15 +46,28 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   const [tailoring, setTailoring] = useState<Tailoring | null>(null);
   const [tailorBusy, setTailorBusy] = useState(false);
   const [tailorMsg, setTailorMsg] = useState<string | null>(null);
+  const [apply, setApply] = useState<ApplyAnswers | null>(null);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [copied, setCopied] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([getReportForRole(role.id), getTailoring(role.id)]).then(([r, t]) => {
+    Promise.all([getReportForRole(role.id), getTailoring(role.id), getApplyAnswers(role.id)]).then(([r, t, a]) => {
       if (!alive) return;
-      setReport(r?.markdown ?? null); setTailoring(t); setLoading(false);
+      setReport(r?.markdown ?? null); setTailoring(t); setApply(a); setLoading(false);
     });
     return () => { alive = false; };
   }, [role.id]);
+
+  const draftApply = async () => {
+    setApplyBusy(true); setApplyMsg('Drafting answers… 20–40s.');
+    const res = await runApplyAssist(role.id);
+    setApplyBusy(false);
+    if (res.error) { setApplyMsg(res.error); return; }
+    setApply(res.content ?? null); setApplyMsg(null);
+  };
+  const copy = (i: number, text: string) => { navigator.clipboard?.writeText(text); setCopied(i); setTimeout(() => setCopied(null), 1500); };
 
   const tailor = async () => {
     setTailorBusy(true); setTailorMsg('Tailoring CV + cover letter… 30–60s.');
@@ -113,6 +127,35 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
               </div>
             )}
             {!tailoring && !tailorBusy && <p className="text-xs text-gray-600">Generate a truthful CV + cover letter tuned to this role (uses your saved key + CV).</p>}
+          </div>
+
+          {/* Assisted apply */}
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-white"><Send size={15} /> Assisted apply</span>
+              <button onClick={draftApply} disabled={applyBusy} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200 disabled:opacity-50">
+                {applyBusy ? 'Drafting…' : apply ? 'Re-draft answers' : 'Draft answers'}
+              </button>
+              {role.url && <a href={role.url} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs text-white underline underline-offset-4">open posting <ExternalLink size={12} /></a>}
+            </div>
+            {applyMsg && <p className="mb-3 text-xs text-gray-400">{applyMsg}</p>}
+            {apply && (
+              <div className="space-y-3">
+                {apply.answers.map((qa, i) => (
+                  <div key={i} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <p className="text-xs font-medium text-gray-300">{qa.question}</p>
+                      <button onClick={() => copy(i, qa.answer)} aria-label="Copy" className="shrink-0 text-gray-400 hover:text-white">
+                        {copied === i ? <ClipboardCheck size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-400">{qa.answer}</p>
+                  </div>
+                ))}
+                <p className="text-xs text-gray-600">Review every answer, then submit on the posting yourself. Hireloom never auto-submits.</p>
+              </div>
+            )}
+            {!apply && !applyBusy && <p className="text-xs text-gray-600">Draft truthful answers to the common application questions, ready to review and paste. Pro feature.</p>}
           </div>
         </div>
       </div>

@@ -15,12 +15,14 @@ built and (where possible) verified; these steps wire it to live infrastructure.
    - `supabase/migrations/0002_byok.sql` (Vault-backed provider keys + `cv_md` +
      `set_provider_key` / `get_provider_key` RPCs)
    - `supabase/migrations/0003_tailorings.sql` (stored tailored CV/cover packages)
+   - `supabase/migrations/0004_apply_answers.sql` (assisted-apply drafted answers)
 3. **Authentication → Providers**: enable **Email**. (Optional: enable **Google**,
    add OAuth client id/secret, set Site URL + redirect to your domain.)
 4. **Edge Functions** (install the Supabase CLI, `supabase link` the project):
    ```bash
    supabase functions deploy evaluate
    supabase functions deploy tailor
+   supabase functions deploy apply-assist
    supabase functions deploy checkout
    supabase functions deploy stripe-webhook --no-verify-jwt
    ```

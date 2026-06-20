@@ -53,6 +53,14 @@ export async function getTailoring(roleId: string): Promise<Tailoring | null> {
   return (data as { content: Tailoring } | null)?.content ?? null;
 }
 
+export interface ApplyAnswers { answers: { question: string; answer: string }[]; }
+
+export async function getApplyAnswers(roleId: string): Promise<ApplyAnswers | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.from('apply_answers').select('content').eq('role_id', roleId).maybeSingle();
+  return (data as { content: ApplyAnswers } | null)?.content ?? null;
+}
+
 export async function getReportForRole(roleId: string): Promise<Report | null> {
   if (!supabase) return null;
   const { data } = await supabase
