@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="Hireloom">
+  <title>Hireloom</title>
+  <defs>
+    <linearGradient id="hl-favicon-grad" x1="20" y1="2" x2="20" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="45%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+    <linearGradient id="hl-favicon-sheen" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="rgba(255,255,255,.55)"/>
+      <stop offset="55%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+  <!-- Squircle backdrop reads cleanly in browser tabs at 16x16 -->
+  <rect x="0" y="0" width="40" height="40" rx="8" ry="8" fill="#0a0612"/>
+  <!-- Hexagonal H mark -->
+  <path d="M4 12 L9 4 L14 12 L14 16 L26 16 L26 12 L31 4 L36 12 L36 28 L31 36 L26 28 L26 24 L14 24 L14 28 L9 36 L4 28 Z"
+        fill="url(#hl-favicon-grad)"/>
+  <path d="M4 12 L9 4 L14 12 L14 16 L26 16 L26 12 L31 4 L36 12 L36 28 L31 36 L26 28 L26 24 L14 24 L14 28 L9 36 L4 28 Z"
+        fill="url(#hl-favicon-sheen)" opacity=".35"/>
+</svg>
