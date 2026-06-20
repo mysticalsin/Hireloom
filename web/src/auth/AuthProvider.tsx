@@ -43,7 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   const signInWithGoogle = async (): Promise<Result> => {
     if (!supabase) return { error: 'Auth is not configured yet.' };
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+    // Request gmail.readonly so the dashboard can surface inbox signals (read-only).
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        scopes: 'email profile https://www.googleapis.com/auth/gmail.readonly',
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
     return { error: error?.message };
   };
   const signOut = async () => { await supabase?.auth.signOut(); };

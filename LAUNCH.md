@@ -17,7 +17,10 @@ built and (where possible) verified; these steps wire it to live infrastructure.
    - `supabase/migrations/0003_tailorings.sql` (stored tailored CV/cover packages)
    - `supabase/migrations/0004_apply_answers.sql` (assisted-apply drafted answers)
 3. **Authentication → Providers**: enable **Email**. (Optional: enable **Google**,
-   add OAuth client id/secret, set Site URL + redirect to your domain.)
+   add OAuth client id/secret, set Site URL + redirect to your domain.) For the
+   dashboard's **inbox signals**, the Google OAuth consent screen must allow the
+   `gmail.readonly` scope (the app requests it at sign-in; reads run client-side
+   on the user's token — nothing server-side touches their mail).
 4. **Edge Functions** (install the Supabase CLI, `supabase link` the project):
    ```bash
    supabase functions deploy evaluate

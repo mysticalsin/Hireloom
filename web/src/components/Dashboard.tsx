@@ -5,13 +5,21 @@ import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription }
 import { startCheckout } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
 import { getCv, saveCv, getSavedProviders, saveProviderKey } from '../lib/settings';
+import { getInboxSignals, type Signal } from '../lib/gmail';
 import RoleDetail from './RoleDetail';
+
+const SIGNAL_STYLE: Record<string, string> = {
+  offer: 'text-emerald-300 border-emerald-700/40',
+  interview: 'text-sky-300 border-sky-700/40',
+  rejection: 'text-red-300 border-red-800/40',
+  response: 'text-gray-300 border-white/15',
+};
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
 const PROVIDERS = ['anthropic', 'kimi', 'openrouter', 'gemini'];
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, signInWithGoogle } = useAuth();
   const [sub, setSub] = useState<Subscription | null>(null);
   const [used, setUsed] = useState(0);
   const [roles, setRoles] = useState<RoleRow[]>([]);
@@ -20,6 +28,20 @@ export default function Dashboard() {
   const [billingMsg, setBillingMsg] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedRole, setSelectedRole] = useState<RoleRow | null>(null);
+  const [signals, setSignals] = useState<Signal[] | null>(null);
+  const [inboxBusy, setInboxBusy] = useState(false);
+  const [inboxMsg, setInboxMsg] = useState<string | null>(null);
+  const [needsGmail, setNeedsGmail] = useState(false);
+
+  const syncInbox = async () => {
+    setInboxBusy(true); setInboxMsg('Reading inbox…'); setNeedsGmail(false);
+    const r = await getInboxSignals();
+    setInboxBusy(false);
+    if (r.needsConnect) { setNeedsGmail(true); setInboxMsg('Connect Gmail (read-only) to surface responses, interviews, and offers.'); return; }
+    if (r.error) { setInboxMsg(r.error); return; }
+    setSignals(r.signals ?? []);
+    setInboxMsg((r.signals?.length ?? 0) === 0 ? 'No job-search signals in the last 45 days.' : null);
+  };
 
   // new evaluation
   const [input, setInput] = useState('');
@@ -110,6 +132,28 @@ export default function Dashboard() {
             {billingMsg && <span className="w-full text-sm text-gray-400">{billingMsg}</span>}
           </div>
         )}
+
+        {/* Inbox signals */}
+        <div className="liquid-glass mb-8 rounded-2xl bg-white/[0.03] p-6">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium">Inbox signals</span>
+            <button onClick={syncInbox} disabled={inboxBusy} className="liquid-glass rounded-full px-4 py-1.5 text-xs font-medium disabled:opacity-50">{inboxBusy ? 'Syncing…' : 'Sync inbox'}</button>
+            {needsGmail && <button onClick={() => signInWithGoogle()} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200">Connect Gmail</button>}
+          </div>
+          {inboxMsg && <p className="mb-3 text-xs text-gray-400">{inboxMsg}</p>}
+          {signals && signals.length > 0 && (
+            <ul className="space-y-2">
+              {signals.map((s) => (
+                <li key={s.id} className="flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-sm">
+                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs capitalize ${SIGNAL_STYLE[s.type] ?? 'text-gray-300 border-white/15'}`}>{s.type}</span>
+                  <span className="truncate text-gray-300">{s.subject}</span>
+                  <span className="ml-auto shrink-0 text-xs text-gray-500">{s.from.replace(/<.*>/, '').trim()}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!signals && !inboxMsg && <p className="text-xs text-gray-600">Read-only Gmail scan for responses, rejections, interviews, and offers. Runs in your browser on your Google token.</p>}
+        </div>
 
         <h2 className="mb-3 text-lg font-semibold">Roles</h2>
         <div className="overflow-hidden rounded-xl border border-white/10">
