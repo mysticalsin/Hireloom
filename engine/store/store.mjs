@@ -41,9 +41,11 @@ export function makeInMemoryStore({ now = () => new Date().toISOString() } = {})
 
   return {
     // ---- tenants / users ----
-    createTenant({ name } = {}) {
+    createTenant({ name, id: givenId } = {}) {
       if (!name) throw new Error('createTenant: name required');
-      const t = { id: id('t'), name, createdAt: now() };
+      const tid = givenId || id('t');
+      if (tenants.has(tid)) throw new Error('createTenant: id already exists');
+      const t = { id: tid, name, createdAt: now() };
       tenants.set(t.id, t);
       return { ...t };
     },

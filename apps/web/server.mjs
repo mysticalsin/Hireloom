@@ -11,7 +11,7 @@
 import http from 'http';
 import https from 'https';
 import fs from 'fs/promises';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import crypto from 'crypto';
@@ -27,6 +27,9 @@ import {
 } from './lib/onboard.mjs';
 import { makeSafeResolver } from './lib/path-safety.mjs';
 import { readJsonBody, MAX_BODY_BYTES } from './lib/http-utils.mjs';
+import { makeInMemoryStore } from '../../engine/store/store.mjs';
+import { createCheckoutSession, constructEvent, priceToPlanFromEnv } from '../../engine/billing/stripe.mjs';
+import { applyWebhookEvent } from '../../engine/billing/entitlement.mjs';
 import { buildGmailStatus } from './lib/gmail-status.mjs';
 import { detectSignal, matchApplication, extractRoleFromEmail } from './lib/gmail-signals.mjs';
 import { buildRoleIndex, matchEmailToRole, companiesMatch, titlesSimilar, ROLE_KEY_RE, loadLanes, reconcilePoolKeys } from './lib/role-index.mjs';
@@ -8914,12 +8917,46 @@ const ERROR_COUNTERS = {
   routeError:         0,
 };
 
+// ── Billing (Stripe) ────────────────────────────────────────────────────
+// Single-tenant interim: full multi-tenant billing needs auth (Phase 3) + the
+// Postgres store. Until then, seed one stable tenant and persist its subscription
+// to a JSON file so entitlement survives restarts. Endpoints are dead until the
+// STRIPE_* env vars are set (see engine/billing/*).
+const BILLING_TENANT = process.env.HIRELOOM_TENANT_ID || 'local';
+const BILLING_STATE_FILE = path.join(DATA_DIR, 'billing-state.json');
+const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const billingStore = makeInMemoryStore();
+try { billingStore.createTenant({ id: BILLING_TENANT, name: BILLING_TENANT }); } catch { /* already seeded */ }
+try {
+  const saved = JSON.parse(readFileSync(BILLING_STATE_FILE, 'utf8'));
+  if (saved && saved.plan) billingStore.setSubscription(BILLING_TENANT, saved);
+} catch { /* no prior state */ }
+function persistBillingState() {
+  try {
+    const sub = billingStore.getSubscription(BILLING_TENANT);
+    if (sub) writeFileSync(BILLING_STATE_FILE, JSON.stringify(sub, null, 2));
+  } catch (e) { console.error('[billing] persist failed:', e.message); }
+}
+// Raw body (Stripe webhook signature verification needs the unparsed bytes).
+function readRawBody(req, limit = MAX_BODY_BYTES) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { req.destroy(); reject(new Error('body too large')); } else { chunks.push(c); }
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 async function handleRequest(req, res) {
   applySecurityHeaders(req, res);
   // Auth gate: only allow /api/health unauthenticated when bound to a
   // non-loopback address. Everything else needs the token.
   const urlForAuth = new URL(req.url, `http://${HOST}:${PORT}`);
-  if (NON_LOOPBACK && urlForAuth.pathname !== '/api/health' && !isAuthorized(req)) {
+  if (NON_LOOPBACK && urlForAuth.pathname !== '/api/health' && urlForAuth.pathname !== '/api/stripe/webhook' && !isAuthorized(req)) {
     res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'WWW-Authenticate': 'Bearer realm="Hireloom"' });
     res.end(JSON.stringify({ ok: false, error: 'authentication required' }));
     return;
@@ -8937,7 +8974,57 @@ async function handleRequest(req, res) {
   // Methods that mutate state must come from a trusted Origin or be
   // same-origin (no Origin header).
   if (req.method !== 'GET' && req.method !== 'HEAD' && !isOriginAllowed(req)) {
+    // Stripe posts the webhook cross-origin (no Origin header → already allowed);
+    // this guard only blocks browser CSRF, which the webhook isn't.
     return sendJsonError(res, 403, 'origin not allowed');
+  }
+
+  // ── API: Stripe webhook (raw body, signature-verified) ──
+  // Verifies with STRIPE_WEBHOOK_SECRET, maps the event to an entitlement, and
+  // persists it. Bypasses the auth gate (Stripe can't send AUTH_TOKEN); the
+  // signature IS the auth.
+  if (pathname === '/api/stripe/webhook' && req.method === 'POST') {
+    try {
+      const raw = await readRawBody(req);
+      const event = await constructEvent(raw, req.headers['stripe-signature']);
+      const applied = applyWebhookEvent(billingStore, event, { priceToPlan: priceToPlanFromEnv() });
+      if (applied) persistBillingState();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ received: true }));
+    } catch (err) {
+      // 400 tells Stripe to retry; verification failures land here.
+      sendJsonError(res, 400, 'webhook verification failed', err);
+    }
+    return;
+  }
+
+  // ── API: create a Stripe Checkout session ──
+  if (pathname === '/api/billing/checkout' && req.method === 'POST') {
+    try {
+      const { plan } = await readJsonBody(req);
+      const priceId = plan === 'studio' ? process.env.STRIPE_PRICE_STUDIO
+        : plan === 'pro' ? process.env.STRIPE_PRICE_PRO : '';
+      if (!priceId) return sendJsonError(res, 400, 'unknown or unconfigured plan (expected "pro" or "studio")');
+      const session = await createCheckoutSession({
+        tenantId: BILLING_TENANT,
+        priceId,
+        successUrl: `${PUBLIC_URL}/?billing=success`,
+        cancelUrl: `${PUBLIC_URL}/?billing=cancel`,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ url: session.url }));
+    } catch (err) {
+      sendJsonError(res, 500, 'checkout failed', err);
+    }
+    return;
+  }
+
+  // ── API: billing status (current plan + subscription) ──
+  if (pathname === '/api/billing/status') {
+    const sub = billingStore.getSubscription(BILLING_TENANT);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ plan: billingStore.tenantPlan(BILLING_TENANT), subscription: sub }));
+    return;
   }
 
   // ── API: Data ──
