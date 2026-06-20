@@ -4,8 +4,10 @@
 import { readFileSync } from 'fs';
 import { chromium } from 'playwright';
 import { loadIdentity } from '../lib/identity.mjs';
+import { callLLM } from '../llm/provider.mjs';
 
-const KEY   = process.env.KIMI_API_KEY || '';
+// Default Kimi base preserved (NVIDIA NIM); the chokepoint reads the key per call
+// (opts.apiKey or KIMI_API_KEY), so this engine is BYOK + provider-agnostic.
 const BASE  = (process.env.KIMI_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '');
 const MODEL = process.env.KIMI_MODEL || 'moonshotai/kimi-k2.6';
 
@@ -30,35 +32,24 @@ Also write a tailored COVER LETTER of EXACTLY 3 paragraphs (no more) to the same
 OUTPUT: STRICT JSON only, no markdown, matching exactly:
 {"title": string, "summary": string, "experience": [{"title": string, "period": string, "location": string, "bullets": [string]}], "competencies": string (" · " separated), "tools": string (" · " separated), "coverLetter": [string, string, string]}`;
 
-export async function kimiTailor(cvText, jd, roleTitle, company) {
-  const body = {
-    model: MODEL,
-    messages: [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: `JOB TITLE: ${roleTitle}\nCOMPANY: ${company}\n\n=== JOB DESCRIPTION ===\n${jd}\n\n=== CANDIDATE CV (source of truth) ===\n${cvText}\n\nReturn the tailored JSON now.` },
-    ],
-    temperature: 0.4, max_tokens: 3000,
-    response_format: { type: 'json_object' },
-  };
-  // hard timeout so a stalled connection fails fast and the caller retries
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 180_000);
-  let res;
-  try {
-    res = await fetch(`${BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
-  } finally { clearTimeout(timer); }
-  if (res.status === 429) { const e = new Error('rate-or-usage-limit'); e.code = 429; e.retryAfter = res.headers.get('retry-after'); e.bodyText = await res.text().catch(() => ''); throw e; }
-  if (!res.ok) throw new Error(`kimi ${res.status}: ${await res.text().catch(() => '')}`);
-  const j = await res.json();
-  let txt = j.choices?.[0]?.message?.content || '';
-  txt = txt.replace(/```json/gi, '').replace(/```/g, '').trim();
+export async function kimiTailor(cvText, jd, roleTitle, company, opts = {}) {
+  const user = `JOB TITLE: ${roleTitle}\nCOMPANY: ${company}\n\n=== JOB DESCRIPTION ===\n${jd}\n\n=== CANDIDATE CV (source of truth) ===\n${cvText}\n\nReturn the tailored JSON now.`;
+  const out = await callLLM({
+    provider: opts.provider || 'kimi',
+    model: opts.model || MODEL,
+    apiKey: opts.apiKey,
+    baseUrl: opts.baseUrl || BASE,
+    system: SYSTEM,
+    prompt: user,
+    temperature: 0.4,
+    maxTokens: 3000,
+    json: true,
+    timeoutMs: 180_000,
+    fetchImpl: opts.fetchImpl,
+  });
+  let txt = (out.text || '').replace(/```json/gi, '').replace(/```/g, '').trim();
   const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
-  if (s < 0 || e < 0) throw new Error('kimi returned no JSON');
+  if (s < 0 || e < 0) throw new Error('tailor returned no JSON');
   const parsed = JSON.parse(txt.slice(s, e + 1));
   // structural validation — a malformed shape should retry, not crash the renderer
   if (!parsed.summary || !Array.isArray(parsed.experience) || parsed.experience.length === 0 ||

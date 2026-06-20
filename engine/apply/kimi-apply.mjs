@@ -19,6 +19,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { chromium } from 'playwright';
 import { createResolver, extractFieldsInPage, isDecline, preferTechnical } from './autoapply-core.mjs';
+import { callLLM } from '../llm/provider.mjs';
 
 const PROJECT_DIR = process.cwd();
 
@@ -68,21 +69,10 @@ const CAND_NAME = `${CAND.firstName} ${CAND.lastName}`.trim() || 'the candidate'
 const CV_MD = (() => { try { return readFileSync('cv.md', 'utf8').slice(0, 6000); } catch { return ''; } })();
 const JD = (() => { try { return JDFILE && existsSync(JDFILE) ? readFileSync(JDFILE, 'utf8').slice(0, 6000) : ''; } catch { return ''; } })();
 
-// ── Kimi call ──
+// ── Kimi call (via the unified BYOK chokepoint) ──
 async function callKimi(system, user, maxTokens = 500) {
-  const body = JSON.stringify({
-    model: MODEL,
-    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-    temperature: 0.4, max_tokens: maxTokens,
-  });
-  const r = await fetch(`${BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  if (!r.ok) throw new Error(`Kimi ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const j = await r.json();
-  return (j.choices?.[0]?.message?.content || '').trim();
+  const out = await callLLM({ provider: 'kimi', model: MODEL, baseUrl: BASE, system, prompt: user, temperature: 0.4, maxTokens });
+  return out.text;
 }
 
 // Candidate facts block — given to Kimi so it MAPS real facts to fields rather
