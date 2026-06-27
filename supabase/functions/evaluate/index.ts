@@ -61,6 +61,10 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get('Authorization') ?? '';
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+  // Service-role client for quota RPCs. Migration 0007 locks consume_quota/refund_quota to
+  // service_role only, so a user JWT can no longer call refund_quota directly to reset its
+  // own counter. We verify the JWT below, then pass the verified user.id explicitly.
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
@@ -91,7 +95,7 @@ Deno.serve(async (req) => {
 
   // Atomic quota: reserve a slot BEFORE spending on the LLM; refund if the call fails.
   const cap = PLAN_EVAL_CAP[plan] ?? 10;
-  const { data: consumed, error: qErr } = await supabase.rpc('consume_quota', { p_metric: 'evaluationsPerMonth', p_cap: cap });
+  const { data: consumed, error: qErr } = await admin.rpc('consume_quota', { p_user_id: user.id, p_metric: 'evaluationsPerMonth', p_cap: cap });
   if (qErr) return errorResponse(500, 'Could not verify your monthly quota.', qErr, origin);
   if (consumed === -1) return jsonResponse({ error: 'quota_exceeded', plan }, 402, origin);
 
@@ -109,7 +113,7 @@ Deno.serve(async (req) => {
     await supabase.from('reports').insert({ user_id: user.id, role_id: role.id, markdown: text.replace(SUMMARY_RE, '').trim(), score: Number.isFinite(scoreNum) ? scoreNum : null });
     return jsonResponse({ ok: true, role_id: role.id, summary }, 200, origin);
   } catch (err) {
-    await supabase.rpc('refund_quota', { p_metric: 'evaluationsPerMonth' }).catch(() => {}); // give the slot back
+    await admin.rpc('refund_quota', { p_user_id: user.id, p_metric: 'evaluationsPerMonth' }).catch(() => {}); // give the slot back
     return errorResponse(502, clientLlmMessage(err, provider), err, origin);
   }
 });

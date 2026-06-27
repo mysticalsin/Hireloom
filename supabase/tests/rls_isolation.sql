@@ -73,7 +73,33 @@ begin
   select count(*) into n from public.provider_keys where user_id = :'A';
   if n <> 0 then raise exception 'FAIL byok: B read A''s provider_keys'; end if;
 
-  raise notice 'OK: RLS isolation + paywall lockdown + BYOK isolation';
+  -- 5. Quota-RPC lockdown (migration 0007): consume_quota/refund_quota are EXECUTE-revoked
+  --    from `authenticated` (service-role only). A user JWT calling refund_quota directly was
+  --    the paywall bypass — it must now be denied (42501).
+  begin
+    perform public.refund_quota(:'B'::uuid, 'evaluationsPerMonth');
+    raise exception 'FAIL paywall: B called refund_quota directly (grant not revoked)';
+  exception
+    when insufficient_privilege then null; -- expected
+  end;
+  begin
+    perform public.consume_quota(:'B'::uuid, 'evaluationsPerMonth', 10);
+    raise exception 'FAIL paywall: B called consume_quota directly (grant not revoked)';
+  exception
+    when insufficient_privilege then null; -- expected
+  end;
+
+  -- 6. Rate-limit table (migration 0006): SELECT-own only, no write policy → B cannot
+  --    INSERT directly (would otherwise let a user reset their own burst counter).
+  begin
+    insert into public.rate_limits (user_id, metric, window_start, count) values (:'B', 'evaluate', now(), 0);
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL ratelimit: B self-inserted % rate_limits row(s)', n; end if;
+  exception
+    when insufficient_privilege then null; -- expected
+  end;
+
+  raise notice 'OK: RLS isolation + paywall lockdown + quota-RPC lockdown + BYOK isolation';
 end $$;
 
 rollback;

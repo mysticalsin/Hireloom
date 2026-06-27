@@ -32,6 +32,8 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get('Authorization') ?? '';
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+  // Service-role client for quota RPCs (locked to service_role in migration 0007).
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
@@ -56,7 +58,7 @@ Deno.serve(async (req) => {
 
   // Atomic quota: reserve BEFORE spending on the LLM; refund on failure.
   const cap = PLAN_PKG_CAP[plan] ?? 3;
-  const { data: consumed, error: qErr } = await supabase.rpc('consume_quota', { p_metric: 'packagesPerMonth', p_cap: cap });
+  const { data: consumed, error: qErr } = await admin.rpc('consume_quota', { p_user_id: user.id, p_metric: 'packagesPerMonth', p_cap: cap });
   if (qErr) return errorResponse(500, 'Could not verify your monthly quota.', qErr, origin);
   if (consumed === -1) return jsonResponse({ error: 'quota_exceeded', plan }, 402, origin);
 
@@ -69,7 +71,7 @@ Deno.serve(async (req) => {
     if (error) throw error;
     return jsonResponse({ ok: true, content }, 200, origin);
   } catch (err) {
-    await supabase.rpc('refund_quota', { p_metric: 'packagesPerMonth' }).catch(() => {});
+    await admin.rpc('refund_quota', { p_user_id: user.id, p_metric: 'packagesPerMonth' }).catch(() => {});
     return errorResponse(502, clientLlmMessage(err, provider), err, origin);
   }
 });
