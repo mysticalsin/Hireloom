@@ -38,7 +38,7 @@ export default function CookieConsent() {
         <p className="text-sm text-ink-muted">
           Hireloom stores a sign-in session in your browser (strictly necessary) and remembers your
           theme. No ad tracking.{' '}
-          <a href="/privacy" className="text-ink underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <a href="/privacy.html" className="text-ink underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             Privacy
           </a>
         </p>

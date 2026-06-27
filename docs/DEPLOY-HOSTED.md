@@ -11,7 +11,7 @@ run it when you're ready with your own accounts.
 ## 1. Supabase — database + RLS
 ```bash
 supabase link --project-ref <your-ref>
-supabase db push            # applies supabase/migrations/0001..0005 (forward-only)
+supabase db push            # applies supabase/migrations/0001..0014 (forward-only)
 ```
 `0005_security_hardening.sql` is the security-critical one: paywall lockdown (subscriptions/
 usage_counters SELECT-only), atomic `consume_quota`, `audit_log`, `stripe_events`, CHECK
@@ -22,15 +22,29 @@ constraints, `delete_my_account()`. Confirm it applied cleanly.
 Set a real transactional SMTP (Resend/Postmark) in the Supabase dashboard (Auth → SMTP) so
 confirmation/reset emails send. Add your web origin under Auth → URL Configuration.
 
+**Google OAuth (required for Google sign-in + Connect Gmail).** In Auth → Providers → Google,
+enable the provider and paste the OAuth **client id** and **client secret** from a Google Cloud
+OAuth consent screen / credentials. Authorize the Supabase callback
+(`https://<proj>.supabase.co/auth/v1/callback`) as a redirect URI on the Google side. Request
+the `https://www.googleapis.com/auth/gmail.readonly` scope so the same Google grant powers the
+client-side "Sync inbox" Gmail read (the SPA fetches `https://gmail.googleapis.com`, allowed by
+the CSP `connect-src` in `web/nginx.conf`).
+
 ## 3. Supabase — edge functions
 ```bash
 supabase functions deploy evaluate
 supabase functions deploy tailor
 supabase functions deploy apply-assist
+supabase functions deploy validate-key
+supabase functions deploy recruiter-score
 supabase functions deploy checkout
+supabase functions deploy billing-portal
 supabase functions deploy demo-eval        # optional keyless "try a sample score" demo (off unless DEMO_API_KEY is set)
 supabase functions deploy stripe-webhook --no-verify-jwt   # Stripe can't send a JWT; signature is the auth
 ```
+The per-function `verify_jwt` posture is also pinned in `supabase/config.toml` (`[functions.*]`)
+so it survives a plain redeploy — `stripe-webhook` stays `verify_jwt = false`, every other
+function stays `verify_jwt = true`.
 Set function secrets:
 ```bash
 supabase secrets set SITE_URL="https://app.hireloom.example"            # CORS allowlist + Stripe return URLs
@@ -75,13 +89,20 @@ container serves the static build via nginx with a strict CSP (see `web/nginx.co
 Railway alternative: point a service at `web/` with the same Dockerfile + build args.
 
 ## 5a. Scheduled maintenance
-`public.prune_rate_limits()` (migration `0008`) must be scheduled in production to bound the
-`rate_limits` table — without it old per-user rate-limit rows accumulate unbounded. Either
-enable `pg_cron` and schedule it:
+Migration `0014` schedules all retention prunes automatically **if `pg_cron` is available**:
+`prune_rate_limits` (0008), `prune_audit_log` (90d), `prune_analytics_events` (180d), and
+`prune_stripe_events` (30d). The scheduling is guarded — if `pg_cron` is not installed the
+migration emits a `notice` and continues (non-fatal), so the prune functions still exist but are
+not auto-scheduled.
+
+If `pg_cron` is unavailable on your host, invoke the prune functions from any external scheduler:
+`prune_rate_limits()` on a ~15-minute cadence, and the other three daily, e.g.
 ```sql
-select cron.schedule('prune-rate-limits', '*/15 * * * *', 'select public.prune_rate_limits()');
+select public.prune_rate_limits();
+select public.prune_audit_log();
+select public.prune_analytics_events();
+select public.prune_stripe_events();
 ```
-or invoke `select public.prune_rate_limits();` from any external scheduler on a 15-minute cadence.
 
 ## 6. Smoke test (do before inviting anyone)
 - Sign up → confirm email → sign in.
@@ -95,9 +116,10 @@ or invoke `select public.prune_rate_limits();` from any external scheduler on a 
 ## CI gate (before any of this)
 `.github/workflows/ci-hosted.yml` runs: web typecheck+vitest+build, engine provider tests,
 and `deno check` on the edge functions + entitlement-twin tests. The `supabase start` +
-pgTAP RLS/isolation suite is the Phase-1 addition — keep it green before charging anyone.
+pgTAP RLS/isolation suite keeps tenant isolation honest — keep it green before charging anyone.
 
 ## Known not-yet-done (see WORKING.md)
 - Session is in localStorage (CSP mitigates; httpOnly-cookie migration via `@supabase/ssr` pending).
-- pgTAP RLS isolation tests + per-user rate limiting + `import-roles` (OSS→hosted) pending.
-- Legal docs (ToS/Privacy/AUP/DPA), data-export endpoint, cookie consent pending.
+- `import-roles` (OSS→hosted) pending.
+- DPA + final legal review by counsel pending (Privacy/Terms drafts ship at `/privacy.html` and
+  `/terms.html`; AUP drafted).

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { X, ExternalLink, Sparkles, Download, FileDown, ClipboardCheck, Copy, Send, Gauge, Check, Minus } from 'lucide-react';
-import { getReportForRole, getTailoring, getApplyAnswers, getRecruiterScore, type RoleRow, type Tailoring, type ApplyAnswers, type RecruiterScore } from '../lib/db';
+import { getReportForRole, getTailoring, getApplyAnswers, getRecruiterScore, updateRoleStatus, ROLE_STATUSES, type RoleStatus, type RoleRow, type Tailoring, type ApplyAnswers, type RecruiterScore } from '../lib/db';
+import { getSavedProviders } from '../lib/settings';
+import { startCheckout } from '../lib/billing';
 import { runTailor } from '../lib/tailor';
 import { runApplyAssist } from '../lib/apply';
 import { runRecruiterScore } from '../lib/recruiter';
@@ -93,7 +95,7 @@ function RecruiterScorecard({ score }: { score: RecruiterScore }) {
   );
 }
 
-export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: () => void }) {
+export default function RoleDetail({ role, onClose, onChanged }: { role: RoleRow; onClose: () => void; onChanged?: () => void }) {
   const { user } = useAuth();
   const name = (user?.user_metadata?.full_name as string) || user?.email || 'Candidate';
   const contact = user?.email ?? '';
@@ -106,12 +108,28 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   const [apply, setApply] = useState<ApplyAnswers | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [applyUpgrade, setApplyUpgrade] = useState(false);
   const [recruiter, setRecruiter] = useState<RecruiterScore | null>(null);
   const [rsBusy, setRsBusy] = useState(false);
   const [rsMsg, setRsMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+  // BYOK provider routing: the libs default to 'anthropic', which dead-ends a user
+  // whose only saved key is another provider. Pick from saved keys, default to the first.
+  const [providers, setProviders] = useState<string[]>([]);
+  const [provider, setProvider] = useState('anthropic');
+  // Pipeline status — local so the select reflects instantly; persisted via updateRoleStatus.
+  const [status, setStatus] = useState<RoleStatus>(role.status as RoleStatus);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, onClose);
+
+  useEffect(() => {
+    let alive = true;
+    getSavedProviders()
+      .then((ps) => { if (!alive) return; setProviders(ps); if (ps.length > 0) setProvider(ps[0]); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -123,18 +141,26 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
     return () => { alive = false; };
   }, [role.id]);
 
+  const changeStatus = async (next: RoleStatus) => {
+    const prev = status;
+    setStatus(next); setStatusMsg(null);
+    const res = await updateRoleStatus(role.id, next);
+    if (res.error) { setStatus(prev); setStatusMsg(res.error); return; }
+    onChanged?.(); // let the Dashboard list reflect the new status
+  };
+
   const draftApply = async () => {
-    setApplyBusy(true); setApplyMsg('Drafting answers… 20–40s.');
-    const res = await runApplyAssist(role.id);
+    setApplyBusy(true); setApplyMsg('Drafting answers… 20–40s.'); setApplyUpgrade(false);
+    const res = await runApplyAssist(role.id, provider);
     setApplyBusy(false);
-    if (res.error) { setApplyMsg(res.error); return; }
+    if (res.error) { setApplyMsg(res.error); setApplyUpgrade(!!res.upgrade); return; }
     setApply(res.content ?? null); setApplyMsg(null);
   };
   const copy = (i: number, text: string) => { navigator.clipboard?.writeText(text); setCopied(i); setTimeout(() => setCopied(null), 1500); };
 
   const tailor = async () => {
     setTailorBusy(true); setTailorMsg('Tailoring CV + cover letter… 30–60s.');
-    const res = await runTailor(role.id);
+    const res = await runTailor(role.id, provider);
     setTailorBusy(false);
     if (res.error) { setTailorMsg(res.error); return; }
     setTailoring(res.content ?? null); setTailorMsg(null);
@@ -142,7 +168,7 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
 
   const scoreCv = async () => {
     setRsBusy(true); setRsMsg('Scoring through a recruiter lens… 20–40s.');
-    const res = await runRecruiterScore(role.id);
+    const res = await runRecruiterScore(role.id, provider);
     setRsBusy(false);
     if (res.error) { setRsMsg(res.error); return; }
     setRecruiter(res.content ?? null); setRsMsg(null);
@@ -160,8 +186,25 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-ink-muted">
           <span>{role.title}</span>
-          <span>· {role.status}</span>
           {role.url && <a href={role.url} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-accent underline underline-offset-4">posting <ExternalLink size={13} /></a>}
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-2 text-ink-muted">
+            <span>Status</span>
+            <select value={status} onChange={(e) => changeStatus(e.target.value as RoleStatus)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+              {ROLE_STATUSES.map((s) => <option key={s} value={s} className="bg-surface">{s}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-ink-muted">
+            <span>AI provider</span>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+              {providers.length === 0
+                ? <option value={provider} className="bg-surface">{provider} (no key)</option>
+                : providers.map((p) => <option key={p} value={p} className="bg-surface">{p}</option>)}
+            </select>
+          </label>
+          {statusMsg && <span role="alert" className="text-danger">{statusMsg}</span>}
         </div>
 
         <div className="overflow-y-auto rounded-xl border border-hairline bg-surface-2 p-5 text-sm leading-relaxed">
@@ -235,6 +278,9 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
               {role.url && <a href={role.url} target="_blank" rel="noopener" className="inline-flex min-h-11 items-center gap-1 text-xs text-accent underline underline-offset-4">open posting <ExternalLink size={12} /></a>}
             </div>
             {applyMsg && <p className="mb-3 text-xs text-ink-muted">{applyMsg}</p>}
+            {applyUpgrade && (
+              <button onClick={() => startCheckout('pro')} className="mb-3 min-h-11 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Upgrade to Pro</button>
+            )}
             {apply && (
               <div className="space-y-3">
                 {apply.answers.map((qa, i) => (

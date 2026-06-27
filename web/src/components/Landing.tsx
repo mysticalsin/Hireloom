@@ -145,8 +145,8 @@ export default function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 text-sm text-ink-faint md:flex-row md:px-10">
           <div><span className="font-display text-base text-ink-muted">Hireloom</span> <span className="ml-2">heir + loom · a quiet career atelier</span></div>
           <div className="flex items-center gap-6">
-            <a href="/privacy" className="hover:text-ink">Privacy</a>
-            <a href="/terms" className="hover:text-ink">Terms</a>
+            <a href="/privacy.html" className="hover:text-ink">Privacy</a>
+            <a href="/terms.html" className="hover:text-ink">Terms</a>
             <a href="https://github.com/mysticalsin/Hireloom" target="_blank" rel="noopener" className="inline-flex items-center gap-1 hover:text-ink"><Github size={14} /> Open source</a>
           </div>
         </div>

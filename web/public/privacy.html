@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Hireloom</title>
+  <meta name="robots" content="all" />
+  <meta name="description" content="How the hosted Hireloom service handles your data." />
+  <link rel="icon" href="/favicon.svg" />
+  <style>
+    :root {
+      --gold: #e0a458;
+      --bg: #0b0805;
+      --panel: rgba(28, 22, 14, 0.55);
+      --border: rgba(224, 164, 88, 0.18);
+      --text: #f6f1e7;
+      --muted: #b8b0a2;
+      --faint: #8f887b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background:
+        radial-gradient(900px 520px at 12% -10%, rgba(224,164,88,0.14), rgba(224,164,88,0) 60%),
+        radial-gradient(800px 600px at 110% 120%, rgba(224,164,88,0.07), rgba(224,164,88,0) 55%),
+        linear-gradient(135deg, #100c07 0%, #0b0805 60%, #0e0a06 100%);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.7;
+      font-size: 17px;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 72px 28px 96px; }
+    header { margin-bottom: 48px; }
+    .kicker {
+      font-size: 12px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--gold); font-weight: 600; margin-bottom: 14px;
+    }
+    .wordmark {
+      font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
+      font-weight: 600; font-size: 30px; letter-spacing: -0.02em; color: var(--gold);
+      text-decoration: none; display: inline-block;
+    }
+    h1 {
+      font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
+      font-weight: 600; font-size: 42px; line-height: 1.1; letter-spacing: -0.02em;
+      margin: 28px 0 10px;
+    }
+    .effective { color: var(--faint); font-size: 15px; }
+    .note {
+      margin: 28px 0 0; padding: 16px 20px; border-radius: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--muted); font-size: 15px;
+    }
+    h2 {
+      font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
+      font-weight: 600; font-size: 24px; letter-spacing: -0.01em;
+      margin: 44px 0 14px; color: var(--text);
+    }
+    p { margin: 0 0 16px; color: #e8e1d4; }
+    ul { margin: 0 0 16px; padding-left: 22px; color: #e8e1d4; }
+    li { margin: 0 0 8px; }
+    strong { color: var(--text); font-weight: 600; }
+    em { color: var(--muted); font-style: italic; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em; color: var(--gold);
+      background: rgba(224,164,88,0.10); padding: 1px 6px; border-radius: 5px;
+    }
+    a { color: var(--gold); text-decoration: none; border-bottom: 1px solid rgba(224,164,88,0.35); }
+    a:hover { border-bottom-color: var(--gold); }
+    footer {
+      margin-top: 64px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.08);
+      color: var(--faint); font-size: 14px;
+    }
+    footer a { font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="kicker">heir + loom · a quiet career atelier</div>
+      <a class="wordmark" href="/">Hireloom</a>
+      <h1>Privacy Policy</h1>
+      <p class="effective">Effective date: TBD</p>
+      <div class="note">
+        <strong>Draft — review with counsel before launch.</strong> This describes how the
+        hosted Hireloom service ("Hireloom", "we") handles your data.
+      </div>
+    </header>
+
+    <main>
+      <h2>Who we are</h2>
+      <p>
+        Hireloom is a bring-your-own-key (BYOK) career tool. The data controller is the Hireloom
+        operator (contact: <em>privacy@hireloom.app — TBD</em>). Our processors are listed below.
+      </p>
+
+      <h2>What we collect</h2>
+      <ul>
+        <li><strong>Account data:</strong> email, name, authentication metadata (via Supabase Auth).</li>
+        <li><strong>Career data you provide (PII):</strong> your CV/résumé text, job descriptions you
+          paste, generated evaluations, tailored CVs/cover letters, and application drafts.</li>
+        <li><strong>Provider API keys (BYOK):</strong> the keys you add for Anthropic/OpenAI/Gemini/OpenRouter/Kimi.</li>
+        <li><strong>Usage data:</strong> monthly evaluation/package counts, plan/subscription status.</li>
+        <li><strong>Billing data:</strong> handled by Stripe — we store only a customer/subscription
+          reference, never your card number.</li>
+        <li><strong>Cookies:</strong> a session cookie/token for authentication. No third-party
+          advertising cookies.</li>
+      </ul>
+
+      <h2>How your BYOK keys are handled (the important part)</h2>
+      <p>
+        Your provider keys are stored <strong>encrypted in Supabase Vault</strong>. They are
+        <strong>never</strong> written to application tables, <strong>never</strong> logged, and
+        <strong>never</strong> returned to your browser after you save them. They are decrypted in
+        memory only at the moment we make an AI call <strong>on your behalf, with your key, to the
+        provider you chose</strong>. We never sell, share, or use your keys for any other purpose.
+        You can delete a key at any time in Settings.
+      </p>
+
+      <h2>How we use your data</h2>
+      <ul>
+        <li>To run evaluations/tailoring/assisted-apply <strong>on your chosen AI provider using your key</strong>.</li>
+        <li>To maintain your account, pipeline, and subscription/quota.</li>
+        <li>To secure the service and investigate abuse (see the append-only audit log of sensitive
+          actions: key set/get, plan changes, account deletion).</li>
+      </ul>
+      <p>We do <strong>not</strong> train any model on your data, and we do not sell your personal data.</p>
+
+      <h2>AI processing &amp; sub-processors</h2>
+      <p>
+        When you run an evaluation, your CV + the job description are sent to the AI provider
+        <strong>you select</strong>, authenticated with <strong>your</strong> key, subject to
+        <strong>that provider's</strong> terms and privacy policy. Our processors:
+        <strong>Supabase</strong> (auth, database, vault, storage, edge functions),
+        <strong>Stripe</strong> (billing), and <strong>your chosen AI provider(s)</strong>. Email is
+        sent via our transactional email provider (<em>Resend/Postmark — TBD</em>).
+      </p>
+
+      <h2>Retention &amp; deletion</h2>
+      <p>
+        We keep your data while your account is active. You can erase everything yourself: Settings →
+        delete account triggers <code>delete_my_account()</code>, which removes your auth identity,
+        all your tenant rows (CVs, roles, reports, tailorings, application drafts), and your Vault key
+        secrets. Stale job-description/report rows are subject to a retention purge (<em>policy window
+        TBD</em>).
+      </p>
+
+      <h2>Your rights (GDPR/CCPA)</h2>
+      <p>
+        Access, rectification, erasure, portability (data export), restriction, and objection. EU/UK
+        users may lodge a complaint with their supervisory authority. Exercise rights in-product or by
+        contacting us; we respond within applicable statutory timeframes.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Per-tenant isolation enforced by Postgres Row-Level Security; keys in Vault (encrypted at
+        rest); TLS in transit; strict Content-Security-Policy; rate-limited auth; append-only audit
+        log. No system is perfectly secure; we will notify affected users of a qualifying breach as
+        required by law.
+      </p>
+
+      <h2>International transfers</h2>
+      <p>
+        Data may be processed in the regions of our processors (Supabase/Stripe/your AI provider).
+        Where required, transfers rely on Standard Contractual Clauses or equivalent safeguards.
+      </p>
+
+      <h2>Children</h2>
+      <p>Not directed to anyone under 16. We do not knowingly collect their data.</p>
+
+      <h2>Changes &amp; contact</h2>
+      <p>
+        We will post changes here and update the effective date. Questions:
+        <em>privacy@hireloom.app (TBD)</em>.
+      </p>
+    </main>
+
+    <footer>
+      <a href="/">← Back to Hireloom</a> · <a href="/terms.html">Terms of Service</a>
+    </footer>
+  </div>
+</body>
+</html>

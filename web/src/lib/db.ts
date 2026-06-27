@@ -99,6 +99,17 @@ export async function getReportForRole(roleId: string): Promise<Report | null> {
   return unwrap((data as Report | null) ?? null, error);
 }
 
+// Canonical pipeline vocab — must match roles_status_chk (migration 0005).
+export const ROLE_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'] as const;
+export type RoleStatus = (typeof ROLE_STATUSES)[number];
+
+// Owner update permitted by the roles "own roles" FOR ALL RLS policy.
+export async function updateRoleStatus(roleId: string, status: RoleStatus): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Not configured.' };
+  const { error } = await supabase.from('roles').update({ status, updated_at: new Date().toISOString() }).eq('id', roleId);
+  return { error: error?.message };
+}
+
 export async function getUsage(metric = 'evaluationsPerMonth'): Promise<number> {
   if (!supabase) return 0;
   const period = new Date().toISOString().slice(0, 7); // YYYY-MM

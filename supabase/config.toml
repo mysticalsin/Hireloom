@@ -17,3 +17,37 @@ enable_signup = true
 enable_confirmations = true
 double_confirm_changes = true
 secure_password_change = true
+
+# Edge function JWT posture as Infrastructure-as-Code. Without this block the
+# stripe-webhook's no-JWT requirement lives only in the deploy-time CLI flag
+# (--no-verify-jwt); a plain `supabase functions deploy` would silently re-enable
+# JWT verification and 401 every Stripe event. Pinning it here makes the posture
+# verifiable and survive redeploys. Stripe authenticates via its signature header,
+# not a Supabase JWT, so it MUST stay verify_jwt = false. Every other function is
+# user-facing and requires an authenticated caller.
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.evaluate]
+verify_jwt = true
+
+[functions.tailor]
+verify_jwt = true
+
+[functions.apply-assist]
+verify_jwt = true
+
+[functions.validate-key]
+verify_jwt = true
+
+[functions.recruiter-score]
+verify_jwt = true
+
+[functions.demo-eval]
+verify_jwt = true
+
+[functions.checkout]
+verify_jwt = true
+
+[functions.billing-portal]
+verify_jwt = true

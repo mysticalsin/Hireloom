@@ -36,21 +36,23 @@ export async function deleteProviderKey(provider: string): Promise<{ error?: str
 export async function exportMyData(): Promise<{ error?: string; url?: string }> {
   if (!supabase) return { error: 'Not configured.' };
   try {
-    const [profile, roles, reports, tailorings, applies, subs, providers] = await Promise.all([
+    const [profile, roles, reports, tailorings, applies, recruiterScores, subs, providers] = await Promise.all([
       supabase.from('profiles').select('*').maybeSingle(),
       supabase.from('roles').select('*'),
       supabase.from('reports').select('*'),
       supabase.from('tailorings').select('*'),
       supabase.from('apply_answers').select('*'),
+      supabase.from('recruiter_scores').select('*'),
       supabase.from('subscriptions').select('plan,status,current_period_end'),
       supabase.from('provider_keys').select('provider,updated_at'),
     ]);
-    const err = profile.error || roles.error || reports.error || tailorings.error || applies.error || subs.error || providers.error;
+    const err = profile.error || roles.error || reports.error || tailorings.error || applies.error || recruiterScores.error || subs.error || providers.error;
     if (err) return { error: err.message };
     const payload = {
       exportedAt: new Date().toISOString(),
       profile: profile.data, roles: roles.data, reports: reports.data,
       tailorings: tailorings.data, applyAnswers: applies.data,
+      recruiterScores: recruiterScores.data,
       subscription: subs.data, configuredProviders: providers.data,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

@@ -217,8 +217,9 @@ export default function Dashboard() {
             <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
               {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{savedProviders.includes(p) ? p : `${p} (no key)`}</option>)}
             </select>
-            <button type="submit" disabled={evalBusy} className="min-h-11 rounded-full bg-accent px-6 py-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{evalBusy ? 'Working…' : 'Evaluate'}</button>
+            <button type="submit" disabled={evalBusy || !savedProviders.includes(provider)} className="min-h-11 rounded-full bg-accent px-6 py-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{evalBusy ? 'Working…' : 'Evaluate'}</button>
           </form>
+          {!savedProviders.includes(provider) && <p className="mt-3 text-sm text-ink-muted">Add a {provider} key in Settings to evaluate with it.</p>}
           {evalMsg && <p className="mt-3 text-sm text-ink-muted">{evalMsg}</p>}
           <p className="mt-2 text-xs text-ink-muted">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
         </div>
@@ -296,7 +297,7 @@ export default function Dashboard() {
       </main>
 
       {showSettings && <SettingsPanel onClose={closeSettings} />}
-      {selectedRole && <RoleDetail role={selectedRole} onClose={closeRole} />}
+      {selectedRole && <RoleDetail role={selectedRole} onClose={closeRole} onChanged={reload} />}
     </div>
   );
 }
