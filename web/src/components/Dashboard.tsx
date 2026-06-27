@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [inboxMsg, setInboxMsg] = useState<string | null>(null);
   const [needsGmail, setNeedsGmail] = useState(false);
   const [hasKey, setHasKey] = useState(false);
+  const [savedProviders, setSavedProviders] = useState<string[]>([]);
   const [hasCv, setHasCv] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(
     () => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'),
@@ -74,7 +75,7 @@ export default function Dashboard() {
         getSubscription(), getUsage(), listRoles(),
         getSavedProviders().catch(() => [] as string[]), getCv().catch(() => ''),
       ]);
-      setSub(s); setUsed(u); setRoles(r); setHasKey(providers.length > 0); setHasCv(!!cv.trim());
+      setSub(s); setUsed(u); setRoles(r); setHasKey(providers.length > 0); setSavedProviders(providers); setHasCv(!!cv.trim());
       // Default the eval provider to one the user actually has a key for; leave a manual pick alone.
       setProvider((cur) => (providers.length > 0 && !providers.includes(cur) ? providers[0] : cur));
     } catch {
@@ -171,7 +172,7 @@ export default function Dashboard() {
           <form onSubmit={evaluate} className="flex flex-col gap-3 sm:flex-row">
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste a job URL or the full JD text…" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-4 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
             <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
-              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}</option>)}
+              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{savedProviders.includes(p) ? p : `${p} (no key)`}</option>)}
             </select>
             <button type="submit" disabled={evalBusy} className="min-h-11 rounded-full bg-accent px-6 py-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{evalBusy ? 'Working…' : 'Evaluate'}</button>
           </form>

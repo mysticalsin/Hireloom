@@ -27,6 +27,7 @@ select set_config('request.jwt.claims', json_build_object('sub', :'B', 'role', '
 do $$
 declare
   n int;
+  rl boolean;
 begin
   -- 1. Tenant isolation: B cannot read A's roles.
   select count(*) into n from public.roles where company = 'Acme';
@@ -99,7 +100,21 @@ begin
     when insufficient_privilege then null; -- expected
   end;
 
-  raise notice 'OK: RLS isolation + paywall lockdown + quota-RPC lockdown + BYOK isolation';
+  -- 7. Rate-limit enforcement (migrations 0006/0010): check_rate_limit is EXECUTE-granted
+  --    to authenticated and increments a per-(user,metric,window) counter atomically.
+  --    With p_limit = 3, the first three calls in the same window must return true and the
+  --    fourth (count 4 > 3) must return false. Small limit keeps the loop fast.
+  for n in 1..4 loop
+    select public.check_rate_limit('evaluate', 3, 60) into rl;
+    if n <= 3 and rl is not true then
+      raise exception 'FAIL ratelimit: call % within limit 3 returned %, expected true', n, rl;
+    end if;
+    if n = 4 and rl is not false then
+      raise exception 'FAIL ratelimit: call 4 over limit 3 returned %, expected false', rl;
+    end if;
+  end loop;
+
+  raise notice 'OK: RLS isolation + paywall lockdown + quota-RPC lockdown + BYOK isolation + rate-limit enforcement';
 end $$;
 
 rollback;
