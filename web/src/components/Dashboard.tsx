@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, Sun, Moon } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, X, Sun, Moon } from 'lucide-react';
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
@@ -62,6 +62,10 @@ export default function Dashboard() {
   const [provider, setProvider] = useState('anthropic');
   const [evalBusy, setEvalBusy] = useState(false);
   const [evalMsg, setEvalMsg] = useState<string | null>(null);
+
+  // Stable handlers so the modals' focus-trap/scroll-lock effects don't tear down on parent re-render.
+  const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeRole = useCallback(() => setSelectedRole(null), []);
 
   async function reload() {
     setLoading(true); setLoadErr(null);
@@ -245,8 +249,8 @@ export default function Dashboard() {
         </div>
       </main>
 
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {selectedRole && <RoleDetail role={selectedRole} onClose={() => setSelectedRole(null)} />}
+      {showSettings && <SettingsPanel onClose={closeSettings} />}
+      {selectedRole && <RoleDetail role={selectedRole} onClose={closeRole} />}
     </div>
   );
 }
@@ -321,7 +325,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <div className="mb-2 text-sm font-medium">AI provider key (BYOK)</div>
           <div className="flex gap-2">
             <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
-              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}{saved.includes(p) ? ' ✓' : ''}</option>)}
+              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}</option>)}
             </select>
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
             <button onClick={saveKey} className="min-h-11 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Save</button>
@@ -334,15 +338,17 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                 return (
                   <li key={p} className="flex flex-col gap-1 rounded-lg border border-hairline bg-surface-2 px-3 py-1.5 text-sm">
                     <div className="flex items-center justify-between">
-                      <span className="capitalize">{p} <span className="text-success">✓ saved</span></span>
+                      <span className="capitalize">{p} <span className="inline-flex items-center gap-0.5 text-success"><Check size={13} className="text-success" /> saved</span></span>
                       <div className="flex items-center gap-1">
                         <button onClick={() => testKey(p)} disabled={st?.testing} className="min-h-11 px-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{st?.testing ? 'Testing…' : 'Test'}</button>
                         <button onClick={() => removeKey(p)} className="min-h-11 px-2 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
                       </div>
                     </div>
-                    {st && !st.testing && (st.ok
-                      ? <span className="text-xs text-success">✓ Key works</span>
-                      : <span className="text-xs text-danger">✗ {st.error || 'Key check failed.'}</span>)}
+                    <span role="status" aria-live="polite">
+                      {st && !st.testing && (st.ok
+                        ? <span className="inline-flex items-center gap-1 text-xs text-success"><Check size={13} className="text-success" /> Key works</span>
+                        : <span className="inline-flex items-center gap-1 text-xs text-danger"><X size={13} className="text-danger" /> {st.error || 'Key check failed.'}</span>)}
+                    </span>
                   </li>
                 );
               })}

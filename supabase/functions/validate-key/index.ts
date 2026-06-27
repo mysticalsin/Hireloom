@@ -27,6 +27,11 @@ Deno.serve(async (req) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
+  // Per-user burst cap (cost/abuse control). Fixed window. Fail-open on transient DB errors.
+  const { data: allowed, error: rlErr } = await supabase.rpc('check_rate_limit', { p_metric: 'validate-key', p_limit: 10, p_window_seconds: 60 });
+  if (rlErr) console.error('[rate_limit] validate-key', rlErr); // fail-open: don't lock out users on a transient DB error
+  if (allowed === false) return jsonResponse({ error: 'rate_limited' }, 429, origin);
+
   const { provider } = await req.json().catch(() => ({}));
   if (!provider || !LLM_PROVIDERS.includes(provider)) return jsonResponse({ error: 'unsupported provider' }, 400, origin);
 

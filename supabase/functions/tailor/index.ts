@@ -38,7 +38,8 @@ Deno.serve(async (req) => {
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
   // Per-user burst cap (cost/abuse control, beyond the monthly quota). Fixed window.
-  const { data: allowed } = await supabase.rpc('check_rate_limit', { p_metric: 'tailor', p_limit: 20, p_window_seconds: 60 });
+  const { data: allowed, error: rlErr } = await supabase.rpc('check_rate_limit', { p_metric: 'tailor', p_limit: 20, p_window_seconds: 60 });
+  if (rlErr) console.error('[rate_limit] tailor', rlErr); // fail-open: don't lock out paying users on a transient DB error
   if (allowed === false) return jsonResponse({ error: 'rate_limited' }, 429, origin);
 
   const { roleId, provider = 'anthropic', model } = await req.json().catch(() => ({}));
