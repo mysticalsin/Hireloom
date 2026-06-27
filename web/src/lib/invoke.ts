@@ -9,7 +9,10 @@ export async function invokeFn<T>(name: string, body: Record<string, unknown>): 
   if (error) {
     let parsed: { error?: string } | null = null;
     try { parsed = await (error as { context?: Response }).context?.json?.() ?? null; } catch { /* no body */ }
-    return { error: parsed?.error || error.message, code: parsed?.error };
+    const code = parsed?.error;
+    // A 429 is generic across every function — surface a friendly "slow down" centrally.
+    const friendly = code === 'rate_limited' ? "You're going a bit fast — wait a minute and try again." : null;
+    return { error: friendly || parsed?.error || error.message, code };
   }
   const d = data as { error?: string } | null;
   if (d?.error) return { error: d.error, code: d.error };

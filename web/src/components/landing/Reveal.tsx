@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode, type MouseEvent } from 'react';
 import Lenis from 'lenis';
 
 // Smooth scroll for the landing (disabled under prefers-reduced-motion).
+// eslint-disable-next-line react-refresh/only-export-components
 export function useLenis() {
   const reduce = useReducedMotion();
   useEffect(() => {

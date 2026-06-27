@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, X, Sun, Moon } from 'lucide-react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, X, Sun, Moon, ExternalLink } from 'lucide-react';
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
@@ -18,6 +18,15 @@ const SIGNAL_STYLE: Record<string, string> = {
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
 const PROVIDERS = ['anthropic', 'openai', 'gemini', 'kimi', 'openrouter'];
+// Where each provider mints API keys — surfaced next to the BYOK input so a new
+// user isn't left hunting for the right console.
+const CONSOLE_URL: Record<string, string> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  gemini: 'https://aistudio.google.com/apikey',
+  openrouter: 'https://openrouter.ai/keys',
+  kimi: 'https://platform.moonshot.ai/console/api-keys',
+};
 
 export default function Dashboard() {
   const { user, signOut, connectGmail } = useAuth();
@@ -273,12 +282,16 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [cv, setCv] = useState('');
   const [saved, setSaved] = useState<string[]>([]);
   const [keyStatus, setKeyStatus] = useState<Record<string, { ok?: boolean; error?: string; testing?: boolean }>>({});
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { signOut } = useAuth();
 
+  // Split status vs failure so errors don't render as green "success" text.
+  const ok = (text: string) => setMsg({ text });
+  const fail = (text: string) => setMsg({ text, error: true });
+
   useEffect(() => {
-    getCv().then(setCv).catch(() => setMsg('Could not load your saved CV.'));
+    getCv().then(setCv).catch(() => fail('Could not load your saved CV.'));
     getSavedProviders().then(setSaved).catch(() => {});
   }, []);
 
@@ -290,36 +303,37 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   };
 
   const saveKey = async () => {
-    if (!apiKey.trim()) { setMsg('Enter a key.'); return; }
+    if (!apiKey.trim()) { fail('Enter a key.'); return; }
     const p = provider;
     const r = await saveProviderKey(p, apiKey.trim());
-    if (r.error) { setMsg(r.error); return; }
-    setMsg(`${p} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
+    if (r.error) { fail(r.error); return; }
+    ok(`${p} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
     testKey(p); // auto-validate the freshly-saved key
   };
   const removeKey = async (p: string) => {
     const r = await deleteProviderKey(p);
-    if (r.error) { setMsg(r.error); return; }
-    setMsg(`${p} key removed.`); getSavedProviders().then(setSaved).catch(() => {});
+    if (r.error) { fail(r.error); return; }
+    ok(`${p} key removed.`); getSavedProviders().then(setSaved).catch(() => {});
   };
   const downloadData = async () => {
     const r = await exportMyData();
-    if (r.error) { setMsg(r.error); return; }
+    if (r.error) { fail(r.error); return; }
     if (r.url) {
       const a = document.createElement('a');
       a.href = r.url; a.download = 'hireloom-export.json'; a.click();
       URL.revokeObjectURL(r.url);
-      setMsg('Your data was downloaded as JSON.');
+      ok('Your data was downloaded as JSON.');
     }
   };
   const removeAccount = async () => {
     const r = await deleteMyAccount();
-    if (r.error) { setMsg(r.error); return; }
+    if (r.error) { fail(r.error); return; }
     await signOut();
   };
   const saveResume = async () => {
     const r = await saveCv(cv);
-    setMsg(r.error ?? 'CV saved.');
+    if (r.error) { fail(r.error); return; }
+    ok('CV saved.');
   };
 
   return (
@@ -332,6 +346,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             </select>
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
             <button onClick={saveKey} className="min-h-11 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">Save</button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <a href={CONSOLE_URL[provider]} target="_blank" rel="noopener" className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">Get a {provider} key <ExternalLink size={13} /></a>
+            <span className="text-xs text-ink-faint">Most evaluations cost ~$0.01–0.05 on your own key — no markup from us.</span>
           </div>
           <p className="mt-2 text-xs text-ink-faint">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
           {saved.length > 0 && (
@@ -382,7 +400,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <p className="mt-2 text-xs text-ink-muted">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
         </div>
 
-        {msg && <p role="status" className="mt-4 text-sm text-success">{msg}</p>}
+        {msg && (
+          <p role={msg.error ? 'alert' : 'status'} className={`mt-4 text-sm ${msg.error ? 'text-danger' : 'text-success'}`}>{msg.text}</p>
+        )}
     </Dialog>
   );
 }
