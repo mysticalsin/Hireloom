@@ -8,6 +8,7 @@ import { runEvaluation } from '../lib/evaluate';
 import { runDemoEval } from '../lib/demo';
 import { getCv, saveCv, getSavedProviders, saveProviderKey, validateProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
+import { track } from '../lib/analytics';
 import RoleDetail from './RoleDetail';
 
 const SIGNAL_STYLE: Record<string, string> = {
@@ -131,6 +132,7 @@ export default function Dashboard() {
     const r = await runEvaluation(input.trim(), provider);
     setEvalBusy(false);
     if (r.error) { setEvalMsg(r.error); return; }
+    track('eval_run', { provider });
     setEvalMsg(`Scored ${r.summary?.company} — ${r.summary?.role}: ${r.summary?.score}/5`);
     setInput('');
     reload();
@@ -142,6 +144,7 @@ export default function Dashboard() {
     setDemoBusy(false);
     if (r.disabled) { setDemoOff(true); return; } // operator hasn't funded the demo → hide silently
     if (r.error) { setDemoErr(r.error); return; }
+    track('demo_run');
     setDemoReport(r.markdown ?? null);
   };
 
@@ -224,7 +227,7 @@ export default function Dashboard() {
           <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-hairline bg-surface p-5">
             <span className="text-sm text-ink-muted">You’re on Free. Upgrade to Pro for unlimited evaluations, inbox signals, and assisted apply.</span>
             <div className="ml-auto flex gap-3">
-              <button onClick={() => upgrade('pro')} className="min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Upgrade to Pro</button>
+              <button onClick={() => { track('upgrade_click', { plan: 'pro' }); upgrade('pro'); }} className="min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Upgrade to Pro</button>
             </div>
             {billingMsg && <span className="w-full text-sm text-ink-muted">{billingMsg}</span>}
           </div>
@@ -338,6 +341,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     const p = provider;
     const r = await saveProviderKey(p, apiKey.trim());
     if (r.error) { fail(r.error); return; }
+    track('key_added', { provider: p });
     ok(`${p} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
     testKey(p); // auto-validate the freshly-saved key
   };
@@ -364,6 +368,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const saveResume = async () => {
     const r = await saveCv(cv);
     if (r.error) { fail(r.error); return; }
+    track('cv_added');
     ok('CV saved.');
   };
 

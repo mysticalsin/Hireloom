@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { track } from '../lib/analytics';
 
 type Result = { error?: string };
 
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string, fullName?: string): Promise<Result> => {
     if (!supabase) return { error: 'Auth is not configured yet.' };
     const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+    if (!error) track('signup');
     return { error: error?.message };
   };
   const signIn = async (email: string, password: string): Promise<Result> => {
