@@ -35,6 +35,11 @@ Deno.serve(async (req) => {
   if (!price) return jsonResponse({ error: 'unknown or unconfigured plan' }, 400, origin);
 
   try {
+    // Idempotency key dedups a double-submit (e.g. a rapid double-click) within a
+    // coarse 1-minute bucket, while a later legitimate retry falls in a new bucket
+    // and can still create a fresh session.
+    const bucket = Math.floor(Date.now() / 60_000);
+    const idempotencyKey = `checkout:${user.id}:${plan}:${bucket}`;
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price, quantity: 1 }],
@@ -44,7 +49,7 @@ Deno.serve(async (req) => {
       customer_email: user.email ?? undefined,
       metadata: { tenantId: user.id, priceId: price },
       subscription_data: { metadata: { tenantId: user.id } },
-    });
+    }, { idempotencyKey });
     return jsonResponse({ url: session.url }, 200, origin);
   } catch (err) {
     return errorResponse(502, 'Could not start checkout. Please try again.', err, origin);

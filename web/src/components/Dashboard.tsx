@@ -75,6 +75,8 @@ export default function Dashboard() {
         getSavedProviders().catch(() => [] as string[]), getCv().catch(() => ''),
       ]);
       setSub(s); setUsed(u); setRoles(r); setHasKey(providers.length > 0); setHasCv(!!cv.trim());
+      // Default the eval provider to one the user actually has a key for; leave a manual pick alone.
+      setProvider((cur) => (providers.length > 0 && !providers.includes(cur) ? providers[0] : cur));
     } catch {
       // Never let a failed load read as "no roles" / "free plan" / "0 used".
       setLoadErr('We couldn’t load your atelier. Check your connection and retry.');
@@ -328,7 +330,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}</option>)}
             </select>
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
-            <button onClick={saveKey} className="min-h-11 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Save</button>
+            <button onClick={saveKey} className="min-h-11 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">Save</button>
           </div>
           <p className="mt-2 text-xs text-ink-faint">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
           {saved.length > 0 && (
@@ -340,8 +342,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <div className="flex items-center justify-between">
                       <span className="capitalize">{p} <span className="inline-flex items-center gap-0.5 text-success"><Check size={13} className="text-success" /> saved</span></span>
                       <div className="flex items-center gap-1">
-                        <button onClick={() => testKey(p)} disabled={st?.testing} className="min-h-11 px-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{st?.testing ? 'Testing…' : 'Test'}</button>
-                        <button onClick={() => removeKey(p)} className="min-h-11 px-2 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
+                        <button onClick={() => testKey(p)} disabled={st?.testing} className="min-h-11 px-3.5 text-xs text-ink-muted hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{st?.testing ? 'Testing…' : 'Test'}</button>
+                        <button onClick={() => removeKey(p)} className="min-h-11 px-3.5 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
                       </div>
                     </div>
                     <span role="status" aria-live="polite">

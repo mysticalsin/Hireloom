@@ -72,7 +72,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
               <input id="reset-email" ref={firstField} className={FIELD} placeholder="you@email.com" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
               {error && <p role="alert" className="text-sm text-danger">{error}</p>}
               {notice && <p role="status" className="text-sm text-success">{notice}</p>}
-              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{busy ? 'Sending…' : 'Send reset link'}</button>
+              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">{busy ? 'Sending…' : 'Send reset link'}</button>
             </form>
             <p className="mt-6 text-center text-sm text-ink-muted">
               <button onClick={() => { setView('auth'); reset(); }} className="min-h-11 text-ink underline underline-offset-4">Back to sign in</button>
@@ -107,7 +107,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
               {error && <p role="alert" className="text-sm text-danger">{error}</p>}
               {notice && <p role="status" className="text-sm text-success">{notice}</p>}
 
-              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
                 {busy ? 'Working…' : isSignup ? 'Create account' : 'Sign in'}
               </button>
             </form>
@@ -116,7 +116,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
               <span className="h-px flex-1 bg-hairline" /> or <span className="h-px flex-1 bg-hairline" />
             </div>
 
-            <button onClick={google} disabled={!configured} className="min-h-11 w-full rounded-full border border-hairline-strong px-6 py-3 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            <button onClick={google} disabled={!configured} className="min-h-11 w-full rounded-full border border-hairline-strong px-6 py-3 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
               Continue with Google
             </button>
 

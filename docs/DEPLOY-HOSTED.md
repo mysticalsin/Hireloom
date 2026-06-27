@@ -59,6 +59,15 @@ fly deploy \
 container serves the static build via nginx with a strict CSP (see `web/nginx.conf`).
 Railway alternative: point a service at `web/` with the same Dockerfile + build args.
 
+## 5a. Scheduled maintenance
+`public.prune_rate_limits()` (migration `0008`) must be scheduled in production to bound the
+`rate_limits` table — without it old per-user rate-limit rows accumulate unbounded. Either
+enable `pg_cron` and schedule it:
+```sql
+select cron.schedule('prune-rate-limits', '*/15 * * * *', 'select public.prune_rate_limits()');
+```
+or invoke `select public.prune_rate_limits();` from any external scheduler on a 15-minute cadence.
+
 ## 6. Smoke test (do before inviting anyone)
 - Sign up → confirm email → sign in.
 - Settings → save an Anthropic/OpenAI key → it shows as saved (never echoed back).

@@ -33,7 +33,7 @@ export default function SetNewPassword() {
             className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-4 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           />
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <button type="submit" disabled={busy} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <button type="submit" disabled={busy} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
             {busy ? 'Saving…' : 'Update password'}
           </button>
         </form>
