@@ -35,6 +35,10 @@ Deno.serve(async (req) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
+  // Per-user burst cap (cost/abuse control, beyond the monthly quota). Fixed window.
+  const { data: allowed } = await supabase.rpc('check_rate_limit', { p_metric: 'tailor', p_limit: 20, p_window_seconds: 60 });
+  if (allowed === false) return jsonResponse({ error: 'rate_limited' }, 429, origin);
+
   const { roleId, provider = 'anthropic', model } = await req.json().catch(() => ({}));
   if (!roleId) return jsonResponse({ error: 'roleId required' }, 400, origin);
   if (!LLM_PROVIDERS.includes(provider)) return jsonResponse({ error: 'unsupported provider' }, 400, origin);

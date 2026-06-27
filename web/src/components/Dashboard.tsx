@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
 import { startCheckout, openBillingPortal } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
-import { getCv, saveCv, getSavedProviders, saveProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
+import { getCv, saveCv, getSavedProviders, saveProviderKey, validateProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
 import RoleDetail from './RoleDetail';
 
@@ -265,6 +265,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [apiKey, setApiKey] = useState('');
   const [cv, setCv] = useState('');
   const [saved, setSaved] = useState<string[]>([]);
+  const [keyStatus, setKeyStatus] = useState<Record<string, { ok?: boolean; error?: string; testing?: boolean }>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { signOut } = useAuth();
@@ -274,11 +275,20 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     getSavedProviders().then(setSaved).catch(() => {});
   }, []);
 
+  // Ping the provider with the stored key; surface ✓/✗ inline (key stays server-side).
+  const testKey = async (p: string) => {
+    setKeyStatus((s) => ({ ...s, [p]: { testing: true } }));
+    const r = await validateProviderKey(p);
+    setKeyStatus((s) => ({ ...s, [p]: { ok: r.ok, error: r.error } }));
+  };
+
   const saveKey = async () => {
     if (!apiKey.trim()) { setMsg('Enter a key.'); return; }
-    const r = await saveProviderKey(provider, apiKey.trim());
+    const p = provider;
+    const r = await saveProviderKey(p, apiKey.trim());
     if (r.error) { setMsg(r.error); return; }
-    setMsg(`${provider} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
+    setMsg(`${p} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
+    testKey(p); // auto-validate the freshly-saved key
   };
   const removeKey = async (p: string) => {
     const r = await deleteProviderKey(p);
@@ -319,12 +329,23 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <p className="mt-2 text-xs text-ink-faint">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
           {saved.length > 0 && (
             <ul className="mt-3 space-y-1.5">
-              {saved.map((p) => (
-                <li key={p} className="flex items-center justify-between rounded-lg border border-hairline bg-surface-2 px-3 py-1.5 text-sm">
-                  <span className="capitalize">{p} <span className="text-success">✓ saved</span></span>
-                  <button onClick={() => removeKey(p)} className="min-h-11 px-2 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
-                </li>
-              ))}
+              {saved.map((p) => {
+                const st = keyStatus[p];
+                return (
+                  <li key={p} className="flex flex-col gap-1 rounded-lg border border-hairline bg-surface-2 px-3 py-1.5 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="capitalize">{p} <span className="text-success">✓ saved</span></span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => testKey(p)} disabled={st?.testing} className="min-h-11 px-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{st?.testing ? 'Testing…' : 'Test'}</button>
+                        <button onClick={() => removeKey(p)} className="min-h-11 px-2 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
+                      </div>
+                    </div>
+                    {st && !st.testing && (st.ok
+                      ? <span className="text-xs text-success">✓ Key works</span>
+                      : <span className="text-xs text-danger">✗ {st.error || 'Key check failed.'}</span>)}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

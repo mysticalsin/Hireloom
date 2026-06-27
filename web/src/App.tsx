@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import SetNewPassword from './components/SetNewPassword';
 import Landing from './components/Landing';
+import CookieConsent from './components/CookieConsent';
 
 // Dashboard is the heavy authed surface — load it only after sign-in. The public
 // Landing is eager so the marketing LCP paints without a chunk round-trip.
@@ -32,6 +33,8 @@ export default function App() {
   return (
     <AuthProvider>
       <Shell />
+      {/* Mounted outside Shell so the consent notice shows on landing + app, any auth state. */}
+      <CookieConsent />
     </AuthProvider>
   );
 }

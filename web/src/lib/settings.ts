@@ -75,3 +75,12 @@ export async function saveProviderKey(provider: string, apiKey: string): Promise
   const { error } = await supabase.rpc('set_provider_key', { p_provider: provider, p_key: apiKey });
   return { error: error?.message };
 }
+
+// Pings the provider with the user's STORED key to confirm it authenticates. The key
+// stays server-side — this only returns whether it works ({ok}) or a sanitized reason.
+export async function validateProviderKey(provider: string): Promise<{ ok?: boolean; error?: string }> {
+  if (!supabase) return { error: 'Not configured.' };
+  const { data, error } = await supabase.functions.invoke('validate-key', { body: { provider } });
+  if (error) return { error: error.message };
+  return data as { ok?: boolean; error?: string };
+}
