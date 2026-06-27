@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, X, Sun, Moon, ExternalLink } from 'lucide-react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, X, Sun, Moon, ExternalLink, Upload, Github, Star, Plus } from 'lucide-react';
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
@@ -9,6 +9,8 @@ import { runDemoEval } from '../lib/demo';
 import { getCv, saveCv, getSavedProviders, saveProviderKey, validateProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
 import { track } from '../lib/analytics';
+import { extractPdfText } from '../lib/pdf';
+import { fetchGithubProjects, type GithubProject } from '../lib/github';
 import RoleDetail from './RoleDetail';
 
 const SIGNAL_STYLE: Record<string, string> = {
@@ -302,6 +304,21 @@ export default function Dashboard() {
   );
 }
 
+// Appends GitHub repos to the CV markdown without duplicating the heading or
+// rows already present (matched by repo URL). Returns the new CV string.
+function appendGithubToCv(cv: string, projects: GithubProject[]): string {
+  const line = (p: GithubProject) =>
+    `- [${p.name}](${p.url}) — ${p.language ?? 'n/a'}, ★${p.stars}${p.description ? `: ${p.description}` : ''}`;
+  const fresh = projects.filter((p) => !cv.includes(p.url));
+  if (fresh.length === 0) return cv;
+  const rows = fresh.map(line).join('\n');
+  const hasHeading = /^##\s+GitHub Projects\s*$/m.test(cv);
+  const base = cv.replace(/\s+$/, '');
+  if (hasHeading) return `${base}\n${rows}\n`;
+  const sep = base ? '\n\n' : '';
+  return `${base}${sep}## GitHub Projects\n${rows}\n`;
+}
+
 function Card({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-hairline bg-surface p-5">
@@ -319,6 +336,15 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [keyStatus, setKeyStatus] = useState<Record<string, { ok?: boolean; error?: string; testing?: boolean }>>({});
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // PDF CV import — parsed client-side; fills the textarea for the user to review.
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfHint, setPdfHint] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  // GitHub enrichment — public repos appended to the CV on the user's confirmation.
+  const [ghUser, setGhUser] = useState('');
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghError, setGhError] = useState<string | null>(null);
+  const [ghProjects, setGhProjects] = useState<GithubProject[]>([]);
   const { signOut } = useAuth();
 
   // Split status vs failure so errors don't render as green "success" text.
@@ -373,6 +399,39 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     ok('CV saved.');
   };
 
+  // Parse a chosen PDF into the textarea — the user reviews, then clicks Save CV.
+  const onPdfChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    setPdfError(null); setPdfHint(null); setPdfBusy(true);
+    try {
+      const text = await extractPdfText(file);
+      if (!text.trim()) { setPdfError('No text found — this PDF may be a scanned image.'); return; }
+      setCv(text);
+      setPdfHint('Parsed — review + Save.');
+    } catch {
+      setPdfError('Could not read that PDF.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const fetchGithub = async () => {
+    setGhError(null); setGhProjects([]); setGhBusy(true);
+    try {
+      const projects = await fetchGithubProjects(ghUser);
+      if (projects.length === 0) setGhError('No public, non-forked repos found.');
+      setGhProjects(projects);
+    } catch (err) {
+      setGhError((err as Error).message);
+    } finally {
+      setGhBusy(false);
+    }
+  };
+
+  const addGithub = (projects: GithubProject[]) => setCv((prev) => appendGithubToCv(prev, projects));
+
   return (
     <Dialog title="Settings" onClose={onClose}>
         <div className="mb-6">
@@ -415,9 +474,51 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mb-2">
-          <div className="mb-2 text-sm font-medium">Your CV (markdown)</div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium">Your CV (markdown)</span>
+            <label className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent ${pdfBusy ? 'pointer-events-none opacity-50' : ''}`}>
+              <Upload size={15} /> {pdfBusy ? 'Parsing…' : 'Upload PDF'}
+              <input type="file" accept=".pdf" onChange={onPdfChange} disabled={pdfBusy} className="sr-only" />
+            </label>
+          </div>
           <textarea value={cv} onChange={(e) => setCv(e.target.value)} rows={6} placeholder="Paste your CV in markdown…" className="w-full rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
+          <span role="status" aria-live="polite">
+            {pdfHint && <span className="mt-1 block text-xs text-success">{pdfHint}</span>}
+            {pdfError && <span className="mt-1 block text-xs text-danger">{pdfError}</span>}
+          </span>
           <button onClick={saveResume} className="mt-2 min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Save CV</button>
+        </div>
+
+        <div className="mt-6 border-t border-hairline pt-5">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Github size={15} /> Enrich from GitHub</div>
+          <p className="mb-2 text-xs text-ink-faint">Pull your top public repos and append them to your CV. Nothing is sent but the username.</p>
+          <div className="flex gap-2">
+            <label htmlFor="gh-user" className="sr-only">GitHub username</label>
+            <input id="gh-user" value={ghUser} onChange={(e) => setGhUser(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') fetchGithub(); }} placeholder="GitHub username" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
+            <button onClick={fetchGithub} disabled={ghBusy || !ghUser.trim()} className="min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{ghBusy ? 'Fetching…' : 'Fetch projects'}</button>
+          </div>
+          {ghError && <p role="alert" className="mt-2 text-xs text-danger">{ghError}</p>}
+          {ghProjects.length > 0 && (
+            <>
+              <ul className="mt-3 space-y-1.5">
+                {ghProjects.map((p) => (
+                  <li key={p.url} className="flex items-start justify-between gap-2 rounded-lg border border-hairline bg-surface-2 px-3 py-1.5 text-sm">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <a href={p.url} target="_blank" rel="noopener" className="truncate font-medium text-accent hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{p.name}</a>
+                        <span className="inline-flex items-center gap-0.5 text-xs text-ink-faint"><Star size={11} /> {p.stars}</span>
+                        {p.language && <span className="text-xs text-ink-faint">{p.language}</span>}
+                      </div>
+                      {p.description && <p className="truncate text-xs text-ink-muted">{p.description}</p>}
+                    </div>
+                    <button onClick={() => addGithub([p])} className="inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><Plus size={13} /> Add to CV</button>
+                  </li>
+                ))}
+              </ul>
+              <button onClick={() => addGithub(ghProjects)} className="mt-2 min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Add all to CV</button>
+              <p className="mt-2 text-xs text-ink-faint">Added to the CV box above — review, then Save CV.</p>
+            </>
+          )}
         </div>
 
         <div className="mt-6 border-t border-hairline pt-5">
