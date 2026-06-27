@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; }
+    .card {
+      position: relative; width: 1200px; height: 630px; overflow: hidden;
+      background:
+        radial-gradient(900px 520px at 12% -10%, rgba(224,164,88,0.22), rgba(224,164,88,0) 60%),
+        radial-gradient(800px 600px at 110% 120%, rgba(224,164,88,0.10), rgba(224,164,88,0) 55%),
+        linear-gradient(135deg, #100c07 0%, #0b0805 60%, #0e0a06 100%);
+      color: #f6f1e7; font-family: 'Inter', sans-serif;
+      display: grid; grid-template-columns: 1fr 470px; align-items: center;
+    }
+    .grain { position: absolute; inset: 0; opacity: 0.035;
+      background-image: radial-gradient(#fff 0.5px, transparent 0.5px); background-size: 4px 4px; }
+    .left { padding: 0 0 0 90px; position: relative; }
+    .kicker { font-size: 19px; letter-spacing: 0.30em; text-transform: uppercase; color: #e0a458; font-weight: 600; margin-bottom: 22px; }
+    .wordmark { font-family: 'Fraunces', serif; font-weight: 600; font-size: 116px; line-height: 0.9; letter-spacing: -0.025em; color: #e0a458; }
+    .tagline { margin-top: 26px; font-size: 35px; line-height: 1.2; font-weight: 500; color: #f1ead c; color: #f1eadc; max-width: 560px; }
+    .providers { margin-top: 34px; font-size: 19px; color: #b8b0a2; font-weight: 500; letter-spacing: 0.01em; }
+    .providers b { color: #e0a458; font-weight: 600; }
+
+    /* right: product preview card */
+    .stage { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
+    .preview {
+      width: 380px; transform: rotate(-3deg);
+      background: rgba(28,22,14,0.72); border: 1px solid rgba(224,164,88,0.22);
+      border-radius: 22px; padding: 28px; box-shadow: 0 40px 90px rgba(0,0,0,0.55);
+      backdrop-filter: blur(8px);
+    }
+    .pv-top { display: flex; align-items: center; gap: 16px; }
+    .ring {
+      width: 84px; height: 84px; border-radius: 50%; flex: none;
+      background: conic-gradient(#e0a458 0 84%, rgba(255,255,255,0.10) 84% 100%);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ring > div { width: 64px; height: 64px; border-radius: 50%; background: #16100a; display: flex; align-items: center; justify-content: center;
+      font-family: 'Fraunces', serif; font-weight: 600; font-size: 26px; color: #f6f1e7; }
+    .pv-co { font-family: 'Fraunces', serif; font-size: 27px; font-weight: 600; color: #f6f1e7; line-height: 1.05; }
+    .pv-role { font-size: 17px; color: #b8b0a2; margin-top: 4px; }
+    .bars { margin-top: 24px; display: flex; flex-direction: column; gap: 13px; }
+    .bar { display: flex; align-items: center; gap: 12px; font-size: 15px; color: #cfc7b8; }
+    .bar .lbl { width: 96px; }
+    .track { flex: 1; height: 8px; border-radius: 99px; background: rgba(255,255,255,0.08); overflow: hidden; }
+    .fill { height: 100%; border-radius: 99px; background: #e0a458; }
+    .chip { margin-top: 22px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600;
+      color: #0e0b07; background: #e0a458; padding: 7px 14px; border-radius: 99px; }
+    .foot { position: absolute; bottom: 40px; left: 90px; font-size: 20px; color: #8f887b; }
+    .foot b { color: #cfc7b8; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="grain"></div>
+    <div class="left">
+      <div class="kicker">heir + loom · a quiet career atelier</div>
+      <div class="wordmark">Hireloom</div>
+      <div class="tagline">Apply to fewer jobs.<br/>Get more interviews.</div>
+      <div class="providers">Score · Tailor · Apply — on <b>your own AI key</b></div>
+    </div>
+    <div class="stage">
+      <div class="preview">
+        <div class="pv-top">
+          <div class="ring"><div>4.6</div></div>
+          <div>
+            <div class="pv-co">Stripe</div>
+            <div class="pv-role">Senior Product Manager</div>
+          </div>
+        </div>
+        <div class="bars">
+          <div class="bar"><span class="lbl">Skills fit</span><span class="track"><span class="fill" style="width:92%"></span></span></div>
+          <div class="bar"><span class="lbl">Experience</span><span class="track"><span class="fill" style="width:88%"></span></span></div>
+          <div class="bar"><span class="lbl">Seniority</span><span class="track"><span class="fill" style="width:80%"></span></span></div>
+        </div>
+        <div class="chip">✓ Tailored CV + cover letter ready</div>
+      </div>
+    </div>
+    <div class="foot"><b>hireloom.app</b> · Claude · GPT · Gemini · OpenRouter · Kimi</div>
+  </div>
+</body>
+</html>
