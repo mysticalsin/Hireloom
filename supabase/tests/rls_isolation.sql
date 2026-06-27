@@ -34,8 +34,12 @@ begin
 
   -- 2. Paywall lockdown: B cannot self-grant a paid plan. subscriptions is SELECT-only
   --    for authenticated (migration 0005), so this UPDATE must be denied (42501).
+  --    An RLS-blocked UPDATE with no matching policy affects 0 rows SILENTLY (no
+  --    exception), so assert row_count = 0 in addition to catching insufficient_privilege.
   begin
     update public.subscriptions set plan = 'studio' where user_id = :'B';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL paywall: B updated % subscription row(s) to studio', n; end if;
     -- If the update somehow applied, that is a paywall breach.
     if exists (select 1 from public.subscriptions where plan = 'studio') then
       raise exception 'FAIL paywall: B self-upgraded to studio';
@@ -47,8 +51,22 @@ begin
   -- 3. Paywall lockdown: B cannot zero their own usage counter.
   begin
     update public.usage_counters set count = 0 where user_id = :'B';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL paywall: B zeroed % usage_counter row(s)', n; end if;
   exception
     when insufficient_privilege then null; -- expected
+  end;
+
+  -- 3b. Paywall lockdown: B cannot self-INSERT a paid subscription. There is no
+  --     INSERT policy on subscriptions (writes go via the service-role webhook /
+  --     SECURITY DEFINER RPCs only), so a fresh studio row must be rejected or
+  --     affect 0 rows.
+  begin
+    insert into public.subscriptions (user_id, plan) values (:'B', 'studio');
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL paywall: B self-inserted % studio subscription row(s)', n; end if;
+  exception
+    when insufficient_privilege then null; -- expected: RLS WITH CHECK denied the insert
   end;
 
   -- 4. BYOK isolation: provider_keys are SELECT-only-own; B sees none of A's (and none here).

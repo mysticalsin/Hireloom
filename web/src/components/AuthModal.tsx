@@ -9,7 +9,7 @@ interface AuthModalProps {
   onSwitch: (mode: 'signin' | 'signup') => void;
 }
 
-const FIELD = 'rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900';
+const FIELD = 'min-h-11 rounded-lg border border-hairline bg-surface-2 px-4 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface';
 
 export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
   const { signIn, signUp, signInWithGoogle, resetPassword, configured } = useAuth();
@@ -57,34 +57,34 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div ref={panelRef} className="liquid-glass relative w-full max-w-md rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
-        <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80">
+      <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={onClose} />
+      <div ref={panelRef} className="relative w-full max-w-md rounded-2xl border border-hairline-strong bg-surface p-7 text-ink shadow-md">
+        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <X size={20} />
         </button>
 
         {view === 'forgot' ? (
           <>
-            <h2 id="auth-title" className="mb-1 text-2xl font-semibold tracking-tight">Reset your password</h2>
-            <p className="mb-6 text-sm text-gray-400">We’ll email a secure link to set a new one.</p>
+            <h2 id="auth-title" className="mb-1 font-display text-2xl font-semibold tracking-tight">Reset your password</h2>
+            <p className="mb-6 text-sm text-ink-muted">We’ll email a secure link to set a new one.</p>
             <form onSubmit={sendReset} className="flex flex-col gap-3">
               <label htmlFor="reset-email" className="sr-only">Email</label>
               <input id="reset-email" ref={firstField} className={FIELD} placeholder="you@email.com" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
-              {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-              {notice && <p role="status" className="text-sm text-emerald-400">{notice}</p>}
-              <button type="submit" disabled={busy || !configured} className="mt-1 rounded-full bg-white px-6 py-3 font-medium text-black transition-colors hover:bg-gray-200 disabled:opacity-50">{busy ? 'Sending…' : 'Send reset link'}</button>
+              {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+              {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50">{busy ? 'Sending…' : 'Send reset link'}</button>
             </form>
-            <p className="mt-6 text-center text-sm text-gray-400">
-              <button onClick={() => { setView('auth'); reset(); }} className="text-white underline underline-offset-4">Back to sign in</button>
+            <p className="mt-6 text-center text-sm text-ink-muted">
+              <button onClick={() => { setView('auth'); reset(); }} className="min-h-11 text-ink underline underline-offset-4">Back to sign in</button>
             </p>
           </>
         ) : (
           <>
-            <h2 id="auth-title" className="mb-1 text-2xl font-semibold tracking-tight">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
-            <p className="mb-6 text-sm text-gray-400">{isSignup ? 'Start free. Bring your own AI key — no card required.' : 'Sign in to your Hireloom atelier.'}</p>
+            <h2 id="auth-title" className="mb-1 font-display text-2xl font-semibold tracking-tight">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
+            <p className="mb-6 text-sm text-ink-muted">{isSignup ? 'Start free. Bring your own AI key — no card required.' : 'Sign in to your Hireloom atelier.'}</p>
 
             {!configured && (
-              <p role="alert" className="mb-4 rounded-lg border border-yellow-700/40 bg-yellow-900/20 p-3 text-sm text-yellow-200">
+              <p role="alert" className="mb-4 rounded-lg border border-hairline-strong bg-surface-2 p-3 text-sm text-warning">
                 Auth isn’t configured yet. Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
               </p>
             )}
@@ -102,27 +102,27 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
               <input id="auth-password" className={FIELD} placeholder="Password (8+ characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={isSignup ? 'new-password' : 'current-password'} required />
 
               {!isSignup && (
-                <button type="button" onClick={() => { setView('forgot'); reset(); }} className="self-start text-xs text-gray-400 underline underline-offset-4 hover:text-white">Forgot password?</button>
+                <button type="button" onClick={() => { setView('forgot'); reset(); }} className="min-h-11 self-start text-xs text-ink-muted underline underline-offset-4 hover:text-ink">Forgot password?</button>
               )}
-              {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-              {notice && <p role="status" className="text-sm text-emerald-400">{notice}</p>}
+              {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+              {notice && <p role="status" className="text-sm text-success">{notice}</p>}
 
-              <button type="submit" disabled={busy || !configured} className="mt-1 rounded-full bg-white px-6 py-3 font-medium text-black transition-colors hover:bg-gray-200 disabled:opacity-50">
+              <button type="submit" disabled={busy || !configured} className="mt-1 min-h-11 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50">
                 {busy ? 'Working…' : isSignup ? 'Create account' : 'Sign in'}
               </button>
             </form>
 
-            <div className="my-4 flex items-center gap-3 text-xs text-gray-500">
-              <span className="h-px flex-1 bg-white/10" /> or <span className="h-px flex-1 bg-white/10" />
+            <div className="my-4 flex items-center gap-3 text-xs text-ink-faint">
+              <span className="h-px flex-1 bg-hairline" /> or <span className="h-px flex-1 bg-hairline" />
             </div>
 
-            <button onClick={google} disabled={!configured} className="liquid-glass w-full rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50">
+            <button onClick={google} disabled={!configured} className="min-h-11 w-full rounded-full border border-hairline-strong px-6 py-3 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50">
               Continue with Google
             </button>
 
-            <p className="mt-6 text-center text-sm text-gray-400">
+            <p className="mt-6 text-center text-sm text-ink-muted">
               {isSignup ? 'Already have an account?' : 'New to Hireloom?'}{' '}
-              <button onClick={() => onSwitch(isSignup ? 'signin' : 'signup')} className="text-white underline underline-offset-4">
+              <button onClick={() => onSwitch(isSignup ? 'signin' : 'signup')} className="min-h-11 text-ink underline underline-offset-4">
                 {isSignup ? 'Sign in' : 'Create one'}
               </button>
             </p>

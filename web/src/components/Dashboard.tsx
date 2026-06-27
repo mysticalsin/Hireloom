@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check } from 'lucide-react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check, Sun, Moon } from 'lucide-react';
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
@@ -10,10 +10,10 @@ import { getInboxSignals, type Signal } from '../lib/gmail';
 import RoleDetail from './RoleDetail';
 
 const SIGNAL_STYLE: Record<string, string> = {
-  offer: 'text-emerald-300 border-emerald-700/40',
-  interview: 'text-sky-300 border-sky-700/40',
-  rejection: 'text-red-300 border-red-800/40',
-  response: 'text-gray-300 border-white/15',
+  offer: 'text-success border-hairline-strong',
+  interview: 'text-info border-hairline-strong',
+  rejection: 'text-danger border-hairline-strong',
+  response: 'text-ink-muted border-hairline',
 };
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
@@ -36,6 +36,16 @@ export default function Dashboard() {
   const [needsGmail, setNeedsGmail] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   const [hasCv, setHasCv] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    () => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'),
+  );
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+  };
 
   const syncInbox = async () => {
     setInboxBusy(true); setInboxMsg('Reading inbox…'); setNeedsGmail(false);
@@ -104,118 +114,129 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-full bg-black text-white">
-      <header className="flex items-center justify-between border-b border-white/10 px-6 py-5 md:px-12">
-        <span className="text-xl font-bold tracking-tight">HIRELOOM</span>
+    <div className="min-h-full bg-canvas text-ink">
+      <header className="flex items-center justify-between border-b border-hairline px-6 py-5 md:px-12">
+        <span className="font-display text-xl font-semibold tracking-tight">Hireloom</span>
         <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-gray-400 sm:inline">{user?.email}</span>
-          <button onClick={() => setShowSettings(true)} className="liquid-glass flex items-center gap-2 rounded-full px-4 py-2 text-sm"><SettingsIcon size={16} /> Settings</button>
-          <button onClick={signOut} className="liquid-glass flex items-center gap-2 rounded-full px-4 py-2 text-sm"><LogOut size={16} /> Sign out</button>
+          <span className="hidden text-sm text-ink-muted sm:inline">{user?.email}</span>
+          <button onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} className="flex h-11 w-11 items-center justify-center rounded-full border border-hairline-strong text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
+          <button onClick={() => setShowSettings(true)} className="flex min-h-11 items-center gap-2 rounded-full border border-hairline-strong px-4 py-2 text-sm text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><SettingsIcon size={16} /> Settings</button>
+          <button onClick={signOut} className="flex min-h-11 items-center gap-2 rounded-full border border-hairline-strong px-4 py-2 text-sm text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><LogOut size={16} /> Sign out</button>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-10 md:px-12">
         {banner && (
-          <div className="mb-6 rounded-xl border border-emerald-700/40 bg-emerald-900/20 px-5 py-3 text-sm text-emerald-200">{banner}</div>
+          <div className="mb-6 rounded-xl border border-hairline-strong bg-surface px-5 py-3 text-sm text-success">{banner}</div>
         )}
 
         {loadErr && (
-          <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-800/50 bg-red-950/30 px-5 py-3 text-sm text-red-200">
+          <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline-strong bg-surface px-5 py-3 text-sm text-danger">
             <span>{loadErr}</span>
-            <button onClick={reload} className="rounded-full border border-red-700/50 px-3 py-1 text-xs font-medium hover:bg-red-900/30">Retry</button>
+            <button onClick={reload} className="min-h-11 rounded-full border border-hairline-strong px-3 py-1 text-xs font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Retry</button>
           </div>
         )}
 
-        <h1 className="mb-1 text-3xl font-semibold tracking-tight">Your atelier</h1>
-        <p className="mb-8 text-gray-400">Everything Hireloom tracks for your search, in one place.</p>
+        <h1 className="mb-1 font-display text-3xl font-semibold tracking-tight">Your atelier</h1>
+        <p className="mb-8 text-ink-muted">Everything Hireloom tracks for your search, in one place.</p>
 
         <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <Card icon={<CreditCard size={18} />} label="Plan"><span className="text-2xl font-semibold capitalize">{loading ? '—' : plan}</span><span className="ml-2 text-sm text-gray-400">{loading ? '' : (sub?.status ?? '—')}</span></Card>
-          <Card icon={<Gauge size={18} />} label="Evaluations this month"><span className="text-2xl font-semibold">{loading ? '—' : used}</span><span className="ml-2 text-sm text-gray-400">/ {cap === Infinity ? '∞' : cap}</span></Card>
-          <Card icon={<Briefcase size={18} />} label="Roles tracked"><span className="text-2xl font-semibold">{loading ? '—' : roles.length}</span></Card>
+          <Card icon={<CreditCard size={18} />} label="Plan">{loading ? <div className="h-8 w-24 animate-pulse rounded bg-surface-2" /> : <><span className="text-2xl font-semibold capitalize">{plan}</span><span className="ml-2 text-sm text-ink-muted">{sub?.status ?? '—'}</span></>}</Card>
+          <Card icon={<Gauge size={18} />} label="Evaluations this month">{loading ? <div className="h-8 w-20 animate-pulse rounded bg-surface-2" /> : <><span className="text-2xl font-semibold">{used}</span><span className="ml-2 text-sm text-ink-muted">/ {cap === Infinity ? '∞' : cap}</span></>}</Card>
+          <Card icon={<Briefcase size={18} />} label="Roles tracked">{loading ? <div className="h-8 w-12 animate-pulse rounded bg-surface-2" /> : <span className="text-2xl font-semibold">{roles.length}</span>}</Card>
         </div>
 
         {!loading && (!hasKey || !hasCv) && (
-          <div className="mb-8 rounded-2xl border border-white/15 bg-white/[0.03] p-6">
-            <h2 className="mb-1 text-lg font-semibold">Get your first score in 3 steps</h2>
-            <p className="mb-4 text-sm text-gray-400">Hireloom runs on your own AI key — your CV and keys stay yours.</p>
+          <div className="mb-8 rounded-2xl border border-hairline bg-surface p-6">
+            <h2 className="mb-1 font-display text-lg font-semibold">Get your first score in 3 steps</h2>
+            <p className="mb-4 text-sm text-ink-muted">Hireloom runs on your own AI key — your CV and keys stay yours.</p>
             <ol className="space-y-2 text-sm">
-              <li className="flex items-center gap-2">{hasKey ? <Check size={16} className="text-emerald-400" /> : <span className="w-4 text-gray-500">1.</span>}<span className={hasKey ? 'text-gray-500 line-through' : 'text-gray-200'}>Add your AI provider key</span></li>
-              <li className="flex items-center gap-2">{hasCv ? <Check size={16} className="text-emerald-400" /> : <span className="w-4 text-gray-500">2.</span>}<span className={hasCv ? 'text-gray-500 line-through' : 'text-gray-200'}>Paste your CV</span></li>
-              <li className="flex items-center gap-2"><span className="w-4 text-gray-500">3.</span><span className="text-gray-200">Paste a job URL below to score it</span></li>
+              <li className="flex items-center gap-2">{hasKey ? <Check size={16} className="text-success" /> : <span className="w-4 text-ink-faint">1.</span>}<span className={hasKey ? 'text-ink-faint line-through' : 'text-ink'}>Add your AI provider key</span></li>
+              <li className="flex items-center gap-2">{hasCv ? <Check size={16} className="text-success" /> : <span className="w-4 text-ink-faint">2.</span>}<span className={hasCv ? 'text-ink-faint line-through' : 'text-ink'}>Paste your CV</span></li>
+              <li className="flex items-center gap-2"><span className="w-4 text-ink-faint">3.</span><span className="text-ink">Paste a job URL below to score it</span></li>
             </ol>
-            <button onClick={() => setShowSettings(true)} className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-medium text-black hover:bg-gray-200">Open Settings</button>
+            <button onClick={() => setShowSettings(true)} className="mt-4 min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Open Settings</button>
           </div>
         )}
 
         {/* New evaluation */}
-        <div className="liquid-glass mb-8 rounded-2xl bg-white/[0.03] p-6">
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium"><Sparkles size={16} className="text-white" /> Evaluate a role</div>
+        <div className="liquid-glass mb-8 rounded-2xl p-6">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium"><Sparkles size={16} className="text-accent" /> Evaluate a role</div>
           <form onSubmit={evaluate} className="flex flex-col gap-3 sm:flex-row">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste a job URL or the full JD text…" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900">
-              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-gray-900">{p}</option>)}
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste a job URL or the full JD text…" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-4 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}</option>)}
             </select>
-            <button type="submit" disabled={evalBusy} className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black transition-colors hover:bg-gray-200 disabled:opacity-50">{evalBusy ? 'Working…' : 'Evaluate'}</button>
+            <button type="submit" disabled={evalBusy} className="min-h-11 rounded-full bg-accent px-6 py-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{evalBusy ? 'Working…' : 'Evaluate'}</button>
           </form>
-          {evalMsg && <p className="mt-3 text-sm text-gray-400">{evalMsg}</p>}
-          <p className="mt-2 text-xs text-gray-400">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
+          {evalMsg && <p className="mt-3 text-sm text-ink-muted">{evalMsg}</p>}
+          <p className="mt-2 text-xs text-ink-muted">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
         </div>
 
         {plan === 'free' && (
-          <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5">
-            <span className="text-sm text-gray-300">You’re on Free. Upgrade to Pro for unlimited evaluations, inbox signals, and assisted apply.</span>
+          <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-hairline bg-surface p-5">
+            <span className="text-sm text-ink-muted">You’re on Free. Upgrade to Pro for unlimited evaluations, inbox signals, and assisted apply.</span>
             <div className="ml-auto flex gap-3">
-              <button onClick={() => upgrade('pro')} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-black hover:bg-gray-200">Upgrade to Pro</button>
+              <button onClick={() => upgrade('pro')} className="min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Upgrade to Pro</button>
             </div>
-            {billingMsg && <span className="w-full text-sm text-gray-400">{billingMsg}</span>}
+            {billingMsg && <span className="w-full text-sm text-ink-muted">{billingMsg}</span>}
           </div>
         )}
 
         {plan !== 'free' && (
-          <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5 text-sm text-gray-400">
+          <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-hairline bg-surface p-5 text-sm text-ink-muted">
             <span>Manage your subscription, payment method, and invoices.</span>
-            <button onClick={manageBilling} className="liquid-glass ml-auto rounded-full px-5 py-2 font-medium text-white">Manage billing</button>
-            {billingMsg && <span className="w-full text-gray-400">{billingMsg}</span>}
+            <button onClick={manageBilling} className="ml-auto min-h-11 rounded-full border border-hairline-strong px-5 py-2 font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Manage billing</button>
+            {billingMsg && <span className="w-full text-ink-muted">{billingMsg}</span>}
           </div>
         )}
 
         {/* Inbox signals */}
-        <div className="liquid-glass mb-8 rounded-2xl bg-white/[0.03] p-6">
+        <div className="mb-8 rounded-2xl border border-hairline bg-surface p-6">
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium">Inbox signals</span>
-            <button onClick={syncInbox} disabled={inboxBusy} className="liquid-glass rounded-full px-4 py-1.5 text-xs font-medium disabled:opacity-50">{inboxBusy ? 'Syncing…' : 'Sync inbox'}</button>
-            {needsGmail && <button onClick={() => connectGmail()} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200">Connect Gmail</button>}
+            <button onClick={syncInbox} disabled={inboxBusy} className="min-h-11 rounded-full border border-hairline-strong px-4 py-1.5 text-xs font-medium text-ink hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{inboxBusy ? 'Syncing…' : 'Sync inbox'}</button>
+            {needsGmail && <button onClick={() => connectGmail()} className="min-h-11 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Connect Gmail</button>}
           </div>
-          {inboxMsg && <p className="mb-3 text-xs text-gray-400">{inboxMsg}</p>}
+          {inboxMsg && <p className="mb-3 text-xs text-ink-muted">{inboxMsg}</p>}
           {signals && signals.length > 0 && (
             <ul className="space-y-2">
               {signals.map((s) => (
-                <li key={s.id} className="flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-sm">
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs capitalize ${SIGNAL_STYLE[s.type] ?? 'text-gray-300 border-white/15'}`}>{s.type}</span>
-                  <span className="truncate text-gray-300">{s.subject}</span>
-                  <span className="ml-auto shrink-0 text-xs text-gray-500">{s.from.replace(/<.*>/, '').trim()}</span>
+                <li key={s.id} className="flex items-center gap-3 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm">
+                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs capitalize ${SIGNAL_STYLE[s.type] ?? 'text-ink-muted border-hairline'}`}>{s.type}</span>
+                  <span className="truncate text-ink-muted">{s.subject}</span>
+                  <span className="ml-auto shrink-0 text-xs text-ink-faint">{s.from.replace(/<.*>/, '').trim()}</span>
                 </li>
               ))}
             </ul>
           )}
-          {!signals && !inboxMsg && <p className="text-xs text-gray-400">Read-only Gmail scan for responses, rejections, interviews, and offers. Runs in your browser on your Google token.</p>}
+          {!signals && !inboxMsg && <p className="text-xs text-ink-muted">Read-only Gmail scan for responses, rejections, interviews, and offers. Runs in your browser on your Google token.</p>}
         </div>
 
-        <h2 className="mb-3 text-lg font-semibold">Roles</h2>
-        <div className="overflow-hidden rounded-xl border border-white/10">
-          {loading ? <div className="p-8 text-center text-gray-500">Loading…</div>
-            : roles.length === 0 ? <div className="p-8 text-center text-gray-500">No roles yet. Paste a job URL above to score your first one.</div>
+        <h2 className="mb-3 font-display text-lg font-semibold">Roles</h2>
+        <div className="overflow-hidden rounded-xl border border-hairline">
+          {loading ? (
+            <div className="divide-y divide-hairline" aria-busy="true" aria-label="Loading roles">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+                  <div className="h-4 w-32 animate-pulse rounded bg-surface-2" />
+                  <div className="h-4 w-48 animate-pulse rounded bg-surface-2" />
+                  <div className="ml-auto h-4 w-10 animate-pulse rounded bg-surface-2" />
+                  <div className="h-4 w-16 animate-pulse rounded bg-surface-2" />
+                </div>
+              ))}
+            </div>
+          ) : roles.length === 0 ? <div className="p-8 text-center text-ink-faint">No roles yet. Paste a job URL above to score your first one.</div>
             : (
               <table className="w-full text-left text-sm">
-                <thead className="bg-white/5 text-xs uppercase tracking-wide text-gray-400"><tr><th className="px-4 py-3">Company</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Score</th><th className="px-4 py-3">Status</th></tr></thead>
+                <thead className="bg-surface-2 text-xs uppercase tracking-wide text-ink-muted"><tr><th className="px-4 py-3">Company</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Score</th><th className="px-4 py-3">Status</th></tr></thead>
                 <tbody>
                   {roles.map((r) => (
-                    <tr key={r.id} onClick={() => setSelectedRole(r)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedRole(r); } }} tabIndex={0} role="button" aria-label={`Open ${r.company} — ${r.title}`} className="cursor-pointer border-t border-white/5 transition-colors hover:bg-white/5 focus-visible:bg-white/10 focus-visible:outline-none">
+                    <tr key={r.id} onClick={() => setSelectedRole(r)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedRole(r); } }} tabIndex={0} role="button" aria-label={`Open ${r.company} — ${r.title}`} className="cursor-pointer border-t border-hairline transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none">
                       <td className="px-4 py-3 font-medium">{r.company}</td>
-                      <td className="px-4 py-3 text-gray-300">{r.title}</td>
+                      <td className="px-4 py-3 text-ink-muted">{r.title}</td>
                       <td className="px-4 py-3">{r.score ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-400">{r.status}</td>
+                      <td className="px-4 py-3 text-ink-muted">{r.status}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -232,8 +253,8 @@ export default function Dashboard() {
 
 function Card({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
-    <div className="liquid-glass rounded-xl bg-white/[0.03] p-5">
-      <div className="mb-2 flex items-center gap-2 text-sm text-gray-400">{icon} {label}</div>
+    <div className="rounded-xl border border-hairline bg-surface p-5">
+      <div className="mb-2 flex items-center gap-2 text-sm text-ink-muted">{icon} {label}</div>
       <div>{children}</div>
     </div>
   );
@@ -289,19 +310,19 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         <div className="mb-6">
           <div className="mb-2 text-sm font-medium">AI provider key (BYOK)</div>
           <div className="flex gap-2">
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900">
-              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-gray-900">{p}{saved.includes(p) ? ' ✓' : ''}</option>)}
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="min-h-11 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+              {PROVIDERS.map((p) => <option key={p} value={p} className="bg-surface">{p}{saved.includes(p) ? ' ✓' : ''}</option>)}
             </select>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
-            <button onClick={saveKey} className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black hover:bg-gray-200">Save</button>
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="min-h-11 flex-1 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
+            <button onClick={saveKey} className="min-h-11 rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Save</button>
           </div>
-          <p className="mt-2 text-xs text-gray-500">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
+          <p className="mt-2 text-xs text-ink-faint">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
           {saved.length > 0 && (
             <ul className="mt-3 space-y-1.5">
               {saved.map((p) => (
-                <li key={p} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.02] px-3 py-1.5 text-sm">
-                  <span className="capitalize">{p} <span className="text-emerald-400">✓ saved</span></span>
-                  <button onClick={() => removeKey(p)} className="text-xs text-gray-400 hover:text-red-400">Remove</button>
+                <li key={p} className="flex items-center justify-between rounded-lg border border-hairline bg-surface-2 px-3 py-1.5 text-sm">
+                  <span className="capitalize">{p} <span className="text-success">✓ saved</span></span>
+                  <button onClick={() => removeKey(p)} className="min-h-11 px-2 text-xs text-ink-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Remove</button>
                 </li>
               ))}
             </ul>
@@ -310,28 +331,28 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="mb-2">
           <div className="mb-2 text-sm font-medium">Your CV (markdown)</div>
-          <textarea value={cv} onChange={(e) => setCv(e.target.value)} rows={6} placeholder="Paste your CV in markdown…" className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
-          <button onClick={saveResume} className="mt-2 liquid-glass rounded-full px-4 py-2 text-sm font-medium">Save CV</button>
+          <textarea value={cv} onChange={(e) => setCv(e.target.value)} rows={6} placeholder="Paste your CV in markdown…" className="w-full rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface" />
+          <button onClick={saveResume} className="mt-2 min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Save CV</button>
         </div>
 
-        <div className="mt-6 border-t border-white/10 pt-5">
+        <div className="mt-6 border-t border-hairline pt-5">
           <div className="mb-2 text-sm font-medium">Your data</div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={downloadData} className="liquid-glass rounded-full px-4 py-2 text-sm font-medium">Download my data</button>
+            <button onClick={downloadData} className="min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Download my data</button>
             {!confirmDelete ? (
-              <button onClick={() => setConfirmDelete(true)} className="rounded-full border border-red-800/50 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-950/30">Delete account</button>
+              <button onClick={() => setConfirmDelete(true)} className="min-h-11 rounded-full border border-hairline-strong px-4 py-2 text-sm font-medium text-danger hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Delete account</button>
             ) : (
               <span className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-red-300">Erases everything. Sure?</span>
-                <button onClick={removeAccount} className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500">Delete forever</button>
-                <button onClick={() => setConfirmDelete(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs">Cancel</button>
+                <span className="text-xs text-danger">Erases everything. Sure?</span>
+                <button onClick={removeAccount} className="min-h-11 rounded-full bg-danger px-3 py-1.5 text-xs font-medium text-on-accent hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Delete forever</button>
+                <button onClick={() => setConfirmDelete(false)} className="min-h-11 rounded-full border border-hairline-strong px-3 py-1.5 text-xs text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Cancel</button>
               </span>
             )}
           </div>
-          <p className="mt-2 text-xs text-gray-400">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
+          <p className="mt-2 text-xs text-ink-muted">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
         </div>
 
-        {msg && <p role="status" className="mt-4 text-sm text-emerald-400">{msg}</p>}
+        {msg && <p role="status" className="mt-4 text-sm text-success">{msg}</p>}
     </Dialog>
   );
 }

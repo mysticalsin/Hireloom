@@ -83,6 +83,11 @@ begin
 end;
 $$;
 
+-- increment_usage is now dead code: all metering routes through consume_quota above.
+-- It still carries the PUBLIC execute grant from 0001, so lock it down (a dead,
+-- world-callable SECURITY DEFINER function is an unnecessary surface).
+revoke all on function public.increment_usage(text, integer) from anon, public;
+
 revoke all on function public.consume_quota(text, integer)  from anon, public;
 revoke all on function public.refund_quota(text)            from anon, public;
 grant execute on function public.consume_quota(text, integer) to authenticated;
@@ -193,6 +198,11 @@ create index if not exists subscriptions_customer_idx on public.subscriptions (c
 alter table public.subscriptions add column if not exists last_event_created bigint;
 
 -- ── 6. CHECK constraints on status-bearing text columns ───────────────────────
+-- Added NOT VALID so this migration never blocks on legacy rows: new/updated rows
+-- are enforced immediately, but existing data is not scanned here. Once the data is
+-- confirmed clean, follow up with `ALTER TABLE … VALIDATE CONSTRAINT <name>;` for
+-- each constraint below (subscriptions_plan_chk, provider_keys_provider_chk,
+-- roles_status_chk) to extend enforcement to the pre-existing rows.
 alter table public.subscriptions
   add constraint subscriptions_plan_chk check (plan in ('free', 'pro', 'studio')) not valid;
 alter table public.provider_keys
