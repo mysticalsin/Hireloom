@@ -28,6 +28,7 @@ supabase functions deploy evaluate
 supabase functions deploy tailor
 supabase functions deploy apply-assist
 supabase functions deploy checkout
+supabase functions deploy demo-eval        # optional keyless "try a sample score" demo (off unless DEMO_API_KEY is set)
 supabase functions deploy stripe-webhook --no-verify-jwt   # Stripe can't send a JWT; signature is the auth
 ```
 Set function secrets:
@@ -40,6 +41,20 @@ supabase secrets set STRIPE_PRICE_PRO="price_..." STRIPE_PRICE_STUDIO="price_...
 # Optional: KIMI_BASE_URL if using a non-default Moonshot endpoint.
 ```
 (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.)
+
+**Optional — keyless "try a sample score" demo.** The `demo-eval` function lets a signed-in
+user with no BYO key yet run ONE sample A-G evaluation on **your** (the operator's) key, to
+feel the product before the BYOK wall. It is **operator-opt-in and OFF by default**: with no
+`DEMO_API_KEY` set the function returns `{ disabled: true }` and the UI hides the button — you
+spend nothing. When funded it is hard-capped: **one per user** (`profiles.demo_used`, set via
+the service role) plus a **3-per-minute** per-user burst limit. The operator key is never
+logged or returned, and a user's own BYO key is never used for the demo.
+```bash
+supabase secrets set DEMO_API_KEY="sk-ant-..."        # the OPERATOR's key — funds the demo; omit to keep it OFF
+supabase secrets set DEMO_PROVIDER="anthropic"        # optional; default anthropic (anthropic|openai|kimi|openrouter|gemini)
+supabase secrets set DEMO_MODEL="claude-sonnet-4-0"   # optional; default per provider
+```
+Deploy the function (`supabase functions deploy demo-eval`) for the feature to exist at all.
 
 ## 4. Stripe
 1. Create two recurring Products/Prices (Pro, Studio); copy the price IDs into the secrets above.

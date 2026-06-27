@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
 import { startCheckout, openBillingPortal } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
+import { runDemoEval } from '../lib/demo';
 import { getCv, saveCv, getSavedProviders, saveProviderKey, validateProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
 import RoleDetail from './RoleDetail';
@@ -73,6 +74,12 @@ export default function Dashboard() {
   const [evalBusy, setEvalBusy] = useState(false);
   const [evalMsg, setEvalMsg] = useState<string | null>(null);
 
+  // keyless "try a sample score" demo (operator-funded; off → button hides)
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoErr, setDemoErr] = useState<string | null>(null);
+  const [demoReport, setDemoReport] = useState<string | null>(null);
+  const [demoOff, setDemoOff] = useState(false);
+
   // Stable handlers so the modals' focus-trap/scroll-lock effects don't tear down on parent re-render.
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeRole = useCallback(() => setSelectedRole(null), []);
@@ -129,6 +136,15 @@ export default function Dashboard() {
     reload();
   };
 
+  const tryDemo = async () => {
+    setDemoBusy(true); setDemoErr(null);
+    const r = await runDemoEval();
+    setDemoBusy(false);
+    if (r.disabled) { setDemoOff(true); return; } // operator hasn't funded the demo → hide silently
+    if (r.error) { setDemoErr(r.error); return; }
+    setDemoReport(r.markdown ?? null);
+  };
+
   return (
     <div className="min-h-full bg-canvas text-ink">
       <header className="flex items-center justify-between border-b border-hairline px-6 py-5 md:px-12">
@@ -171,7 +187,22 @@ export default function Dashboard() {
               <li className="flex items-center gap-2">{hasCv ? <Check size={16} className="text-success" /> : <span className="w-4 text-ink-faint">2.</span>}<span className={hasCv ? 'text-ink-faint line-through' : 'text-ink'}>Paste your CV</span></li>
               <li className="flex items-center gap-2"><span className="w-4 text-ink-faint">3.</span><span className="text-ink">Paste a job URL below to score it</span></li>
             </ol>
-            <button onClick={() => setShowSettings(true)} className="mt-4 min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Open Settings</button>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button onClick={() => setShowSettings(true)} className="min-h-11 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Open Settings</button>
+              {!hasKey && !demoOff && (
+                <button onClick={tryDemo} disabled={demoBusy} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-hairline-strong px-5 py-2 text-sm font-medium text-ink hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                  <Sparkles size={16} /> {demoBusy ? 'Scoring a sample…' : 'Try a sample score on us →'}
+                </button>
+              )}
+            </div>
+            {demoErr && <p role="alert" className="mt-3 text-sm text-danger">{demoErr}</p>}
+            {demoReport && (
+              <div className="mt-4 rounded-xl border border-hairline bg-surface-2 p-5">
+                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-ink"><Sparkles size={15} className="text-accent" /> Your sample score</div>
+                <div className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{demoReport}</div>
+                <button onClick={() => setShowSettings(true)} className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-accent hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Add your key to score real roles →</button>
+              </div>
+            )}
           </div>
         )}
 
