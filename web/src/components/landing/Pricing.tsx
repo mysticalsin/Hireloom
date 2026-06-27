@@ -4,22 +4,23 @@ import { Reveal } from './Reveal';
 
 const TIERS = [
   {
-    name: 'Free', price: '$0', cadence: 'forever', highlight: false,
+    name: 'Free', price: '$0', cadence: 'forever', highlight: false, comingSoon: false,
     blurb: 'Bring your own key and score your search.',
     features: ['10 evaluations / month', 'Truthful tailoring (3 packages/mo)', 'One unified pipeline', 'Your own AI key — no markup'],
     cta: 'Start free',
   },
   {
-    name: 'Pro', price: '$29', cadence: '/month', highlight: true,
+    name: 'Pro', price: '$29', cadence: '/month', highlight: true, comingSoon: false,
     blurb: 'Unlimited scoring, inbox signals, assisted apply.',
     features: ['Unlimited evaluations', 'Unlimited tailored packages', 'Gmail inbox signals', 'Assisted apply (draft answers)', 'Priority support'],
     cta: 'Go Pro',
   },
   {
-    name: 'Studio', price: '$79', cadence: '/month', highlight: false,
-    blurb: 'The full atelier — autopilot + second brain.',
-    features: ['Everything in Pro', 'Search autopilot', 'Obsidian Second Brain', 'Multi-profile workspaces'],
-    cta: 'Go Studio',
+    // Not yet built — sold as "coming soon" (no checkout) until the features ship.
+    name: 'Studio', price: '$79', cadence: '/month', highlight: false, comingSoon: true,
+    blurb: 'Coming soon — the full atelier.',
+    features: ['Everything in Pro', 'Search autopilot (soon)', 'Obsidian Second Brain (soon)', 'Multi-profile workspaces (soon)'],
+    cta: 'Join the waitlist',
   },
 ];
 
@@ -49,8 +50,9 @@ export function Pricing({ onStart }: { onStart: () => void }) {
                 ))}
               </ul>
               <button
-                onClick={onStart}
-                className={`mt-6 rounded-full px-5 py-2.5 text-sm font-medium transition-transform duration-200 ease-atelier active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas ${t.highlight ? 'bg-accent text-on-accent' : 'border border-hairline-strong text-ink hover:bg-surface-2'}`}
+                onClick={t.comingSoon ? undefined : onStart}
+                disabled={t.comingSoon}
+                className={`mt-6 rounded-full px-5 py-2.5 text-sm font-medium transition-transform duration-200 ease-atelier active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas ${t.comingSoon ? 'cursor-not-allowed border border-hairline text-ink-faint' : t.highlight ? 'bg-accent text-on-accent' : 'border border-hairline-strong text-ink hover:bg-surface-2'}`}
               >
                 {t.cta}
               </button>

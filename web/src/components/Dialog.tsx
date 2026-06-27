@@ -11,8 +11,8 @@ interface DialogProps {
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 // Accessible modal: role=dialog + aria-modal + aria-labelledby, focus trap, Escape to
-// close, focus restored to the opener, body scroll locked. (a11y P1: AuthModal already
-// inlines this; SettingsPanel + RoleDetail route through here.)
+// close, focus restored to the opener, body scroll locked. Settings routes through here;
+// AuthModal + RoleDetail apply the same guarantees via the useFocusTrap hook.
 export default function Dialog({ title, onClose, children, className }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();

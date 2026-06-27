@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 interface AuthModalProps {
   mode: 'signin' | 'signup';
@@ -20,16 +21,13 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const firstField = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const isSignup = mode === 'signup';
 
-  // Autofocus the first field; Escape closes (a11y: 2.1.2 / focus order).
-  useEffect(() => {
-    firstField.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Trap Tab + Escape + restore focus; autofocus the first field on open.
+  useFocusTrap(panelRef, onClose);
+  useEffect(() => { firstField.current?.focus(); }, []);
 
   const reset = () => { setError(null); setNotice(null); };
 
@@ -60,7 +58,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="liquid-glass relative w-full max-w-md rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
+      <div ref={panelRef} className="liquid-glass relative w-full max-w-md rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
         <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80">
           <X size={20} />
         </button>

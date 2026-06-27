@@ -55,7 +55,7 @@ jobs:
       - name: Type-check edge functions
         run: deno check supabase/functions/**/*.ts
       - name: Unit tests (entitlement twin, pure logic)
-        run: deno test --allow-none supabase/tests/
+        run: deno test supabase/tests/
 
   rls-isolation:
     # Proves tenant isolation + the paywall lockdown (migration 0005) against a real

@@ -36,16 +36,11 @@ Deno.serve(async (req) => {
     return new Response('bad request', { status: 400 }); // no detail to client
   }
 
-  // Idempotency: record this event id; a duplicate (replay) is skipped.
-  const { error: dupErr } = await admin.from('stripe_events')
-    .insert({ id: event.id, type: event.type, created: event.created });
-  if (dupErr) {
-    // 23505 unique_violation → already processed
-    // deno-lint-ignore no-explicit-any
-    if ((dupErr as any).code === '23505') return ok({ duplicate: true });
-    console.error('stripe_events insert failed:', dupErr.message);
-    return new Response('error', { status: 500 });
-  }
+  // Idempotency: skip if this event id was already FULLY processed. The event is
+  // recorded only AFTER a successful upsert (below), so a failed upsert is retried by
+  // Stripe instead of being silently swallowed by the dedup row.
+  const { data: seen } = await admin.from('stripe_events').select('id').eq('id', event.id).maybeSingle();
+  if (seen) return ok({ duplicate: true });
 
   // checkout.session.completed only grants access when actually paid.
   if (event.type === 'checkout.session.completed') {
@@ -76,5 +71,10 @@ Deno.serve(async (req) => {
     if (error) { console.error('subscription upsert failed:', error.message); return new Response('error', { status: 500 }); }
   }
 
+  // Record the event only AFTER successful processing (a failed upsert above returned 500
+  // WITHOUT recording, so Stripe retries it). The unique PK guards a concurrent double-deliver.
+  // deno-lint-ignore no-explicit-any
+  const { error: recErr } = await admin.from('stripe_events').insert({ id: event.id, type: event.type, created: event.created });
+  if (recErr && (recErr as any).code !== '23505') console.error('stripe_events record failed:', recErr.message);
   return ok();
 });

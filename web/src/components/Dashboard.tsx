@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon } from 'lucide-react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, Check } from 'lucide-react';
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
@@ -34,6 +34,8 @@ export default function Dashboard() {
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxMsg, setInboxMsg] = useState<string | null>(null);
   const [needsGmail, setNeedsGmail] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  const [hasCv, setHasCv] = useState(false);
 
   const syncInbox = async () => {
     setInboxBusy(true); setInboxMsg('Reading inbox…'); setNeedsGmail(false);
@@ -54,8 +56,11 @@ export default function Dashboard() {
   async function reload() {
     setLoading(true); setLoadErr(null);
     try {
-      const [s, u, r] = await Promise.all([getSubscription(), getUsage(), listRoles()]);
-      setSub(s); setUsed(u); setRoles(r);
+      const [s, u, r, providers, cv] = await Promise.all([
+        getSubscription(), getUsage(), listRoles(),
+        getSavedProviders().catch(() => [] as string[]), getCv().catch(() => ''),
+      ]);
+      setSub(s); setUsed(u); setRoles(r); setHasKey(providers.length > 0); setHasCv(!!cv.trim());
     } catch {
       // Never let a failed load read as "no roles" / "free plan" / "0 used".
       setLoadErr('We couldn’t load your atelier. Check your connection and retry.');
@@ -130,12 +135,25 @@ export default function Dashboard() {
           <Card icon={<Briefcase size={18} />} label="Roles tracked"><span className="text-2xl font-semibold">{loading ? '—' : roles.length}</span></Card>
         </div>
 
+        {!loading && (!hasKey || !hasCv) && (
+          <div className="mb-8 rounded-2xl border border-white/15 bg-white/[0.03] p-6">
+            <h2 className="mb-1 text-lg font-semibold">Get your first score in 3 steps</h2>
+            <p className="mb-4 text-sm text-gray-400">Hireloom runs on your own AI key — your CV and keys stay yours.</p>
+            <ol className="space-y-2 text-sm">
+              <li className="flex items-center gap-2">{hasKey ? <Check size={16} className="text-emerald-400" /> : <span className="w-4 text-gray-500">1.</span>}<span className={hasKey ? 'text-gray-500 line-through' : 'text-gray-200'}>Add your AI provider key</span></li>
+              <li className="flex items-center gap-2">{hasCv ? <Check size={16} className="text-emerald-400" /> : <span className="w-4 text-gray-500">2.</span>}<span className={hasCv ? 'text-gray-500 line-through' : 'text-gray-200'}>Paste your CV</span></li>
+              <li className="flex items-center gap-2"><span className="w-4 text-gray-500">3.</span><span className="text-gray-200">Paste a job URL below to score it</span></li>
+            </ol>
+            <button onClick={() => setShowSettings(true)} className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-medium text-black hover:bg-gray-200">Open Settings</button>
+          </div>
+        )}
+
         {/* New evaluation */}
         <div className="liquid-glass mb-8 rounded-2xl bg-white/[0.03] p-6">
           <div className="mb-3 flex items-center gap-2 text-sm font-medium"><Sparkles size={16} className="text-white" /> Evaluate a role</div>
           <form onSubmit={evaluate} className="flex flex-col gap-3 sm:flex-row">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste a job URL or the full JD text…" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm outline-none focus:border-white/40" />
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-3 text-sm outline-none">
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Paste a job URL or the full JD text…" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900">
               {PROVIDERS.map((p) => <option key={p} value={p} className="bg-gray-900">{p}</option>)}
             </select>
             <button type="submit" disabled={evalBusy} className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black transition-colors hover:bg-gray-200 disabled:opacity-50">{evalBusy ? 'Working…' : 'Evaluate'}</button>
@@ -144,12 +162,11 @@ export default function Dashboard() {
           <p className="mt-2 text-xs text-gray-400">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
         </div>
 
-        {plan !== 'studio' && (
+        {plan === 'free' && (
           <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5">
-            <span className="text-sm text-gray-300">{plan === 'free' ? 'You’re on Free. Upgrade for unlimited evaluations, inbox signals, and assisted apply.' : 'You’re on Pro. Go Studio for autopilot + the Second Brain.'}</span>
+            <span className="text-sm text-gray-300">You’re on Free. Upgrade to Pro for unlimited evaluations, inbox signals, and assisted apply.</span>
             <div className="ml-auto flex gap-3">
-              {plan === 'free' && <button onClick={() => upgrade('pro')} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-black hover:bg-gray-200">Upgrade to Pro</button>}
-              <button onClick={() => upgrade('studio')} className="liquid-glass rounded-full px-5 py-2 text-sm font-medium">Upgrade to Studio</button>
+              <button onClick={() => upgrade('pro')} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-black hover:bg-gray-200">Upgrade to Pro</button>
             </div>
             {billingMsg && <span className="w-full text-sm text-gray-400">{billingMsg}</span>}
           </div>
@@ -272,10 +289,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         <div className="mb-6">
           <div className="mb-2 text-sm font-medium">AI provider key (BYOK)</div>
           <div className="flex gap-2">
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm">
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900">
               {PROVIDERS.map((p) => <option key={p} value={p} className="bg-gray-900">{p}{saved.includes(p) ? ' ✓' : ''}</option>)}
             </select>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/40" />
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
             <button onClick={saveKey} className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black hover:bg-gray-200">Save</button>
           </div>
           <p className="mt-2 text-xs text-gray-500">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
@@ -293,7 +310,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="mb-2">
           <div className="mb-2 text-sm font-medium">Your CV (markdown)</div>
-          <textarea value={cv} onChange={(e) => setCv(e.target.value)} rows={6} placeholder="Paste your CV in markdown…" className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/40" />
+          <textarea value={cv} onChange={(e) => setCv(e.target.value)} rows={6} placeholder="Paste your CV in markdown…" className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900" />
           <button onClick={saveResume} className="mt-2 liquid-glass rounded-full px-4 py-2 text-sm font-medium">Save CV</button>
         </div>
 

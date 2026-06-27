@@ -1,10 +1,11 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { X, ExternalLink, Sparkles, Download, FileDown, ClipboardCheck, Copy, Send } from 'lucide-react';
 import { getReportForRole, getTailoring, getApplyAnswers, type RoleRow, type Tailoring, type ApplyAnswers } from '../lib/db';
 import { runTailor } from '../lib/tailor';
 import { runApplyAssist } from '../lib/apply';
 import { openPrint, cvHtml, coverHtml } from '../lib/print';
 import { useAuth } from '../auth/AuthProvider';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 function download(name: string, text: string) {
   const blob = new Blob([text], { type: 'text/markdown' });
@@ -56,6 +57,8 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, onClose);
 
   useEffect(() => {
     let alive = true;
@@ -66,12 +69,6 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [role.id]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const draftApply = async () => {
     setApplyBusy(true); setApplyMsg('Drafting answers… 20–40s.');
@@ -93,8 +90,8 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="rd-title">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="liquid-glass relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
-        <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 text-gray-400 hover:text-white"><X size={20} /></button>
+      <div ref={panelRef} className="liquid-glass relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
+        <button onClick={onClose} autoFocus aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"><X size={20} /></button>
 
         <div className="mb-1 flex items-center gap-3">
           <h2 id="rd-title" className="text-2xl font-semibold tracking-tight">{role.company}</h2>
