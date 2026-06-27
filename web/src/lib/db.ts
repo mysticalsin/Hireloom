@@ -63,6 +63,22 @@ export async function getTailoring(roleId: string): Promise<Tailoring | null> {
   return unwrap((data as { content: Tailoring } | null)?.content ?? null, error);
 }
 
+export interface RecruiterScore {
+  verdict: 'advance' | 'borderline' | 'reject';
+  headline: string;
+  sixSecondScan: string;
+  criteria: { name: string; required: boolean; met: 'yes' | 'partial' | 'no'; note: string }[];
+  redFlags: string[];
+  gapsToClose: string[];
+  fairnessNote: string;
+}
+
+export async function getRecruiterScore(roleId: string): Promise<RecruiterScore | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('recruiter_scores').select('content').eq('role_id', roleId).maybeSingle();
+  return unwrap((data as { content: RecruiterScore } | null)?.content ?? null, error);
+}
+
 export interface ApplyAnswers { answers: { question: string; answer: string }[]; }
 
 export async function getApplyAnswers(roleId: string): Promise<ApplyAnswers | null> {

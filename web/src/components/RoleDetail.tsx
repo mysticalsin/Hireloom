@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { X, ExternalLink, Sparkles, Download, FileDown, ClipboardCheck, Copy, Send } from 'lucide-react';
-import { getReportForRole, getTailoring, getApplyAnswers, type RoleRow, type Tailoring, type ApplyAnswers } from '../lib/db';
+import { X, ExternalLink, Sparkles, Download, FileDown, ClipboardCheck, Copy, Send, Gauge, Check, Minus } from 'lucide-react';
+import { getReportForRole, getTailoring, getApplyAnswers, getRecruiterScore, type RoleRow, type Tailoring, type ApplyAnswers, type RecruiterScore } from '../lib/db';
 import { runTailor } from '../lib/tailor';
 import { runApplyAssist } from '../lib/apply';
+import { runRecruiterScore } from '../lib/recruiter';
 import { openPrint, cvHtml, coverHtml } from '../lib/print';
 import { useAuth } from '../auth/AuthProvider';
 import { useFocusTrap } from '../lib/useFocusTrap';
@@ -43,6 +44,55 @@ function renderMarkdown(text: string): JSX.Element[] {
   return out;
 }
 
+// Recruiter scorecard verdict → tokenized badge (success/warning/danger).
+const VERDICT: Record<RecruiterScore['verdict'], { label: string; cls: string }> = {
+  advance: { label: 'Advance', cls: 'border-success text-success' },
+  borderline: { label: 'Borderline', cls: 'border-warning text-warning' },
+  reject: { label: 'Reject', cls: 'border-danger text-danger' },
+};
+function metIcon(met: RecruiterScore['criteria'][number]['met']) {
+  if (met === 'yes') return <Check size={14} className="text-success" />;
+  if (met === 'partial') return <Minus size={14} className="text-warning" />;
+  return <X size={14} className="text-danger" />;
+}
+function RecruiterScorecard({ score }: { score: RecruiterScore }) {
+  const v = VERDICT[score.verdict] ?? VERDICT.borderline;
+  return (
+    <div className="rounded-lg border border-hairline bg-surface p-4">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${v.cls}`}>{v.label}</span>
+        <p className="font-semibold text-ink">{score.headline}</p>
+      </div>
+      <p className="mb-3 text-ink-muted">{score.sixSecondScan}</p>
+      <ul className="mb-3 space-y-1.5">
+        {(score.criteria ?? []).map((c, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm">
+            <span className="mt-0.5 shrink-0">{metIcon(c.met)}</span>
+            <span className="text-ink-muted">
+              <span className="font-medium text-ink">{c.name}</span>
+              {c.required && <span className="ml-1.5 rounded border border-hairline-strong px-1 py-0.5 text-[10px] uppercase tracking-wide text-ink-faint">required</span>}
+              {c.note && <span className="block text-ink-faint">{c.note}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {(score.redFlags ?? []).length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium text-danger">Red flags</p>
+          <ul>{score.redFlags.map((f, i) => <li key={i} className="ml-5 list-disc text-ink-muted">{f}</li>)}</ul>
+        </div>
+      )}
+      {(score.gapsToClose ?? []).length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-medium text-ink">Gaps to close</p>
+          <ul>{score.gapsToClose.map((g, i) => <li key={i} className="ml-5 list-disc text-ink-muted">{g}</li>)}</ul>
+        </div>
+      )}
+      {score.fairnessNote && <p className="mt-3 border-t border-hairline pt-3 text-xs text-ink-faint">{score.fairnessNote}</p>}
+    </div>
+  );
+}
+
 export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: () => void }) {
   const { user } = useAuth();
   const name = (user?.user_metadata?.full_name as string) || user?.email || 'Candidate';
@@ -56,6 +106,9 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   const [apply, setApply] = useState<ApplyAnswers | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [recruiter, setRecruiter] = useState<RecruiterScore | null>(null);
+  const [rsBusy, setRsBusy] = useState(false);
+  const [rsMsg, setRsMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, onClose);
@@ -63,8 +116,8 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
-    Promise.all([getReportForRole(role.id), getTailoring(role.id), getApplyAnswers(role.id)])
-      .then(([r, t, a]) => { if (!alive) return; setReport(r?.markdown ?? null); setTailoring(t); setApply(a); })
+    Promise.all([getReportForRole(role.id), getTailoring(role.id), getApplyAnswers(role.id), getRecruiterScore(role.id)])
+      .then(([r, t, a, rs]) => { if (!alive) return; setReport(r?.markdown ?? null); setTailoring(t); setApply(a); setRecruiter(rs); })
       .catch(() => { if (alive) setError('Could not load this role. Close and reopen, or retry.'); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -85,6 +138,14 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
     setTailorBusy(false);
     if (res.error) { setTailorMsg(res.error); return; }
     setTailoring(res.content ?? null); setTailorMsg(null);
+  };
+
+  const scoreCv = async () => {
+    setRsBusy(true); setRsMsg('Scoring through a recruiter lens… 20–40s.');
+    const res = await runRecruiterScore(role.id);
+    setRsBusy(false);
+    if (res.error) { setRsMsg(res.error); return; }
+    setRecruiter(res.content ?? null); setRsMsg(null);
   };
 
   return (
@@ -149,6 +210,19 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
               </div>
             )}
             {!tailoring && !tailorBusy && <p className="text-xs text-ink-muted">Generate a truthful CV + cover letter tuned to this role (uses your saved key + CV).</p>}
+          </div>
+
+          {/* Recruiter scorecard */}
+          <div className="mt-6 border-t border-hairline pt-5">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-ink"><Gauge size={15} className="text-accent" /> Recruiter scorecard</span>
+              <button onClick={scoreCv} disabled={rsBusy} className="min-h-11 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                {rsBusy ? 'Scoring…' : recruiter ? 'Re-score' : 'Recruiter scorecard'}
+              </button>
+            </div>
+            {rsMsg && <p className="mb-3 text-xs text-ink-muted">{rsMsg}</p>}
+            {recruiter && <RecruiterScorecard score={recruiter} />}
+            {!recruiter && !rsBusy && <p className="text-xs text-ink-muted">See how a hiring manager would screen your CV against this role — honest, bias-free (uses your saved key + CV).</p>}
           </div>
 
           {/* Assisted apply */}
