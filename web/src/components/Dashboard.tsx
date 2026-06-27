@@ -3,7 +3,7 @@ import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIco
 import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
-import { startCheckout } from '../lib/billing';
+import { startCheckout, openBillingPortal } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
 import { getCv, saveCv, getSavedProviders, saveProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
@@ -80,6 +80,11 @@ export default function Dashboard() {
     const r = await startCheckout(target);
     if (r.error) setBillingMsg(r.error);
   };
+  const manageBilling = async () => {
+    setBillingMsg('Opening billing portal…');
+    const r = await openBillingPortal();
+    if (r.error) setBillingMsg(r.error);
+  };
 
   const evaluate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,7 +141,7 @@ export default function Dashboard() {
             <button type="submit" disabled={evalBusy} className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black transition-colors hover:bg-gray-200 disabled:opacity-50">{evalBusy ? 'Working…' : 'Evaluate'}</button>
           </form>
           {evalMsg && <p className="mt-3 text-sm text-gray-400">{evalMsg}</p>}
-          <p className="mt-2 text-xs text-gray-600">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
+          <p className="mt-2 text-xs text-gray-400">Runs on your saved {provider} key (Settings). Score, tailor, track — truthfully.</p>
         </div>
 
         {plan !== 'studio' && (
@@ -147,6 +152,14 @@ export default function Dashboard() {
               <button onClick={() => upgrade('studio')} className="liquid-glass rounded-full px-5 py-2 text-sm font-medium">Upgrade to Studio</button>
             </div>
             {billingMsg && <span className="w-full text-sm text-gray-400">{billingMsg}</span>}
+          </div>
+        )}
+
+        {plan !== 'free' && (
+          <div className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5 text-sm text-gray-400">
+            <span>Manage your subscription, payment method, and invoices.</span>
+            <button onClick={manageBilling} className="liquid-glass ml-auto rounded-full px-5 py-2 font-medium text-white">Manage billing</button>
+            {billingMsg && <span className="w-full text-gray-400">{billingMsg}</span>}
           </div>
         )}
 
@@ -169,7 +182,7 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-          {!signals && !inboxMsg && <p className="text-xs text-gray-600">Read-only Gmail scan for responses, rejections, interviews, and offers. Runs in your browser on your Google token.</p>}
+          {!signals && !inboxMsg && <p className="text-xs text-gray-400">Read-only Gmail scan for responses, rejections, interviews, and offers. Runs in your browser on your Google token.</p>}
         </div>
 
         <h2 className="mb-3 text-lg font-semibold">Roles</h2>
@@ -298,7 +311,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               </span>
             )}
           </div>
-          <p className="mt-2 text-xs text-gray-600">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
+          <p className="mt-2 text-xs text-gray-400">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
         </div>
 
         {msg && <p role="status" className="mt-4 text-sm text-emerald-400">{msg}</p>}

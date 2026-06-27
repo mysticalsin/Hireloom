@@ -142,7 +142,7 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
                 <p className="mt-3 text-xs text-gray-500">Cover letter ready — download above. Print to PDF from your browser.</p>
               </div>
             )}
-            {!tailoring && !tailorBusy && <p className="text-xs text-gray-600">Generate a truthful CV + cover letter tuned to this role (uses your saved key + CV).</p>}
+            {!tailoring && !tailorBusy && <p className="text-xs text-gray-400">Generate a truthful CV + cover letter tuned to this role (uses your saved key + CV).</p>}
           </div>
 
           {/* Assisted apply */}
@@ -168,10 +168,10 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
                     <p className="text-sm text-gray-400">{qa.answer}</p>
                   </div>
                 ))}
-                <p className="text-xs text-gray-600">Review every answer, then submit on the posting yourself. Hireloom never auto-submits.</p>
+                <p className="text-xs text-gray-400">Review every answer, then submit on the posting yourself. Hireloom never auto-submits.</p>
               </div>
             )}
-            {!apply && !applyBusy && <p className="text-xs text-gray-600">Draft truthful answers to the common application questions, ready to review and paste. Pro feature.</p>}
+            {!apply && !applyBusy && <p className="text-xs text-gray-400">Draft truthful answers to the common application questions, ready to review and paste. Pro feature.</p>}
           </div>
         </div>
       </div>
