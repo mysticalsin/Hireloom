@@ -23,8 +23,11 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, onClose: () => 
     };
 
     document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden'; // lock page scroll behind the modal
     return () => {
       document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
       opener?.focus?.();
     };
   }, [ref, onClose]);

@@ -1,11 +1,11 @@
 import { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import SetNewPassword from './components/SetNewPassword';
+import Landing from './components/Landing';
 
-// Code-split: logged-out visitors load only the landing chunk; the authed dashboard
-// (and its deps) load on demand after sign-in.
+// Dashboard is the heavy authed surface — load it only after sign-in. The public
+// Landing is eager so the marketing LCP paints without a chunk round-trip.
 const Dashboard = lazy(() => import('./components/Dashboard'));
-const Landing = lazy(() => import('./components/Landing'));
 
 function Loading() {
   return <div className="flex h-full items-center justify-center bg-canvas text-ink-faint">Loading…</div>;
@@ -17,12 +17,15 @@ function Shell() {
   if (loading) return <Loading />;
   // Arrived from a reset email → set a new password (takes priority).
   if (passwordRecovery) return <SetNewPassword />;
-  // Signed in → the app. Signed out → the cinematic landing.
-  return (
-    <Suspense fallback={<Loading />}>
-      {session ? <Dashboard /> : <Landing />}
-    </Suspense>
-  );
+  // Signed in → the app (lazy). Signed out → the cinematic landing (eager).
+  if (session) {
+    return (
+      <Suspense fallback={<Loading />}>
+        <Dashboard />
+      </Suspense>
+    );
+  }
+  return <Landing />;
 }
 
 export default function App() {

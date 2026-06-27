@@ -20,7 +20,7 @@ const TIERS = [
     name: 'Studio', price: '$79', cadence: '/month', highlight: false, comingSoon: true,
     blurb: 'Coming soon — the full atelier.',
     features: ['Everything in Pro', 'Search autopilot (soon)', 'Obsidian Second Brain (soon)', 'Multi-profile workspaces (soon)'],
-    cta: 'Join the waitlist',
+    cta: 'Coming soon',
   },
 ];
 

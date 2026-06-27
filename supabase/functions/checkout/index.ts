@@ -29,6 +29,8 @@ Deno.serve(async (req) => {
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
   const { plan } = await req.json().catch(() => ({}));
+  // Studio is not shipped yet — hard-block it server-side regardless of env config.
+  if (plan === 'studio') return jsonResponse({ error: 'Studio is coming soon.' }, 400, origin);
   const price = PRICE[plan as string];
   if (!price) return jsonResponse({ error: 'unknown or unconfigured plan' }, 400, origin);
 

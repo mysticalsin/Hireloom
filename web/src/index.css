@@ -14,7 +14,7 @@
     --border-strong: rgba(255, 255, 255, 0.16);
     --text: #f5f4f1;
     --text-muted: #a6a5a3;
-    --text-faint: #6e6d6b;
+    --text-faint: #8b8a87;
     --accent: #e0a458;
     --accent-hover: #efb770;
     --accent-press: #c98f42;
@@ -35,9 +35,9 @@
     --border-strong: rgba(10, 10, 11, 0.2);
     --text: #1a1a1c;
     --text-muted: #57565a;
-    --text-faint: #8a8a8e;
-    --accent: #b5772a;
-    --accent-hover: #9c6420;
+    --text-faint: #6b6a70;
+    --accent: #8f5e1f;
+    --accent-hover: #7a4f18;
     --accent-press: #824f16;
     --on-accent: #ffffff;
     --success: #15803d;

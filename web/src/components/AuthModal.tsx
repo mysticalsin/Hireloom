@@ -27,7 +27,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
 
   // Trap Tab + Escape + restore focus; autofocus the first field on open.
   useFocusTrap(panelRef, onClose);
-  useEffect(() => { firstField.current?.focus(); }, []);
+  useEffect(() => { firstField.current?.focus(); }, [mode, view]);
 
   const reset = () => { setError(null); setNotice(null); };
 
