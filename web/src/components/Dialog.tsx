@@ -46,7 +46,7 @@ export default function Dialog({ title, onClose, children, className }: DialogPr
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={onClose} />
-      <div ref={panelRef} tabIndex={-1} className={`relative w-full rounded-2xl border border-hairline-strong bg-surface p-7 text-ink shadow-md outline-none ${className ?? 'max-w-lg'}`}>
+      <div ref={panelRef} tabIndex={-1} className={`relative max-h-[85vh] w-full overflow-y-auto rounded-2xl border border-hairline-strong bg-surface p-7 text-ink shadow-md outline-none ${className ?? 'max-w-lg'}`}>
         <div className="mb-5 flex items-start justify-between gap-4">
           <h2 id={titleId} className="font-display text-xl font-semibold tracking-tight">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">

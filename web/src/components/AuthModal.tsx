@@ -58,7 +58,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: AuthModalProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={onClose} />
-      <div ref={panelRef} className="relative w-full max-w-md rounded-2xl border border-hairline-strong bg-surface p-7 text-ink shadow-md">
+      <div ref={panelRef} className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-hairline-strong bg-surface p-7 text-ink shadow-md">
         <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <X size={20} />
         </button>
