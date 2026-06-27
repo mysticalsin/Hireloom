@@ -1,19 +1,15 @@
 // Supabase Edge Function: evaluate a job posting on the user's BYO key, then
-// persist the role + report so the dashboard reflects it. Self-contained (Deno):
-// quota → fetch JD → provider call → parse → write → meter. Mirrors the Node engine.
+// persist the role + report. Self-contained (Deno). Hardened (docs/AUDIT-REPORT.md P0):
+// SSRF-safe JD fetch, atomic quota (reserve→refund), shared provider path (key in headers),
+// origin-pinned CORS, sanitized errors.
 //
 // Deploy: supabase functions deploy evaluate
-// (No extra secrets; uses the caller's JWT + their stored provider key.)
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { preflight, jsonResponse, errorResponse } from '../_shared/http.ts';
+import { callProvider, defaultModel, clientLlmMessage, LLM_PROVIDERS } from '../_shared/llm.ts';
+import { safeFetchText } from '../_shared/safe-fetch.ts';
 
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json', ...cors } });
-
-const PLAN_EVAL_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
+const PLAN_EVAL_CAP: Record<string, number> = { free: 10, pro: 2_147_483_647, studio: 2_147_483_647 };
 const SUMMARY_RE = /---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/;
 
 const SYSTEM = (cv: string) => `You are Hireloom, an AI job-search assistant. Evaluate the job below against the candidate's CV with a structured A-G analysis (role summary, CV match, level & strategy, comp & demand [estimate from training data], personalization plan, interview plan, posting legitimacy). Be honest; never invent experience.
@@ -46,72 +42,70 @@ function htmlToText(html: string) {
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&#x27;/g, "'").replace(/&nbsp;/g, ' ')
     .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
+
+// Pasted text → returned as-is. Greenhouse/Lever → sanctioned APIs (fixed hosts, safe).
+// Any other URL → SSRF-safe fetch (https only, no private IPs, manual redirects, capped).
 async function fetchJd(input: string): Promise<string> {
   if (!/^https?:\/\//i.test(input)) return input.trim();
   let m = input.match(/(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io\/([^/?#]+)\/jobs\/(\d+)/);
   if (m) { const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}?content=true`); const j = await r.json(); return htmlToText(j.content || ''); }
   m = input.match(/jobs\.lever\.co\/([^/?#]+)\/([0-9a-fA-F-]{8,})/);
   if (m) { const r = await fetch(`https://api.lever.co/v0/postings/${m[1]}/${m[2]}`); const j = await r.json(); return j.descriptionPlain || htmlToText(j.description || ''); }
-  const r = await fetch(input); return htmlToText(await r.text());
-}
-
-async function callProvider(provider: string, model: string, apiKey: string, system: string, prompt: string): Promise<string> {
-  if (provider === 'anthropic') {
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model, max_tokens: 4096, system, messages: [{ role: 'user', content: prompt }] }) });
-    if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const j = await r.json(); return (j.content || []).filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('');
-  }
-  if (provider === 'gemini') {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 4096 } }) });
-    if (!r.ok) throw new Error(`gemini ${r.status}`);
-    const j = await r.json(); return (j.candidates?.[0]?.content?.parts || []).map((p: { text: string }) => p.text).join('');
-  }
-  // openai-compatible (kimi | openrouter)
-  const base = provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : (Deno.env.get('KIMI_BASE_URL') || 'https://api.moonshot.cn/v1');
-  const r = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }) });
-  if (!r.ok) throw new Error(`${provider} ${r.status}`);
-  const j = await r.json(); return j.choices?.[0]?.message?.content || '';
+  return htmlToText(await safeFetchText(input));
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+  const origin = req.headers.get('Origin');
+  if (req.method === 'OPTIONS') return preflight(req);
+  if (req.method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405, origin);
 
   const authHeader = req.headers.get('Authorization') ?? '';
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return json({ error: 'unauthorized' }, 401);
+  if (!user) return jsonResponse({ error: 'unauthorized' }, 401, origin);
 
   const { input, provider = 'anthropic', model } = await req.json().catch(() => ({}));
-  if (!input) return json({ error: 'input (URL or JD text) required' }, 400);
+  if (!input || typeof input !== 'string') return jsonResponse({ error: 'input (URL or JD text) required' }, 400, origin);
+  if (!LLM_PROVIDERS.includes(provider)) return jsonResponse({ error: 'unsupported provider' }, 400, origin);
 
-  // Quota (Free = 10/mo)
-  const period = new Date().toISOString().slice(0, 7);
-  const [{ data: sub }, { data: usage }, { data: apiKey }, { data: profile }] = await Promise.all([
+  const [{ data: sub }, { data: apiKey }, { data: profile }] = await Promise.all([
     supabase.from('subscriptions').select('plan').maybeSingle(),
-    supabase.from('usage_counters').select('count').eq('period', period).eq('metric', 'evaluationsPerMonth').maybeSingle(),
     supabase.rpc('get_provider_key', { p_provider: provider }), // decrypts from Vault, scoped to the caller
     supabase.from('profiles').select('cv_md').maybeSingle(),
   ]);
   const plan = sub?.plan || 'free';
-  if ((usage?.count || 0) >= (PLAN_EVAL_CAP[plan] ?? 10)) return json({ error: 'quota_exceeded', plan }, 402);
-  if (!apiKey) return json({ error: `No ${provider} API key saved. Add it in Settings.` }, 400);
+  if (!apiKey) return jsonResponse({ error: `No ${provider} API key saved. Add it in Settings.` }, 400, origin);
 
-  const defaultModel = provider === 'anthropic' ? 'claude-sonnet-4-0' : provider === 'gemini' ? 'gemini-2.0-flash' : 'moonshot-v1-128k';
+  // Fetch the JD first — a bad/blocked URL is a 400 and must NOT consume quota.
+  let jd: string;
   try {
-    const jd = await fetchJd(input);
-    const text = await callProvider(provider, model || defaultModel, apiKey, SYSTEM(profile?.cv_md || ''), `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jd}`);
+    jd = await fetchJd(input);
+  } catch (err) {
+    return errorResponse(400, 'That URL could not be fetched safely. Paste the job description text instead.', err, origin);
+  }
+  if (!jd || jd.length < 30) return jsonResponse({ error: 'Could not extract a job description. Paste the text instead.' }, 400, origin);
+
+  // Atomic quota: reserve a slot BEFORE spending on the LLM; refund if the call fails.
+  const cap = PLAN_EVAL_CAP[plan] ?? 10;
+  const { data: consumed, error: qErr } = await supabase.rpc('consume_quota', { p_metric: 'evaluationsPerMonth', p_cap: cap });
+  if (qErr) return errorResponse(500, 'Could not verify your monthly quota.', qErr, origin);
+  if (consumed === -1) return jsonResponse({ error: 'quota_exceeded', plan }, 402, origin);
+
+  try {
+    const text = await callProvider(provider, model || defaultModel(provider), apiKey, SYSTEM(profile?.cv_md || ''), `\n\nJOB DESCRIPTION TO EVALUATE:\n\n${jd}`);
     const summary = parseSummary(text);
     const scoreNum = parseFloat(summary.score);
     const { data: role, error: roleErr } = await supabase.from('roles').upsert({
       user_id: user.id, dedupe_key: dedupeKey(summary.company, summary.role), company: summary.company, title: summary.role,
-      status: 'Evaluated', score: Number.isFinite(scoreNum) ? scoreNum : null, url: /^https?:/i.test(input) ? input : null, source: 'url', jd_text: jd, updated_at: new Date().toISOString(),
+      status: 'Evaluated', score: Number.isFinite(scoreNum) ? scoreNum : null,
+      url: /^https?:/i.test(input) ? input : null, source: /^https?:/i.test(input) ? 'url' : 'paste',
+      jd_text: jd, updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,dedupe_key' }).select('id').single();
-    if (roleErr) throw new Error(roleErr.message);
+    if (roleErr) throw roleErr;
     await supabase.from('reports').insert({ user_id: user.id, role_id: role.id, markdown: text.replace(SUMMARY_RE, '').trim(), score: Number.isFinite(scoreNum) ? scoreNum : null });
-    await supabase.rpc('increment_usage', { p_metric: 'evaluationsPerMonth', p_n: 1 });
-    return json({ ok: true, role_id: role.id, summary });
+    return jsonResponse({ ok: true, role_id: role.id, summary }, 200, origin);
   } catch (err) {
-    return json({ error: (err as Error).message }, 500);
+    await supabase.rpc('refund_quota', { p_metric: 'evaluationsPerMonth' }).catch(() => {}); // give the slot back
+    return errorResponse(502, clientLlmMessage(err, provider), err, origin);
   }
 });

@@ -44,6 +44,10 @@ test('resolveModel maps aliases, prefixes, slashes, and bare ids', () => {
   assert.deepEqual(resolveModel('anthropic/claude-sonnet-4'), { provider: 'openrouter', model: 'anthropic/claude-sonnet-4' });
   assert.deepEqual(resolveModel('claude-sonnet-4-0'), { provider: 'anthropic', model: 'claude-sonnet-4-0' });
   assert.equal(resolveModel().provider, 'anthropic'); // default
+  assert.deepEqual(resolveModel('openai'), { provider: 'openai', model: 'gpt-4o' });
+  assert.deepEqual(resolveModel('gpt-4o-mini'), { provider: 'openai', model: 'gpt-4o-mini' });
+  assert.deepEqual(resolveModel('gpt-4.1'), { provider: 'openai', model: 'gpt-4.1' }); // heuristic
+  assert.deepEqual(resolveModel('openai:o3-mini'), { provider: 'openai', model: 'o3-mini' });
 });
 
 test('resolveKey prefers explicit arg, falls back to env', () => {
@@ -58,8 +62,8 @@ test('resolveKey prefers explicit arg, falls back to env', () => {
   }
 });
 
-test('PROVIDERS lists the four supported providers', () => {
-  assert.deepEqual([...PROVIDERS].sort(), ['anthropic', 'gemini', 'kimi', 'openrouter']);
+test('PROVIDERS lists the supported providers', () => {
+  assert.deepEqual([...PROVIDERS].sort(), ['anthropic', 'gemini', 'kimi', 'openai', 'openrouter']);
 });
 
 test('anthropic: correct endpoint, headers, body, and parsed output', async () => {
@@ -97,6 +101,20 @@ test('kimi: openai-compatible endpoint, Bearer auth, json mode', async () => {
   assert.deepEqual(out.usage, { inputTokens: 5, outputTokens: 9 });
 });
 
+test('openai: api.openai.com endpoint, Bearer auth, parsed output', async () => {
+  const ff = fakeFetch(OPENAI_RES);
+  const out = await callLLM({
+    provider: 'openai', model: 'gpt-4o', apiKey: 'oa-key',
+    system: 'sys', prompt: 'q', fetchImpl: ff,
+  });
+  const { url, init, body } = ff.calls[0];
+  assert.equal(url, 'https://api.openai.com/v1/chat/completions');
+  assert.equal(init.headers.authorization, 'Bearer oa-key');
+  assert.deepEqual(body.messages[0], { role: 'system', content: 'sys' });
+  assert.deepEqual(body.messages[1], { role: 'user', content: 'q' });
+  assert.equal(out.text, 'hello from kimi'); // OPENAI_RES shape (openai-compatible)
+});
+
 test('openrouter: routes to openrouter.ai with attribution headers', async () => {
   const ff = fakeFetch(OPENAI_RES);
   await callModel('openrouter:meta/llama-3', { apiKey: 'or-key', prompt: 'x', fetchImpl: ff });
@@ -113,8 +131,9 @@ test('gemini: generateContent endpoint with key, systemInstruction, parsed outpu
     provider: 'gemini', model: 'gemini-2.0-flash', apiKey: 'g-key',
     system: 'sys', prompt: 'hi', json: true, fetchImpl: ff,
   });
-  const { url, body } = ff.calls[0];
-  assert.match(url, /\/models\/gemini-2\.0-flash:generateContent\?key=g-key$/);
+  const { url, init, body } = ff.calls[0];
+  assert.match(url, /\/models\/gemini-2\.0-flash:generateContent$/); // key NOT in URL
+  assert.equal(init.headers['x-goog-api-key'], 'g-key');             // key in header
   assert.deepEqual(body.systemInstruction, { parts: [{ text: 'sys' }] });
   assert.deepEqual(body.contents, [{ role: 'user', parts: [{ text: 'hi' }] }]);
   assert.equal(body.generationConfig.responseMimeType, 'application/json');
@@ -161,4 +180,12 @@ test('validateKey returns ok on success and {ok:false} on auth failure', async (
   const bad = await validateKey({ provider: 'anthropic', apiKey: 'bad', fetchImpl: badFf });
   assert.equal(bad.ok, false);
   assert.match(bad.error, /401/);
+});
+
+test('validateKey for openrouter uses a real model (not the literal "openrouter")', async () => {
+  const ff = fakeFetch(OPENAI_RES);
+  const r = await validateKey({ provider: 'openrouter', apiKey: 'or', fetchImpl: ff });
+  assert.equal(r.ok, true);
+  assert.equal(ff.calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
+  assert.notEqual(ff.calls[0].body.model, 'openrouter');
 });

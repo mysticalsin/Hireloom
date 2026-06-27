@@ -1,27 +1,27 @@
-import { useState } from 'react';
+import { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
-import Hero from './components/Hero';
-import AuthModal from './components/AuthModal';
-import Dashboard from './components/Dashboard';
+import SetNewPassword from './components/SetNewPassword';
+
+// Code-split: logged-out visitors load only the landing chunk; the authed dashboard
+// (and its deps) load on demand after sign-in.
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Landing = lazy(() => import('./components/Landing'));
+
+function Loading() {
+  return <div className="flex h-full items-center justify-center bg-canvas text-ink-faint">Loading…</div>;
+}
 
 function Shell() {
-  const { session, loading } = useAuth();
-  const [authMode, setAuthMode] = useState<'signin' | 'signup' | null>(null);
+  const { session, loading, passwordRecovery } = useAuth();
 
-  if (loading) {
-    return <div className="flex h-full items-center justify-center bg-black text-gray-500">Loading…</div>;
-  }
-
+  if (loading) return <Loading />;
+  // Arrived from a reset email → set a new password (takes priority).
+  if (passwordRecovery) return <SetNewPassword />;
   // Signed in → the app. Signed out → the cinematic landing.
-  if (session) return <Dashboard />;
-
   return (
-    <>
-      <Hero onGetStarted={() => setAuthMode('signup')} onSignIn={() => setAuthMode('signin')} />
-      {authMode && (
-        <AuthModal mode={authMode} onClose={() => setAuthMode(null)} onSwitch={(m) => setAuthMode(m)} />
-      )}
-    </>
+    <Suspense fallback={<Loading />}>
+      {session ? <Dashboard /> : <Landing />}
+    </Suspense>
   );
 }
 

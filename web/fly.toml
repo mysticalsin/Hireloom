@@ -1,0 +1,29 @@
+# Fly.io config — Hireloom hosted web (static SPA via nginx).
+# First time:  cd web && fly launch --no-deploy --copy-config
+# Deploy:      fly deploy \
+#                --build-arg VITE_SUPABASE_URL="https://<proj>.supabase.co" \
+#                --build-arg VITE_SUPABASE_ANON_KEY="<anon-key>"
+# (VITE_* are public client values, not secrets. Backend = Supabase; billing = Stripe.)
+app = "hireloom-web"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "3s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

@@ -4,7 +4,7 @@
 // (vault-fed in the hosted platform) with an env-var fallback for local/CLI use.
 // fetch-based — no provider SDKs — so every provider shares one code path.
 //
-// Providers: anthropic | kimi | openrouter | gemini
+// Providers: anthropic | openai | kimi | openrouter | gemini
 //
 //   import { callLLM, resolveModel, validateKey } from './engine/llm/provider.mjs';
 //   const out = await callLLM({ provider: 'anthropic', model: 'claude-sonnet-4-0',
@@ -16,14 +16,16 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const KIMI_DEFAULT_BASE = 'https://api.moonshot.cn/v1';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const OPENAI_BASE = 'https://api.openai.com/v1';
 
-export const PROVIDERS = ['anthropic', 'kimi', 'openrouter', 'gemini'];
+export const PROVIDERS = ['anthropic', 'kimi', 'openrouter', 'gemini', 'openai'];
 
 const ENV_KEY = {
   anthropic: 'ANTHROPIC_API_KEY',
   kimi: 'KIMI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  openai: 'OPENAI_API_KEY',
 };
 
 // User-facing aliases → { provider, model }. Bare/unknown flags fall through to
@@ -37,6 +39,9 @@ const MODEL_ALIASES = {
   'claude-haiku': { provider: 'anthropic', model: 'claude-3-5-haiku-latest' },
   kimi: { provider: 'kimi', model: 'moonshot-v1-128k' },
   gemini: { provider: 'gemini', model: 'gemini-2.0-flash' },
+  openai: { provider: 'openai', model: 'gpt-4o' },
+  'gpt-4o': { provider: 'openai', model: 'gpt-4o' },
+  'gpt-4o-mini': { provider: 'openai', model: 'gpt-4o-mini' },
 };
 
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504, 529]);
@@ -46,7 +51,9 @@ export function resolveModel(flag) {
   if (!flag) return { ...MODEL_ALIASES.claude };
   const f = String(flag).trim();
   if (MODEL_ALIASES[f]) return { ...MODEL_ALIASES[f] };
+  if (f.startsWith('openai:')) return { provider: 'openai', model: f.slice('openai:'.length) };
   if (f.startsWith('openrouter:')) return { provider: 'openrouter', model: f.slice('openrouter:'.length) };
+  if (/^(gpt-|o\d)/i.test(f)) return { provider: 'openai', model: f }; // gpt-4o, o1, o3-mini, ...
   if (f.includes('/')) return { provider: 'openrouter', model: f }; // e.g. "anthropic/claude-sonnet-4"
   return { provider: 'anthropic', model: f }; // bare id → assume an Anthropic model
 }
@@ -78,7 +85,9 @@ function buildAnthropic({ model, key, system, messages, maxTokens, temperature }
 function buildOpenAICompat({ provider, model, key, system, messages, maxTokens, temperature, json, baseUrl }) {
   const url = provider === 'openrouter'
     ? OPENROUTER_URL
-    : `${(baseUrl || process.env.KIMI_BASE_URL || KIMI_DEFAULT_BASE).replace(/\/$/, '')}/chat/completions`;
+    : provider === 'openai'
+      ? `${OPENAI_BASE}/chat/completions`
+      : `${(baseUrl || process.env.KIMI_BASE_URL || KIMI_DEFAULT_BASE).replace(/\/$/, '')}/chat/completions`;
   const msgs = system ? [{ role: 'system', content: system }, ...messages] : messages;
   const body = { model, messages: msgs, temperature, max_tokens: maxTokens };
   if (json) body.response_format = { type: 'json_object' };
@@ -100,8 +109,9 @@ function buildGemini({ model, key, system, messages, maxTokens, temperature, jso
   const body = { contents, generationConfig };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   return {
-    url: `${GEMINI_BASE}/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-    init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    // Key goes in a header, NEVER the URL query string (URLs leak to proxy/CDN/APM logs).
+    url: `${GEMINI_BASE}/models/${model}:generateContent`,
+    init: { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) },
   };
 }
 
@@ -207,16 +217,27 @@ export async function callModel(flag, opts = {}) {
   return callLLM({ provider, model, ...opts });
 }
 
+// Cheapest model per provider for a liveness/validation ping.
+const VALIDATE_MODEL = {
+  anthropic: 'claude-3-5-haiku-latest',
+  openai: 'gpt-4o-mini',
+  gemini: 'gemini-2.0-flash',
+  kimi: 'moonshot-v1-8k',
+  openrouter: 'anthropic/claude-3.5-haiku',
+};
+
 /**
- * Cheap liveness/auth check for a BYO key. Sends a 1-token request.
+ * Cheap liveness/auth check for a BYO key. Sends a 1-token request on a cheap model.
+ * (Per-provider default model — previously resolveModel('openrouter') yielded the literal
+ * model "openrouter", so every valid OpenRouter key failed validation.)
  * @returns {Promise<{ok:boolean, error?:string}>}
  */
 export async function validateKey({ provider, apiKey, model, fetchImpl, timeoutMs = 15_000 } = {}) {
+  if (!provider || !PROVIDERS.includes(provider)) return { ok: false, error: `unknown provider "${provider}"` };
   try {
-    const resolved = model ? { provider, model } : resolveModel(provider === 'anthropic' ? 'claude' : provider);
     await callLLM({
-      provider: provider || resolved.provider,
-      model: model || resolved.model,
+      provider,
+      model: model || VALIDATE_MODEL[provider] || resolveModel(provider).model,
       apiKey,
       prompt: 'ping',
       maxTokens: 1,

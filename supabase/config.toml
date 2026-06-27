@@ -1,0 +1,19 @@
+# Supabase project config — checked in so auth posture is Infrastructure-as-Code,
+# not a dashboard toggle (audit P0: email-confirmation enforcement must be verifiable).
+project_id = "hireloom"
+
+[auth]
+site_url = "env(SITE_URL)"
+additional_redirect_urls = ["http://localhost:5173", "http://127.0.0.1:5173"]
+jwt_expiry = 3600
+enable_signup = true
+# Minimum password length enforced server-side (the UI also checks, but this binds it).
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+# Require a confirmed email before the account is usable — blocks address squatting
+# and support-impersonation. Do NOT disable for the hosted product.
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true

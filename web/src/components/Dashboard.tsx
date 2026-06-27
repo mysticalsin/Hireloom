@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon, KeyRound, X } from 'lucide-react';
+import { LogOut, Briefcase, Gauge, CreditCard, Sparkles, Settings as SettingsIcon } from 'lucide-react';
+import Dialog from './Dialog';
 import { useAuth } from '../auth/AuthProvider';
 import { getSubscription, getUsage, listRoles, type RoleRow, type Subscription } from '../lib/db';
 import { startCheckout } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
-import { getCv, saveCv, getSavedProviders, saveProviderKey } from '../lib/settings';
+import { getCv, saveCv, getSavedProviders, saveProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
 import { getInboxSignals, type Signal } from '../lib/gmail';
 import RoleDetail from './RoleDetail';
 
@@ -16,14 +17,15 @@ const SIGNAL_STYLE: Record<string, string> = {
 };
 
 const PLAN_CAP: Record<string, number> = { free: 10, pro: Infinity, studio: Infinity };
-const PROVIDERS = ['anthropic', 'kimi', 'openrouter', 'gemini'];
+const PROVIDERS = ['anthropic', 'openai', 'gemini', 'kimi', 'openrouter'];
 
 export default function Dashboard() {
-  const { user, signOut, signInWithGoogle } = useAuth();
+  const { user, signOut, connectGmail } = useAuth();
   const [sub, setSub] = useState<Subscription | null>(null);
   const [used, setUsed] = useState(0);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [billingMsg, setBillingMsg] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -50,8 +52,16 @@ export default function Dashboard() {
   const [evalMsg, setEvalMsg] = useState<string | null>(null);
 
   async function reload() {
-    const [s, u, r] = await Promise.all([getSubscription(), getUsage(), listRoles()]);
-    setSub(s); setUsed(u); setRoles(r); setLoading(false);
+    setLoading(true); setLoadErr(null);
+    try {
+      const [s, u, r] = await Promise.all([getSubscription(), getUsage(), listRoles()]);
+      setSub(s); setUsed(u); setRoles(r);
+    } catch {
+      // Never let a failed load read as "no roles" / "free plan" / "0 used".
+      setLoadErr('We couldn’t load your atelier. Check your connection and retry.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -99,13 +109,20 @@ export default function Dashboard() {
           <div className="mb-6 rounded-xl border border-emerald-700/40 bg-emerald-900/20 px-5 py-3 text-sm text-emerald-200">{banner}</div>
         )}
 
+        {loadErr && (
+          <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-800/50 bg-red-950/30 px-5 py-3 text-sm text-red-200">
+            <span>{loadErr}</span>
+            <button onClick={reload} className="rounded-full border border-red-700/50 px-3 py-1 text-xs font-medium hover:bg-red-900/30">Retry</button>
+          </div>
+        )}
+
         <h1 className="mb-1 text-3xl font-semibold tracking-tight">Your atelier</h1>
         <p className="mb-8 text-gray-400">Everything Hireloom tracks for your search, in one place.</p>
 
         <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <Card icon={<CreditCard size={18} />} label="Plan"><span className="text-2xl font-semibold capitalize">{plan}</span><span className="ml-2 text-sm text-gray-400">{sub?.status ?? '—'}</span></Card>
-          <Card icon={<Gauge size={18} />} label="Evaluations this month"><span className="text-2xl font-semibold">{used}</span><span className="ml-2 text-sm text-gray-400">/ {cap === Infinity ? '∞' : cap}</span></Card>
-          <Card icon={<Briefcase size={18} />} label="Roles tracked"><span className="text-2xl font-semibold">{roles.length}</span></Card>
+          <Card icon={<CreditCard size={18} />} label="Plan"><span className="text-2xl font-semibold capitalize">{loading ? '—' : plan}</span><span className="ml-2 text-sm text-gray-400">{loading ? '' : (sub?.status ?? '—')}</span></Card>
+          <Card icon={<Gauge size={18} />} label="Evaluations this month"><span className="text-2xl font-semibold">{loading ? '—' : used}</span><span className="ml-2 text-sm text-gray-400">/ {cap === Infinity ? '∞' : cap}</span></Card>
+          <Card icon={<Briefcase size={18} />} label="Roles tracked"><span className="text-2xl font-semibold">{loading ? '—' : roles.length}</span></Card>
         </div>
 
         {/* New evaluation */}
@@ -138,7 +155,7 @@ export default function Dashboard() {
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium">Inbox signals</span>
             <button onClick={syncInbox} disabled={inboxBusy} className="liquid-glass rounded-full px-4 py-1.5 text-xs font-medium disabled:opacity-50">{inboxBusy ? 'Syncing…' : 'Sync inbox'}</button>
-            {needsGmail && <button onClick={() => signInWithGoogle()} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200">Connect Gmail</button>}
+            {needsGmail && <button onClick={() => connectGmail()} className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black hover:bg-gray-200">Connect Gmail</button>}
           </div>
           {inboxMsg && <p className="mb-3 text-xs text-gray-400">{inboxMsg}</p>}
           {signals && signals.length > 0 && (
@@ -164,7 +181,7 @@ export default function Dashboard() {
                 <thead className="bg-white/5 text-xs uppercase tracking-wide text-gray-400"><tr><th className="px-4 py-3">Company</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Score</th><th className="px-4 py-3">Status</th></tr></thead>
                 <tbody>
                   {roles.map((r) => (
-                    <tr key={r.id} onClick={() => setSelectedRole(r)} className="cursor-pointer border-t border-white/5 transition-colors hover:bg-white/5">
+                    <tr key={r.id} onClick={() => setSelectedRole(r)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedRole(r); } }} tabIndex={0} role="button" aria-label={`Open ${r.company} — ${r.title}`} className="cursor-pointer border-t border-white/5 transition-colors hover:bg-white/5 focus-visible:bg-white/10 focus-visible:outline-none">
                       <td className="px-4 py-3 font-medium">{r.company}</td>
                       <td className="px-4 py-3 text-gray-300">{r.title}</td>
                       <td className="px-4 py-3">{r.score ?? '—'}</td>
@@ -198,14 +215,39 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [cv, setCv] = useState('');
   const [saved, setSaved] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { signOut } = useAuth();
 
-  useEffect(() => { getCv().then(setCv); getSavedProviders().then(setSaved); }, []);
+  useEffect(() => {
+    getCv().then(setCv).catch(() => setMsg('Could not load your saved CV.'));
+    getSavedProviders().then(setSaved).catch(() => {});
+  }, []);
 
   const saveKey = async () => {
     if (!apiKey.trim()) { setMsg('Enter a key.'); return; }
     const r = await saveProviderKey(provider, apiKey.trim());
     if (r.error) { setMsg(r.error); return; }
-    setMsg(`${provider} key saved.`); setApiKey(''); getSavedProviders().then(setSaved);
+    setMsg(`${provider} key saved.`); setApiKey(''); getSavedProviders().then(setSaved).catch(() => {});
+  };
+  const removeKey = async (p: string) => {
+    const r = await deleteProviderKey(p);
+    if (r.error) { setMsg(r.error); return; }
+    setMsg(`${p} key removed.`); getSavedProviders().then(setSaved).catch(() => {});
+  };
+  const downloadData = async () => {
+    const r = await exportMyData();
+    if (r.error) { setMsg(r.error); return; }
+    if (r.url) {
+      const a = document.createElement('a');
+      a.href = r.url; a.download = 'hireloom-export.json'; a.click();
+      URL.revokeObjectURL(r.url);
+      setMsg('Your data was downloaded as JSON.');
+    }
+  };
+  const removeAccount = async () => {
+    const r = await deleteMyAccount();
+    if (r.error) { setMsg(r.error); return; }
+    await signOut();
   };
   const saveResume = async () => {
     const r = await saveCv(cv);
@@ -213,12 +255,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="liquid-glass relative w-full max-w-lg rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
-        <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 text-gray-400 hover:text-white"><X size={20} /></button>
-        <h2 className="mb-5 flex items-center gap-2 text-xl font-semibold"><KeyRound size={18} /> Settings</h2>
-
+    <Dialog title="Settings" onClose={onClose}>
         <div className="mb-6">
           <div className="mb-2 text-sm font-medium">AI provider key (BYOK)</div>
           <div className="flex gap-2">
@@ -228,7 +265,17 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste your key" className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/40" />
             <button onClick={saveKey} className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black hover:bg-gray-200">Save</button>
           </div>
-          <p className="mt-2 text-xs text-gray-600">Stored under row-level security. We never mark up tokens; you pay your provider directly.</p>
+          <p className="mt-2 text-xs text-gray-500">Encrypted in a vault and never shown again. We never mark up tokens — you pay your provider directly.</p>
+          {saved.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {saved.map((p) => (
+                <li key={p} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.02] px-3 py-1.5 text-sm">
+                  <span className="capitalize">{p} <span className="text-emerald-400">✓ saved</span></span>
+                  <button onClick={() => removeKey(p)} className="text-xs text-gray-400 hover:text-red-400">Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="mb-2">
@@ -237,8 +284,24 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <button onClick={saveResume} className="mt-2 liquid-glass rounded-full px-4 py-2 text-sm font-medium">Save CV</button>
         </div>
 
-        {msg && <p className="mt-4 text-sm text-emerald-400">{msg}</p>}
-      </div>
-    </div>
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <div className="mb-2 text-sm font-medium">Your data</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={downloadData} className="liquid-glass rounded-full px-4 py-2 text-sm font-medium">Download my data</button>
+            {!confirmDelete ? (
+              <button onClick={() => setConfirmDelete(true)} className="rounded-full border border-red-800/50 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-950/30">Delete account</button>
+            ) : (
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-red-300">Erases everything. Sure?</span>
+                <button onClick={removeAccount} className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500">Delete forever</button>
+                <button onClick={() => setConfirmDelete(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs">Cancel</button>
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-600">Export is JSON (GDPR portability). Delete removes your account, data, and saved keys — irreversible.</p>
+        </div>
+
+        {msg && <p role="status" className="mt-4 text-sm text-emerald-400">{msg}</p>}
+    </Dialog>
   );
 }

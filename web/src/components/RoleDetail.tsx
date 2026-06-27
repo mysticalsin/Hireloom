@@ -15,7 +15,7 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(a.href);
 }
 function cvMarkdown(t: Tailoring): string {
-  const exp = t.experience.map((j) => `### ${j.title} — ${j.period}\n${j.location}\n${j.bullets.map((b) => `- ${b}`).join('\n')}`).join('\n\n');
+  const exp = (t.experience ?? []).map((j) => `### ${j.title} — ${j.period}\n${j.location}\n${(j.bullets ?? []).map((b) => `- ${b}`).join('\n')}`).join('\n\n');
   return `# ${t.title}\n\n## Summary\n${t.summary}\n\n## Experience\n${exp}\n\n## Competencies\n${t.competencies}\n\n## Tools\n${t.tools}\n`;
 }
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -48,6 +48,7 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   const contact = user?.email ?? '';
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tailoring, setTailoring] = useState<Tailoring | null>(null);
   const [tailorBusy, setTailorBusy] = useState(false);
   const [tailorMsg, setTailorMsg] = useState<string | null>(null);
@@ -58,12 +59,19 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
 
   useEffect(() => {
     let alive = true;
-    Promise.all([getReportForRole(role.id), getTailoring(role.id), getApplyAnswers(role.id)]).then(([r, t, a]) => {
-      if (!alive) return;
-      setReport(r?.markdown ?? null); setTailoring(t); setApply(a); setLoading(false);
-    });
+    setLoading(true); setError(null);
+    Promise.all([getReportForRole(role.id), getTailoring(role.id), getApplyAnswers(role.id)])
+      .then(([r, t, a]) => { if (!alive) return; setReport(r?.markdown ?? null); setTailoring(t); setApply(a); })
+      .catch(() => { if (alive) setError('Could not load this role. Close and reopen, or retry.'); })
+      .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [role.id]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const draftApply = async () => {
     setApplyBusy(true); setApplyMsg('Drafting answers… 20–40s.');
@@ -83,13 +91,13 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="rd-title">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="liquid-glass relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-gray-900/70 p-7 text-white shadow-2xl">
         <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 text-gray-400 hover:text-white"><X size={20} /></button>
 
         <div className="mb-1 flex items-center gap-3">
-          <h2 className="text-2xl font-semibold tracking-tight">{role.company}</h2>
+          <h2 id="rd-title" className="text-2xl font-semibold tracking-tight">{role.company}</h2>
           {role.score != null && <span className="rounded-full border border-white/15 px-2.5 py-0.5 text-sm">{role.score}/5</span>}
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-400">
@@ -100,6 +108,7 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
 
         <div className="overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-5 text-sm leading-relaxed">
           {loading ? <p className="text-gray-500">Loading report…</p>
+            : error ? <p role="alert" className="text-red-300">{error}</p>
             : report ? renderMarkdown(report)
             : <p className="text-gray-500">No report stored for this role yet.</p>}
 
@@ -115,7 +124,7 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
                   <button onClick={() => openPrint(cvHtml(tailoring, name, contact))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><FileDown size={13} /> CV PDF</button>
                   <button onClick={() => openPrint(coverHtml(tailoring, name, contact))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><FileDown size={13} /> Cover PDF</button>
                   <button onClick={() => download(`${slug(role.company)}-cv.md`, cvMarkdown(tailoring))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> .md</button>
-                  <button onClick={() => download(`${slug(role.company)}-cover-letter.md`, tailoring.coverLetter.join('\n\n'))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> Cover .md</button>
+                  <button onClick={() => download(`${slug(role.company)}-cover-letter.md`, (tailoring.coverLetter ?? []).join('\n\n'))} className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs"><Download size={13} /> Cover .md</button>
                 </>
               )}
             </div>
@@ -124,10 +133,10 @@ export default function RoleDetail({ role, onClose }: { role: RoleRow; onClose: 
               <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
                 <p className="mb-2 font-semibold text-white">{tailoring.title}</p>
                 <p className="mb-3 text-gray-300">{tailoring.summary}</p>
-                {tailoring.experience.slice(0, 2).map((j, i) => (
+                {(tailoring.experience ?? []).slice(0, 2).map((j, i) => (
                   <div key={i} className="mb-3">
                     <p className="text-sm font-medium text-white">{j.title} <span className="text-gray-500">· {j.period}</span></p>
-                    <ul className="mt-1">{j.bullets.slice(0, 3).map((b, bi) => <li key={bi} className="ml-5 list-disc text-gray-400">{b}</li>)}</ul>
+                    <ul className="mt-1">{(j.bullets ?? []).slice(0, 3).map((b, bi) => <li key={bi} className="ml-5 list-disc text-gray-400">{b}</li>)}</ul>
                   </div>
                 ))}
                 <p className="mt-3 text-xs text-gray-500">Cover letter ready — download above. Print to PDF from your browser.</p>
