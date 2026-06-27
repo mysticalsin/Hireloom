@@ -14,6 +14,12 @@ async function providerToken(): Promise<string | null> {
   return data.session?.provider_token ?? null;
 }
 
+// True right after a Google sign-in with the gmail scope — lets the UI auto-sync once
+// on return from the OAuth redirect instead of waiting for a manual "Sync inbox" click.
+export async function hasGmailToken(): Promise<boolean> {
+  return (await providerToken()) !== null;
+}
+
 function header(msg: { payload?: { headers?: { name: string; value: string }[] } }, name: string): string {
   return (msg.payload?.headers || []).find((h) => h.name.toLowerCase() === name)?.value ?? '';
 }

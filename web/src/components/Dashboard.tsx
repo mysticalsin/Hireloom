@@ -7,7 +7,7 @@ import { startCheckout, openBillingPortal } from '../lib/billing';
 import { runEvaluation } from '../lib/evaluate';
 import { runDemoEval } from '../lib/demo';
 import { getCv, saveCv, getSavedProviders, saveProviderKey, validateProviderKey, deleteProviderKey, exportMyData, deleteMyAccount } from '../lib/settings';
-import { getInboxSignals, type Signal } from '../lib/gmail';
+import { getInboxSignals, hasGmailToken, type Signal } from '../lib/gmail';
 import { track } from '../lib/analytics';
 import { extractPdfText } from '../lib/pdf';
 import { fetchGithubProjects, type GithubProject } from '../lib/github';
@@ -111,6 +111,8 @@ export default function Dashboard() {
     if (p === 'success') setBanner('Payment received — your plan will update momentarily.');
     if (p === 'cancel') setBanner('Checkout canceled. No charge made.');
     if (p) window.history.replaceState({}, '', window.location.pathname);
+    // Returned from the Google OAuth grant (gmail.readonly) → auto-surface inbox signals once.
+    hasGmailToken().then((has) => { if (has) syncInbox(); }).catch(() => {});
   }, []);
 
   const plan = sub?.plan ?? 'free';

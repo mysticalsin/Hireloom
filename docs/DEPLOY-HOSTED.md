@@ -11,7 +11,7 @@ run it when you're ready with your own accounts.
 ## 1. Supabase — database + RLS
 ```bash
 supabase link --project-ref <your-ref>
-supabase db push            # applies supabase/migrations/0001..0014 (forward-only)
+supabase db push            # applies supabase/migrations/0001..0015 (forward-only)
 ```
 `0005_security_hardening.sql` is the security-critical one: paywall lockdown (subscriptions/
 usage_counters SELECT-only), atomic `consume_quota`, `audit_log`, `stripe_events`, CHECK
@@ -102,6 +102,15 @@ select public.prune_rate_limits();
 select public.prune_audit_log();
 select public.prune_analytics_events();
 select public.prune_stripe_events();
+```
+
+## 5b. Analytics (operator)
+First-party funnel analytics — no third party, no cookies, no PII. The client emits events
+(`signup`, `key_added`, `cv_added`, `eval_run`, `demo_run`, `upgrade_click`) into
+`analytics_events` (write-only for users). Read the funnel with the **service role** (Supabase
+SQL editor) via the `analytics_funnel` view (migration `0015`):
+```sql
+select * from public.analytics_funnel order by total_events desc;
 ```
 
 ## 6. Smoke test (do before inviting anyone)
