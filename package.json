@@ -59,7 +59,7 @@
   },
   "license": "PolyForm-Shield-1.0.0",
   "dependencies": {
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^5.2.3",
     "pdf-lib": "^1.17.1",
     "playwright": "^1.60.0"
   }
